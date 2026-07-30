@@ -60,12 +60,22 @@ jobs:
           PREVIOUS=$(read_version /tmp/prev-pyproject.toml || true)
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           if [ "$VERSION" != "$PREVIOUS" ]; then
-            echo "bumped=true" >> "$GITHUB_OUTPUT"
+            BUMPED=true
             echo "Version bump: ${PREVIOUS:-none} -> $VERSION (will cut a release)"
           else
-            echo "bumped=false" >> "$GITHUB_OUTPUT"
+            BUMPED=false
             echo "Version unchanged at $VERSION (no release; :latest still moves)"
           fi
+          echo "bumped=$BUMPED" >> "$GITHUB_OUTPUT"
+          # Build the tag list here rather than with an inline conditional in the push
+          # step, so a no-bump build can never emit a blank tag line.
+          {
+            echo "tags<<TAGS_EOF"
+            echo "${IMAGE}:latest"
+            echo "${IMAGE}:sha-${GITHUB_SHA}"
+            if [ "$BUMPED" = "true" ]; then echo "${IMAGE}:${VERSION}"; fi
+            echo "TAGS_EOF"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Fail if this release tag already exists
         if: steps.version.outputs.bumped == 'true'
@@ -129,10 +139,7 @@ jobs:
           context: .
           push: true
           cache-from: type=gha
-          tags: |
-            ${{ env.IMAGE }}:latest
-            ${{ env.IMAGE }}:sha-${{ github.sha }}
-            ${{ steps.version.outputs.bumped == 'true' && format('{0}:{1}', env.IMAGE, steps.version.outputs.version) || '' }}
+          tags: ${{ steps.version.outputs.tags }}
 
       - name: Create release
         if: steps.version.outputs.bumped == 'true'
