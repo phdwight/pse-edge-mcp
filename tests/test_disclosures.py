@@ -78,20 +78,39 @@ def test_company_disclosures_parses_despite_missing_company_column(company_discl
     assert result["pages"] == 7
 
     first = result["rows"][0]
-    assert first["edge_no"] == "6220ee4449800956abca0fa0c5b4e4d0"
-    assert first["template"] == "[Amend-3]Amendments to Articles of Incorporation"
-    assert first["pse_form_number"] == "4-3"  # 3rd column here, 3rd in announcements too
-    assert first["circular_number"] == "C05420-2024"  # header says "Report or Circular Number"
-    assert first["announced_at"] == datetime(2024, 8, 12, 15, 1, tzinfo=MANILA)
+    assert first["edge_no"] == "d39af95b65cc2c4464d70b69f0a3140b"
+    assert first["template"] == "Share Buy-Back Transactions"
+    assert first["pse_form_number"] == "9-1"  # 3rd column here, 3rd in announcements too
+    assert first["circular_number"] == "C05694-2026"  # header says "Report or Circular Number"
+    assert first["announced_at"] == datetime(2026, 7, 29, 8, 11, tzinfo=MANILA)
     assert first["company_name"] is None  # column absent upstream
     assert first["company_id"] is None
 
 
-def test_company_disclosures_last_page_is_short(company_disclosures_last_page_html):
+def test_company_disclosures_page_one_is_newest_first(company_disclosures_html):
+    """Regression: `sortType=""` made this endpoint return rows in no order at all, so
+    page 1 mixed 2024, 2025 and 2026 filings and "recent disclosures" answered with old
+    ones. `dateSortType=DESC` alone does not sort it — `sortType=date` is required.
+    """
+    rows = parse_disclosure_table(company_disclosures_html)["rows"]
+    dates = [row["announced_at"] for row in rows]
+
+    assert dates == sorted(dates, reverse=True), "page 1 must be strictly newest-first"
+    assert dates[0].year == 2026, "the newest filing should lead, not an arbitrary one"
+
+
+def test_company_disclosures_last_page_is_short_and_holds_the_oldest(
+    company_disclosures_last_page_html,
+):
     result = parse_disclosure_table(company_disclosures_last_page_html)
     assert len(result["rows"]) == 43  # 343 total - 6 full pages of 50
     assert result["page"] == 7
     assert result["pages"] == 7
+
+    dates = [row["announced_at"] for row in result["rows"]]
+    assert dates == sorted(dates, reverse=True)
+    # Descending sort puts the company's earliest filing on the final page.
+    assert dates[-1] == datetime(2024, 8, 6, 9, 41, tzinfo=MANILA)
 
 
 # --- drift detection ----------------------------------------------------------
@@ -257,6 +276,10 @@ async def test_company_disclosures_sends_company_id_as_keyword(company_disclosur
     form = dict(pair.split("=", 1) for pair in route.calls.last.request.content.decode().split("&"))
     assert form["keyword"] == "599"
     assert form["tmplNm"] == "Press+Release"
+    # sortType must be the literal "date". Empty leaves rows unordered no matter what
+    # dateSortType says, which is what made page 1 lead with 2024 filings.
+    assert form["sortType"] == "date"
+    assert form["dateSortType"] == "DESC"
     await client.aclose()
 
 

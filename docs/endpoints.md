@@ -73,10 +73,31 @@ Circular Number**. 50 rows/page. Company cell links `/companyInformation/form.do
 Fixtures: `announcements_search.html`, `announcements_short_page.html`, `announcements_empty.html`.
 
 ### ✅ `POST /companyDisclosures/search.ax` (form style) — per-company full history
-Params: `pageNo`, `keyword`, `tmplNm`, `sortType`, `dateSortType=DESC`, `cmpySortType`.
+Params: `pageNo`, `keyword`, `tmplNm`, **`sortType=date`**, `dateSortType=DESC`, `cmpySortType`.
 **`keyword` must be the numeric company id** — a ticker symbol returns `[Total 0]`
 (verified: `keyword=SM` → 0 rows; `keyword=599` → `[Total 343]`, 7 pages). No date
 filter, so this is the endpoint for complete history; use `announcements` for windows.
+
+**⚠️ `sortType` must be the literal `"date"` — `dateSortType` alone does nothing here.**
+Found by manual testing on 2026-07-30, after v0.2.0 shipped with `sortType=""`. Measured
+on `keyword=599`, page 1:
+
+| `sortType` | `dateSortType` | Page 1 leads with |
+|---|---|---|
+| `""` | `DESC` | Aug 12 2024, Aug 07 2024, Oct 16 2024, May 30 2025, May 26 2026 — **no order at all** |
+| `date` | `DESC` | Jul 29 2026, Jul 27 2026, Jul 23 2026 — newest first ✅ |
+| `date` | `ASC` | Aug 06 2024, Aug 07 2024, Aug 07 2024 — oldest first ✅ |
+
+The value comes from the page's own sort control, which posts
+`goSort('/companyDisclosures/search.ax','date','DESC')` — the anchor was in the v2
+capture, but its `sortType` argument was not carried into the request. Consequence while
+it was wrong: "what did this company disclose recently" returned two-year-old filings on
+page 1, and because rows were unordered, no amount of paging fixed it.
+
+**Contrast: `announcements/search.ax` needs no `sortType`.** Verified both ways on the
+same window — `sortType=""` and `sortType="date"` return byte-identical ordering
+(`[Total 806]`, newest first). It defaults to date DESC; this endpoint does not. Don't
+assume a shared default across `search.ax` endpoints.
 
 Columns: **Template Name | Announce Date and Time | PSE Form Number | Report or Circular
 Number** — a *different order and set* from `announcements` (no Company Name), and the

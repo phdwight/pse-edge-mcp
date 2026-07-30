@@ -171,6 +171,15 @@ class PseEdgeClient:
 
         `keyword` on the wire is the numeric company id (a symbol yields 0 rows).
         No date filter: use this for complete history, announcements for date ranges.
+
+        **`sortType` must be `"date"`, not empty.** `dateSortType=DESC` alone is ignored
+        here: with `sortType=""` the rows come back in no discernible order (page 1 mixed
+        2024, 2025 and 2026 filings), so "this company's recent disclosures" silently
+        returned old ones. The page's own sort control posts
+        `goSort('/companyDisclosures/search.ax','date','DESC')`, which is where the value
+        comes from. Verified live 2026-07-30: `date`+DESC → newest first, `date`+ASC →
+        oldest first, `""` → unordered. Unlike announcements/search.ax, which defaults to
+        date DESC whether or not sortType is set.
         """
         return await self._post_form(
             "/companyDisclosures/search.ax",
@@ -178,7 +187,7 @@ class PseEdgeClient:
                 "pageNo": str(page),
                 "keyword": company_id,
                 "tmplNm": template,
-                "sortType": "",
+                "sortType": "date",
                 "dateSortType": "DESC",
                 "cmpySortType": "",
             },
