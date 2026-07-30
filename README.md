@@ -92,8 +92,12 @@ docker run --rm -p 8000:8000 ghcr.io/phdwight/pse-edge-mcp:latest   # streamable
 docker run --rm -i --entrypoint pse-edge-mcp ghcr.io/phdwight/pse-edge-mcp:latest  # stdio
 ```
 
-Both architectures are gated before publishing: <200 MB, secret-scanned, and
-smoke-tested on native runners.
+Both architectures are gated before publishing, on native runners. The rule is
+**necessity, not size**: the image must contain exactly the resolved runtime dependency
+closure and nothing else — no build toolchain, no package manager, no dev dependencies, no
+bytecode caches, no source tree — plus a secret scan and a smoke test that the server
+starts and registers its tools. A stray dependency fails the build; a large but genuinely
+required one does not. Image size is reported for information and never gated.
 
 ## Development
 
