@@ -26,6 +26,8 @@ except ImportError:  # older SDKs shipped the same API as FastMCP
 
 from pydantic import BaseModel
 
+from .archive import Archive, NullArchive
+from .cache import Storage
 from .client import PseEdgeClient
 from .config import Settings
 from .errors import PseEdgeMcpError
@@ -99,20 +101,51 @@ async def reply(call: Callable[[], Awaitable[Served[Any]]]) -> dict[str, Any]:
         return exc.payload()
 
 
+def build_storage(settings: Settings) -> tuple[Storage | None, Archive]:
+    """Pick the storage backend from configuration.
+
+    `DATABASE_URL` unset is the zero-config stdio path: an in-memory cache and no archive.
+    Set, it selects Postgres, which buys two things (plan §5): replicas share one cache, so
+    the freeze policy still means one upstream fetch per boundary no matter how many
+    processes run; and reads accumulate into the opportunistic archive.
+
+    Returning `None` for storage leaves `FreezeService` to construct its own default, so
+    there is exactly one place that decides what "no database" means.
+    """
+    if not settings.database_url:
+        return None, NullArchive()
+
+    # Imported here, not at module scope: these pull in SQLAlchemy and asyncpg, which a
+    # plain install without the `postgres` extra does not have. A stdio user must never
+    # hit an ImportError for a backend they did not ask for.
+    from .archive_postgres import PostgresArchive
+    from .db import create_engine, normalise_url
+    from .storage_postgres import PostgresStorage
+
+    engine = create_engine(normalise_url(settings.database_url))
+    return PostgresStorage(engine), PostgresArchive(engine)
+
+
 def build_server(
-    settings: Settings | None = None, calendar: MarketCalendar | None = None
+    settings: Settings | None = None,
+    calendar: MarketCalendar | None = None,
+    storage: Storage | None = None,
+    archive: Archive | None = None,
 ) -> MCPServer:
-    """`calendar` is injectable so tests can pin the freeze clock to a fixed moment."""
+    """`calendar`, `storage` and `archive` are injectable so tests can pin the freeze clock
+    and swap the backend without a database."""
     settings = settings or Settings.from_env()
     calendar = calendar or MarketCalendar(
         tz=settings.market_tz, open_time=settings.market_open, close_time=settings.market_close
     )
+    if storage is None and archive is None:
+        storage, archive = build_storage(settings)
     client = PseEdgeClient(settings)
-    cache = FreezeService(calendar=calendar)
+    cache = FreezeService(calendar=calendar, storage=storage)
 
     companies = CompanyRepository(client, cache)
-    quotes = QuoteRepository(client, companies, cache)
-    disclosures = DisclosureRepository(client, cache, settings.base_url)
+    quotes = QuoteRepository(client, companies, cache, archive)
+    disclosures = DisclosureRepository(client, cache, settings.base_url, archive)
     company_info = CompanyInfoRepository(client, companies, cache)
     market = MarketRepository(client, cache)
 

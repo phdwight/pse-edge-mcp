@@ -1,6 +1,6 @@
 [project]
 name = "pse-edge-mcp"
-version = "0.3.0"
+version = "0.4.0"
 description = "MCP server exposing Philippine Stock Exchange (PSE Edge) data — quotes, price history, disclosures, and more"
 readme = "README.md"
 license = "MIT"
@@ -34,6 +34,7 @@ dev = [
     "respx>=0.22.0",
     "ruff>=0.8.0",
     "packaging>=24.0",
+    "testcontainers[postgres]>=4.9.0",
     "mypy>=1.13.0",
 ]
 
@@ -52,6 +53,9 @@ build-backend = "hatchling.build"
 packages = ["src/pse_edge_mcp"]
 
 [tool.pytest.ini_options]
+markers = [
+    "postgres: needs a real Postgres via testcontainers (requires Docker; skipped without it)",
+]
 asyncio_mode = "auto"
 testpaths = ["tests"]
 

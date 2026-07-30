@@ -22,6 +22,7 @@ from __future__ import annotations
 from datetime import date
 from typing import Any, Literal
 
+from .archive import Archive, NullArchive
 from .errors import InvalidArgumentError, SymbolNotFoundError
 from .models import (
     CompanyHit,
@@ -126,11 +127,18 @@ class QuoteRepository:
     """Quotes and OHLC history. Both need a security_id, which only the quote page has."""
 
     def __init__(
-        self, source: QuoteSource, companies: CompanyRepository, cache: FrozenCache
+        self,
+        source: QuoteSource,
+        companies: CompanyRepository,
+        cache: FrozenCache,
+        archive: Archive | None = None,
     ) -> None:
         self._source = source
         self._companies = companies
         self._cache = cache
+        # NullArchive by default, so stdio use needs no database and nothing above this
+        # layer has to know whether an archive exists.
+        self._archive = archive or NullArchive()
 
     async def quote(self, symbol: str) -> Served[StockQuote]:
         parsed = await self._quote_page(symbol)
@@ -145,7 +153,7 @@ class QuoteRepository:
             f"ohlc:{company_id}:{security_id}:{start.isoformat()}:{end.isoformat()}",
             lambda: self._source.fetch_price_history(company_id, security_id, start, end),
         )
-        return served.map(
+        history = served.map(
             lambda data: PriceHistory(
                 symbol=parsed.value["symbol"],
                 company_id=company_id,
@@ -165,6 +173,16 @@ class QuoteRepository:
                 ],
             )
         )
+        # Opportunistic archive (plan §6a): bars already fetched for this caller are
+        # recorded on the way past, so history deepens without a single extra request to
+        # PSE Edge. Failures here are logged, never raised — see archive.py.
+        await self._archive.record_bars(
+            company_id=company_id,
+            security_id=security_id,
+            symbol=history.value.symbol,
+            bars=history.value.bars,
+        )
+        return history
 
     async def _quote_page(self, symbol: str) -> Served[dict[str, Any]]:
         """Fetch and parse the quote page, backfilling identity from autocomplete.
@@ -195,10 +213,17 @@ class DisclosureRepository:
     presentation one, so the routing lives here (see docs/endpoints.md v3).
     """
 
-    def __init__(self, source: DisclosureSource, cache: FrozenCache, base_url: str) -> None:
+    def __init__(
+        self,
+        source: DisclosureSource,
+        cache: FrozenCache,
+        base_url: str,
+        archive: Archive | None = None,
+    ) -> None:
         self._source = source
         self._cache = cache
         self._base_url = base_url.rstrip("/")
+        self._archive = archive or NullArchive()
 
     async def search(
         self,
@@ -249,7 +274,11 @@ class DisclosureRepository:
                 source=source_name,
             )
 
-        return served.map(build)
+        result = served.map(build)
+        # Every disclosure that passes through a search is archived by its edge_no, so the
+        # archive accumulates market coverage as a side effect of ordinary use.
+        await self._archive.record_disclosures(result.value.hits)
+        return result
 
     async def fulltext(
         self,

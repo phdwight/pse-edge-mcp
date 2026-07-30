@@ -3,6 +3,19 @@
 name: pse-edge-mcp
 
 services:
+  # Schema is applied by an explicit one-shot job, never by the server on boot: replicas
+  # must not race to mutate their own schema (plan §5). `docker compose up` still works
+  # end to end because app waits for this to complete successfully.
+  migrate:
+    build: .
+    entrypoint: ["alembic", "upgrade", "head"]
+    environment:
+      DATABASE_URL: postgresql+asyncpg://pse:${POSTGRES_PASSWORD:-pse-dev-only}@db:5432/pse_edge
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
   app:
     build: .
     ports:
@@ -15,6 +28,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     restart: unless-stopped
     read_only: true
     tmpfs:

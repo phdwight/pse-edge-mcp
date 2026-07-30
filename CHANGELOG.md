@@ -6,6 +6,22 @@ Format: [Keep a Changelog](https://keepachangelog.com/) · Versioning: [SemVer](
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-07-30
+
+### Added
+- Phase 4 storage & archive. `PostgresStorage` implements the existing `Storage` protocol, so the market-boundary freeze policy is unchanged — Postgres just makes the cache **shared and durable**, which means N replicas make one upstream fetch per boundary instead of N.
+- Opportunistic EOD archive (plan §6a): `eod_bars` and `disclosures` fill from reads a user already triggered, so history deepens with zero extra load on PSE Edge. `Archive` protocol with `NullArchive` (stdio default) and `PostgresArchive`.
+- Alembic migrations (`migrations/`, revision `0001_initial`) and a one-shot `migrate` service in compose, gated on `service_completed_successfully`. `check_schema()` fails at startup with an actionable message if migrations were skipped, rather than dying mid-request on an opaque `UndefinedTableError`.
+- 20 storage tests against a real ephemeral **Postgres 18** via testcontainers, applying the **real migration** rather than `metadata.create_all` so migration drift is caught in CI. They skip cleanly when Docker is unavailable. 129 tests total.
+
+### Changed
+- The runtime image installs `--extra postgres` again, now that code uses the driver — it was correctly absent while nothing imported it. `scripts/check_image.py` takes `--extra` so the expected closure mirrors the Dockerfile; without it the drivers would look like bloat.
+- `build_server()` accepts injectable `storage` and `archive`.
+
+### Fixed
+- A failed archive write can no longer fail the user's read. The first implementation caught only `SQLAlchemyError`, but an unreachable database raises `OSError`/`ConnectionRefusedError` from the driver socket — so a database outage would have broken every price-history request. Caught broadly now (still letting `CancelledError` through), and a test covers it.
+- Postgres stays genuinely optional: the driver modules are imported lazily inside `build_storage()`, so a plain install without the `postgres` extra cannot hit an ImportError. A test asserts SQLAlchemy does not leak into `sys.modules` when the server is imported.
+
 ## [0.3.0] - 2026-07-30
 
 ### Added

@@ -36,7 +36,21 @@ cp .env.example .env   # set POSTGRES_PASSWORD
 docker compose up --build
 ```
 
-Serves streamable HTTP on `:8000`, with Postgres 18 as shared cache/archive.
+Serves streamable HTTP on `:8000`, with Postgres 18 as shared cache and archive. A one-shot
+`migrate` service applies the Alembic schema before the app starts.
+
+**Postgres is optional.** Without `DATABASE_URL` the server uses an in-memory cache and keeps
+no archive — the zero-config path for local stdio use, and it needs neither the `postgres`
+extra nor a database. With `DATABASE_URL` set you get two things: replicas **share one cache**,
+so the market-boundary freeze still means one upstream fetch per boundary however many
+processes run; and every read **accumulates into an EOD archive** (daily bars and disclosures)
+that deepens over time at zero extra cost to PSE Edge, which serves only limited history
+itself. Nothing crawls — the archive fills solely from fetches you already made.
+
+```bash
+# applying the schema by hand, outside compose
+DATABASE_URL=postgresql+asyncpg://user:pass@host/db uv run alembic upgrade head
+```
 
 ## Tools
 

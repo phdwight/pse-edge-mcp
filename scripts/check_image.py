@@ -5,7 +5,9 @@ Invariant #5 is about *necessity*, not a megabyte budget. A size threshold is a 
 proxy — it passes while shipping a package manager and dev tooling, and fails when a
 genuinely required dependency is large. So the checks here are:
 
-  1. Installed Python distributions == the resolved runtime closure, exactly.
+  1. Installed Python distributions == the resolved runtime closure, exactly — where the
+     closure includes whichever optional extras the image declares (--extra, mirroring
+     the Dockerfile).
      Anything extra is bloat (a stray extra, a leaked dev dependency); anything
      missing means the image cannot actually run.
   2. No build toolchain and no package manager in the runtime image.
@@ -47,7 +49,7 @@ def run(cmd: list[str]) -> str:
     return result.stdout
 
 
-def expected_closure(target_platform: str) -> set[str]:
+def expected_closure(target_platform: str, extras: list[str]) -> set[str]:
     """The runtime dependency closure for `target_platform`, straight from the lockfile.
 
     `uv export` resolves exactly what a production install pulls: no dev group, no
@@ -59,19 +61,20 @@ def expected_closure(target_platform: str) -> set[str]:
     Markers are therefore evaluated against the image's own platform rather than
     assumed away, so a genuinely absent Linux dependency still fails the check.
     """
-    out = run(
-        [
-            "uv",
-            "export",
-            "--no-dev",
-            "--no-hashes",
-            "--no-emit-project",
-            "--frozen",
-            "--quiet",
-            "--format",
-            "requirements-txt",
-        ]
-    )
+    command = [
+        "uv",
+        "export",
+        "--no-dev",
+        "--no-hashes",
+        "--no-emit-project",
+        "--frozen",
+        "--quiet",
+        "--format",
+        "requirements-txt",
+    ]
+    for extra in extras:
+        command += ["--extra", extra]
+    out = run(command)
     environment = {
         "sys_platform": target_platform,
         "platform_system": {"linux": "Linux", "darwin": "Darwin", "win32": "Windows"}.get(
@@ -117,6 +120,14 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("image")
     parser.add_argument("--json", action="store_true", help="emit machine-readable results")
+    parser.add_argument(
+        "--extra",
+        action="append",
+        default=[],
+        dest="extras",
+        help="optional-dependency group the image installs; must mirror the Dockerfile, "
+        "otherwise a legitimately-installed extra looks like bloat (repeatable)",
+    )
     args = parser.parse_args()
     image = args.image
 
@@ -124,7 +135,7 @@ def main() -> int:
     notes: dict[str, object] = {}
 
     # 1. installed == declared runtime closure (plus the project itself)
-    expected = expected_closure("linux") | {normalise("pse-edge-mcp")}
+    expected = expected_closure("linux", args.extras) | {normalise("pse-edge-mcp")}
     installed = installed_distributions(image)
     extra = sorted(installed - expected)
     missing = sorted(expected - installed)

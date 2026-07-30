@@ -178,7 +178,27 @@ Scalability decisions made **now**, paid for **later**:
      buckets, so a renamed or added group surfaces instead of being dropped.
   4. `directors_and_management_list.do` is mapped and trivial to parse but exposes no tool —
      it is not in the v1 surface in §3. Add when wanted.
-- **Phase 4 — Polish & release:** Postgres storage backend + Alembic schema + archive upserts, README (install for Claude Desktop/Code, ToS note), error-message quality, PyPI publish, tag v0.1.0.
+- **Phase 4 — Storage & archive (delivered):** Postgres storage backend + Alembic schema + archive upserts.
+  Decisions taken during the build:
+  1. **Postgres stays genuinely optional.** The driver modules are imported lazily inside
+     `build_storage()`, so `pip install pse-edge-mcp` without the `postgres` extra still runs
+     in stdio mode. A test asserts SQLAlchemy does not leak into `sys.modules` when the server
+     is imported. The *image* does install the extra, since compose runs it against Postgres.
+  2. **No `create_all` at runtime.** Schema comes from Alembic alone; compose applies it with a
+     one-shot `migrate` service gated on `service_completed_successfully`, and `check_schema()`
+     fails at startup with an actionable message if migrations were skipped. Replicas must not
+     race to mutate their own schema.
+  3. **`cache_entries` has no TTL column**, by design — freshness stays the calendar's decision
+     (§5a). A test asserts the column set, so a future expiry column cannot quietly introduce a
+     competing policy.
+  4. **A failed archive write never fails the user's read.** Deliberately broad `except`: a
+     database that is down raises `OSError`/`ConnectionRefusedError` from the driver socket, not
+     `SQLAlchemyError`, so catching only the latter would have broken every price-history read
+     during an outage. A test covers it.
+  5. Storage tests run against a real ephemeral **Postgres 18** via testcontainers and apply the
+     **real migration** rather than `metadata.create_all`, so migration drift is caught here
+     instead of in production. They skip cleanly without Docker.
+  Deferred to a later phase: README install polish, PyPI publish.
 - **Phase 5 — Accounts & OAuth 2.1:** Authlib authorization server (PKCE, dynamic client registration, resource metadata), signup with email verification + **passkey enrollment (py_webauthn)**, passkey login ceremony on the authorization page, multi-passkey management page, user/credential/token schema in Postgres, tiered quota middleware, admin CLI. Exit criteria: a fresh user can sign up with a passkey, connect from Claude.ai custom connectors via the standard OAuth flow, log in from a second device, and hit their rate limit cleanly.
 - **Phase 6 — Remote deploy:** production Compose overlay (`compose.prod.yaml`: restart policies, resource limits, TLS-terminating reverse proxy service), `--http` mode hardening (health checks, structured logs), deploy target (any Docker host / Fly.io / Railway / VPS via `docker compose -f compose.yaml -f compose.prod.yaml up -d`).
 
