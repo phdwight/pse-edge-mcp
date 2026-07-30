@@ -1,10 +1,22 @@
-# PSE Edge Endpoint Recon — Phase 0 Report (v2, post browser capture)
+# PSE Edge Endpoint Recon — v3 (Phase 2 fixture pass)
 
-**Date:** 2026-07-30
+**Date:** 2026-07-30 (v2 same day; v3 adds the disclosure fixture pass)
 **Base URL:** `https://edge.pse.com.ph`
-**Method:** live probes from cloud (US IP), community source-mining, and **live browser network capture + request replay** (Chrome, Manila IP).
+**Method:** live probes from cloud (US IP), community source-mining, **live browser network capture + request replay** (Chrome, Manila IP), and **curl param sweeps during closed hours** (v3).
 
 **Legend:** ✅ VERIFIED (live, request+response confirmed) · 📖 COMMUNITY (from working OSS code, not re-verified) · ⚠️ EXISTS (endpoint confirmed live, params need fixture work)
+
+## v3 corrections to v2 (read these — v2 was wrong on all three)
+
+1. **There IS a total count.** v2 said "no total-count text — detect last page by short
+   row count". Every `search.ax` response carries `<span class="count">[page / pages]
+   [Total n]</span>`, so pagination is exact and blind iteration is unnecessary.
+2. **`search_disclosures` maps to `/announcements/search.ax`, not `/keyword/search.ax`.**
+   v2 got this backwards. `keyword/search.ax` is a full-text search over *attachment
+   text* whose index is partial and stale (see §3), so it cannot serve "recent
+   disclosures". `announcements/search.ax` is the market-wide, date-ranged list.
+3. **Page size differs per endpoint:** 50 rows for `announcements` /
+   `companyDisclosures`, but **10** for `keyword`.
 
 ---
 
@@ -48,21 +60,69 @@ Default page load returns ~250 rows (≈1 trading year); arbitrary ranges honore
 
 ## 3. Disclosures
 
-### ✅ `POST /companyDisclosures/search.ax` (form style) — **fully verified end-to-end**
-Params: `pageNo`, `keyword` (company id or free text), `tmplNm` (template name filter, free text), `sortType`, `dateSortType` (`DESC`), `cmpySortType`. Returns HTML: **50 rows/page**, row cells = template name (e.g. `[Amend-1]Amendments to Articles…`), announce datetime, PSE form no, circular no. Each row: `openPopup('<32-hex edge_no>')`. Pagination via `goPage(n)` (SM had 7+ pages). No total-count text — detect last page by short row count.
+### ✅ `POST /announcements/search.ax` (form style) — **the primary disclosure search**
+Params: `pageNo`, `keyword`, `tmplNm` (template filter, free text), `companyId`,
+`fromDate`, `toDate` (**`MM-dd-yyyy`**), `sortType`, `dateSortType=DESC`, `cmpySortType`.
+Date range is required in practice (v2's empty-param replay returning 0 rows is why it
+looked broken). Verified: Jul 1–30 2026 → `[Total 804]`, 17 pages; single day → 36 rows;
+`companyId=599` + Jan–Jul 2026 → 105.
 
-### ✅ `POST /keyword/search.ax` (form style) — advanced/market-wide search
-From `/keyword/form.do`. Params observed on form: `keyword`, `fromDate`, `toDate`, `companyId`, `cmpyNm`, `subjectTitle`, `sector`, `subsector`, `pageNo`. **This is the date-range disclosure search** → primary backend for `search_disclosures`. Fixture pass needed for response shape.
+Columns: **Company Name | Template Name | PSE Form Number | Announce Date and Time |
+Circular Number**. 50 rows/page. Company cell links `/companyInformation/form.do?cmpy_id=N`
+(the market-wide company id source). Each template cell: `openPopup('<32-hex edge_no>')`.
+Fixtures: `announcements_search.html`, `announcements_short_page.html`, `announcements_empty.html`.
 
-### ⚠️ `POST /announcements/search.ax` (form style)
-Exists (200). Params mirror companyDisclosures plus `fromDate`/`toDate`; empty-param replay returned 0 rows — needs param experimentation.
+### ✅ `POST /companyDisclosures/search.ax` (form style) — per-company full history
+Params: `pageNo`, `keyword`, `tmplNm`, `sortType`, `dateSortType=DESC`, `cmpySortType`.
+**`keyword` must be the numeric company id** — a ticker symbol returns `[Total 0]`
+(verified: `keyword=SM` → 0 rows; `keyword=599` → `[Total 343]`, 7 pages). No date
+filter, so this is the endpoint for complete history; use `announcements` for windows.
 
-### ✅ `GET /openDiscViewer.do?edge_no={32-hex}`
-Disclosure detail page: company, template, announce date, subject, attachments. Contains:
-- **`GET /downloadHtml.do?file_id={int}`** — rendered HTML of the disclosure body (iframe preview)
-- **`GET /downloadFile.do?file_id={int}`** — actual attachment download (PDF etc.; the page's Download button submits a GET form with `file_id`)
+Columns: **Template Name | Announce Date and Time | PSE Form Number | Report or Circular
+Number** — a *different order and set* from `announcements` (no Company Name), and the
+circular header is worded differently. Parse cells by `<thead>` label, never by position.
+Fixtures: `company_disclosures_search.html`, `company_disclosures_last_page.html` (43 rows).
 
-`edge_no` = stable disclosure natural key. One disclosure can have multiple `file_id`s (body + attachments).
+### ✅ `POST /keyword/search.ax` (form style) — full-text search inside attachments
+From `/keyword/form.do`. Params: `keyword`, `fromDate`, `toDate` (`MM-dd-yyyy`),
+`companyId`, `cmpyNm`, `subjectTitle`, `sector`, `subsector`, `pageNo`.
+
+**Not a disclosure list** — it searches the *text of disclosure attachments* and returns
+relevance-ordered hits with highlighted snippets, **10 per page**, as a `<dl>`: `dt`
+(subject + `openPopup(edge_no)`), then `dd`s for circular no, attachment
+(`/downloadFile.do?file_id=N` + filename), company (`cmpy_id=N`), announce datetime, and
+the matched snippet with `<em class="emorange embold">` around hits.
+
+**⚠️ The index is partial and stale.** Measured coverage for `keyword=dividend`:
+`[Total 10,666]` overall; by year — 2022: 0, 2023: 4,955, 2024: 5,380, 2025: 331,
+2026: **0** (and 4,955+5,380+331 = 10,666 exactly, so those three years *are* the whole
+index). Anything filed in 2026 is unfindable here. Surface this limit to users rather
+than reporting "no disclosures".
+
+Param traps: `startDate`/`startDt` are silently **ignored** (they return the unfiltered
+total, which looks like success); only `fromDate`/`toDate` filter, and only in
+`MM-dd-yyyy` — ISO or slashed dates yield `[Total 0]`. Fixture: `keyword_search.html`.
+
+### ✅ `GET /openDiscViewer.do?edge_no={32-hex}` — **fully verified end-to-end**
+Small page (~4.9 KB) holding metadata + ids; the disclosure content itself is in an iframe.
+Structure (fixture: `disclosure_viewer.html`):
+- `<title>` = template name; `#viewHeader h2` = company; `#viewHeader p` = `Disclosure Date : Jul 30, 2026`
+- `select#docList` — related documents, `option value` = each `edge_no`, `selected` marks
+  the current one (amendment chains / multi-part filings appear here)
+- `select#file_list` — attachments, `option value` = `file_id`; the first option is a
+  `value=""` "Select" prompt and must be skipped. Download button posts `file_id` to
+  `/downloadFile.do`.
+- `iframe#viewContents src="/downloadHtml.do?file_id={int}"` — the rendered body
+
+**The body `file_id` differs from the attachment `file_id`** (verified: body 1949127,
+attachment 1949133) — one disclosure has several. `edge_no` is the stable natural key and
+a published disclosure never changes, so details are cached permanently
+(`data_policy: "immutable"`, no boundary refetch).
+
+`downloadHtml.do` returns a standalone XHTML doc with content in `#contentBox` (built by a
+Korean vendor — the source carries Korean comments about XHTML doctypes for PDF export).
+Parsing it is deliberately **out of v1 scope** (plan §2: metadata + links only); the tools
+return its URL so the MCP client can fetch it.
 
 ## 4. Financial reports & company info
 
@@ -87,8 +147,14 @@ Homepage also carries server-rendered: recent disclosures, financial reports fee
 
 1. **`get_stock_quote` is an HTML parse**, not JSON — slightly more Phase 1 parser work; recorded HTML fixtures are essential.
 2. **`security_id` resolution:** parse it straight off `stockData.do` per company (simpler than directory pagination); directory sync still populates the Postgres `companies` table.
-3. **`search_disclosures` maps to `/keyword/search.ax`** (date range + sector filters), with `companyDisclosures/search.ax` as the per-company variant.
+3. **`search_disclosures` maps to `/announcements/search.ax`** (market-wide + date range,
+   optional `companyId`), with `companyDisclosures/search.ax` for a company's full
+   history and `keyword/search.ax` exposed separately as attachment full-text search.
 4. **Client must speak both dialects:** JSON-body POSTs and form-encoded POSTs, plus HTML-fragment parsing (selectolax) with fixture-based change detection.
 5. **No auth wall anywhere** — an honest User-Agent, caching, and our own outbound throttle are matters of politeness, not necessity. All the more reason the abuse-prevention layer on *our* remote server matters: we're the ones protecting Edge from our users.
-6. **Pagination pattern:** 50 rows/page, no total count → iterate until short page.
-7. Minor open items for Phase 1–2 fixtures: `tmplNm` template-name taxonomy (free-text input; likely values harvestable from search results themselves), `announcements/search.ax` required params, `cm/companySearch.ax` params, response shape of `keyword/search.ax`.
+6. **Pagination pattern:** 50 rows/page (10 for `keyword`), with an exact `[Total n]` and
+   `[page / pages]` count — expose `total`/`pages`/`has_more` and let callers request the
+   page they want rather than looping blind.
+7. Remaining open items: `tmplNm` template-name taxonomy (free-text input; values are
+   harvestable from search results themselves), `cm/companySearch.ax` params, sector /
+   subsector code values for `keyword/search.ax`, and the Phase 3 parse targets in §4–5.

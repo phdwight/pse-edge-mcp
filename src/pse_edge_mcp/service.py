@@ -34,12 +34,19 @@ class FreezeService:
         self.storage = storage or InMemoryStorage()
         self._flight = SingleFlight()
 
-    async def get(self, key: str, fetch: Callable[[], Awaitable[Any]]) -> Served:
+    async def get(
+        self, key: str, fetch: Callable[[], Awaitable[Any]], *, immutable: bool = False
+    ) -> Served:
+        """`immutable=True` marks objects that never change upstream (plan §5a) — a
+        disclosure keyed by edge_no, for instance. Once cached they are never refetched
+        at any boundary. The open-market freeze still applies to the *first* fetch:
+        protecting PSE Edge outranks serving a cache miss promptly.
+        """
         now = self.calendar.now()
         entry = await self.storage.get(key)
 
-        if entry is not None and self.calendar.is_fresh(entry.fetched_at, now):
-            return self._served(entry, from_cache=True, stale=False)
+        if entry is not None and (immutable or self.calendar.is_fresh(entry.fetched_at, now)):
+            return self._served(entry, from_cache=True, stale=False, immutable=immutable)
 
         if self.calendar.is_market_open(now):
             if entry is not None:
@@ -61,15 +68,18 @@ class FreezeService:
 
         # Concurrent misses for the same key collapse into one upstream request.
         stored = await self._flight.do(key, _fetch_and_store)
-        return self._served(stored, from_cache=False, stale=False)
+        return self._served(stored, from_cache=False, stale=False, immutable=immutable)
 
-    def _served(self, entry: CacheEntry, *, from_cache: bool, stale: bool) -> Served:
+    def _served(
+        self, entry: CacheEntry, *, from_cache: bool, stale: bool, immutable: bool = False
+    ) -> Served:
         return Served(
             value=entry.value,
             meta=Meta(
                 as_of=entry.fetched_at,
-                valid_until=self.calendar.valid_until(entry.fetched_at),
+                valid_until=None if immutable else self.calendar.valid_until(entry.fetched_at),
                 from_cache=from_cache,
+                data_policy="immutable" if immutable else "EOD-frozen",
                 stale=stale,
             ),
         )

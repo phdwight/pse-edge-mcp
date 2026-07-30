@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 
 
 class PseEdgeMcpError(Exception):
@@ -10,12 +11,18 @@ class PseEdgeMcpError(Exception):
 
     code = "INTERNAL_ERROR"
 
-    def payload(self) -> dict:
+    def payload(self) -> dict[str, Any]:
         return {"error": self.code, "message": str(self)}
 
 
 class SymbolNotFoundError(PseEdgeMcpError):
     code = "SYMBOL_NOT_FOUND"
+
+
+class InvalidArgumentError(PseEdgeMcpError):
+    """Caller-supplied argument is malformed — rejected before any upstream request."""
+
+    code = "INVALID_ARGUMENT"
 
 
 class EndpointChangedError(PseEdgeMcpError):
@@ -37,5 +44,5 @@ class MarketOpenNoCacheError(PseEdgeMcpError):
         super().__init__(message)
         self.retry_after = retry_after
 
-    def payload(self) -> dict:
+    def payload(self) -> dict[str, Any]:
         return {**super().payload(), "retry_after": self.retry_after.isoformat()}

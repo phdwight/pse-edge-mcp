@@ -30,17 +30,24 @@ Unofficial — Edge has no public API; we speak to the portal's own internal end
 - ruff line-length 100; mypy strict; pytest-asyncio in auto mode.
 - Compose v2 (`compose.yaml`, no `version:` key). `docker compose up` = app + Postgres 18.
 - Every tool result returns `{"data": ..., "meta": {as_of, valid_until, from_cache, stale, data_policy}}`.
+  `data_policy` is `"EOD-frozen"` normally, or `"immutable"` with `valid_until: null` for
+  objects that never change upstream (disclosures by `edge_no`) — pass
+  `FreezeService.get(..., immutable=True)` for those. The open-market freeze still applies
+  to their first fetch.
 - Timestamps ISO-8601 in Asia/Manila. Accounting negatives `(1,234)` → `-1234`.
 - Layering: `server.py` (MCP tools) → `service.py` (freeze policy) → `client.py`
   (pure HTTP, MCP-agnostic) + `parsers.py` (HTML → dicts). Keep it that way.
 
 ## Roadmap (details in docs/plan.md §7)
 
-- **Phase 2 (next):** disclosures — `search_disclosures` (`/keyword/search.ax` market-wide
-  + `/companyDisclosures/search.ax` per-company, HTML-fragment parsing, 50 rows/page,
-  paginate until short page), `get_disclosure(edge_no)` via `openDiscViewer.do`,
-  attachment links via `downloadFile.do?file_id=` / `downloadHtml.do?file_id=`.
-- **Phase 3:** financial reports, dividends & rights, indices, market summary (all HTML parses).
+- **Phase 2 (done):** disclosures — `search_disclosures` (`/announcements/search.ax`
+  market-wide + date range, `/companyDisclosures/search.ax` for full per-company history),
+  `search_disclosure_fulltext` (`/keyword/search.ax`, attachment text; index only covers
+  ~2023-2025, so it is a separate tool with a coverage warning, not the primary search),
+  `get_disclosure(edge_no)` via `openDiscViewer.do`. Disclosure tables are parsed by
+  `<thead>` label, never by column position — the two endpoints order columns differently.
+  See docs/endpoints.md §"v3 corrections" for the three v2 claims this phase disproved.
+- **Phase 3 (next):** financial reports, dividends & rights, indices, market summary (all HTML parses).
 - **Phase 4:** Postgres storage backend (same `Storage` protocol) + Alembic + opportunistic archive.
 - **Phase 5:** OAuth 2.1 (Authlib) + passkey signup (py_webauthn), tiered quotas, admin CLI.
 - **Phase 6:** production deploy (compose.prod.yaml overlay, TLS, backups).

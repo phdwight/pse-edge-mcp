@@ -1,0 +1,56 @@
+<span class="count">
+
+[1 /
+0]
+[Total 0]
+</span>
+<p class="sort">
+  <a href="#sort" class="select" onclick="goSort('/announcements/search.ax','date','DESC');return false;"><span>date</span></a>
+  <a href="#sort"  onclick="goSort('/announcements/search.ax','cmpy','');return false;"><span>company</span></a>
+</p>
+<form id="listForm" name="listForm">
+  <input type="hidden" name="pageNo" id="pageNo" value=""/>
+  <input type="hidden" name="companyId" id="companyId" value=""/>
+  <input type="hidden" name="keyword" id="keyword" value=""/>
+  <input type="hidden" name="tmplNm" id="tmplNm" value=""/>
+  <input type="hidden" name="fromDate" id="fromDate" value="01-01-2027"/>
+  <input type="hidden" name="toDate" id="toDate" value="01-31-2027"/>
+  <input type="hidden" name="sortType" id="sortMode" value=""/>
+  <input type="hidden" name="dateSortType" id="dateSortType" value="DESC"/>
+  <input type="hidden" name="cmpySortType" id="cmpySortType" value=""/>
+</form>
+<table class="list">
+<colgroup>
+  <col width="20%"/>
+  <col width="30%"/>
+  <col width="15%"/>
+  <col width="20%"/>
+  <col width="15%"/>
+</colgroup>
+<thead>
+  <tr>
+    <th>Company Name</th>
+    <th>Template Name</th>
+    <th>PSE Form Number</th>
+    <th>Announce Date and Time</th>
+    <th>Circular Number</th>
+  </tr>
+</thead>
+<tbody>
+  <tr><td colspan="5" class="alignC">no data.</td></tr>
+</tbody>
+</table>
+
+<div class="paging"></div><p class="disclaimer">
+<span style="font-size:105%;">DISCLAIMER</span><br/>
+The data, information and other contents (the "Contents") appearing on or accessible through
+http://www.exchange.com may not have been prepared by the Exchange but is made available without any responsibility
+on the part of the PSE, or even if prepared by the PSE, is provided on an as is or as available basis.
+The PSE does not guarantee the accuracy, timeliness, completeness,
+performance or fitness for a particular purpose of any and all Contents of this page.
+Your access to and use of this page and its Contents is subject to all applicable international
+and local laws and regulations and the terms and conditions imposed by the PSE under our
+<a href="/page/disclaimer.do">[Disclaimer and Access and Usage Restrictions]</a>.
+By continuing to access and use this page and its Contents, you shall be deemed to have read, understood,
+and agreed to, said terms and conditions.
+</p>
