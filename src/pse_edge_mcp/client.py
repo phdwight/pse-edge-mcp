@@ -10,7 +10,7 @@ Protocol rules (verified by live capture, 2026-07-30):
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date
 from typing import Any
 
 import httpx
@@ -131,11 +131,6 @@ class PseEdgeClient:
         if not isinstance(data, dict) or "chartData" not in data:
             raise EndpointChangedError("DisclosureCht.ax: missing chartData key")
         return data
-
-    @staticmethod
-    def parse_chart_date(raw: str) -> date:
-        """CHART_DATE arrives as e.g. 'Jun 01, 2026 00:00:00'."""
-        return datetime.strptime(raw, "%b %d, %Y %H:%M:%S").date()
 
     # ---- disclosures (Phase 2) ---------------------------------------------
 

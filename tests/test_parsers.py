@@ -6,7 +6,7 @@ import pytest
 
 from pse_edge_mcp.errors import EndpointChangedError
 from pse_edge_mcp.models import StockQuote
-from pse_edge_mcp.parsers import parse_stock_data_page
+from pse_edge_mcp.parsers import parse_chart_date, parse_stock_data_page
 
 
 def test_parse_stock_data_page(stock_data_html):
@@ -47,3 +47,8 @@ def test_down_change_is_negative(stock_data_html):
 def test_structure_change_raises_loudly():
     with pytest.raises(EndpointChangedError):
         parse_stock_data_page("<html><body><p>redesigned page</p></body></html>")
+
+
+def test_chart_date_parsing():
+    """CHART_DATE is a parsing concern, so it lives in parsers, not on the HTTP client."""
+    assert parse_chart_date("Jun 01, 2026 00:00:00") == date(2026, 6, 1)

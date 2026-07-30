@@ -5,6 +5,20 @@ Format: [Keep a Changelog](https://keepachangelog.com/) · Versioning: [SemVer](
 
 ## [Unreleased]
 
+### Changed
+- **Image gate now enforces necessity rather than a size threshold.** `scripts/check_image.py` asserts the installed distributions equal the runtime closure `uv export` resolves from the lockfile, plus no toolchain/package manager, no bytecode caches, no tests/docs/source tree, and non-root. Size is reported, never gated. The old <200 MB budget passed while the image shipped a package manager, 14 MB of bytecode, an editable-install source tree and (earlier) 44 MB of unused database drivers — and would have failed on a dependency the app genuinely needs.
+- Image: `UV_COMPILE_BYTECODE=0` and a `.pyc` sweep in the builder; the project installs `--no-editable` so no source tree or `.pth` indirection ships; `pip` removed from the runtime layer (attack surface only — layers are additive, so base-image bytes stay).
+- **Refactored for SOLID.** A domain layer (`repositories.py`) now owns cache key + fetch + parse + model per data domain, so `server.py` is the MCP boundary only: validate, delegate, shape the reply. Endpoint routing moved out of the tools.
+  - *SRP:* six copies of the same `try/except PseEdgeMcpError` collapsed into one `reply()` helper; duplicated page/date/edge_no checks extracted to `validation.py`; `has_more` and `CompanyHit` mapping deduplicated; `parse_chart_date` moved off the HTTP client into `parsers.py` where parsing belongs.
+  - *DIP + ISP:* new `sources.py` declares narrow per-domain protocols (`CompanySource`, `QuoteSource`, `DisclosureSource`) and `service.FrozenCache`; repositories depend on those, not on `PseEdgeClient`/`FreezeService`, so they are tested with few-line fakes and no HTTP mocking.
+  - *OCP:* a new data domain is a new repository, touching neither existing repositories nor the tools.
+  - `Served` is now generic (`Served[T]`) with a `.map()` so freshness metadata cannot be dropped while re-typing a payload.
+- Tool surface, request wire formats, and response shapes are unchanged; a new `test_tool_surface_is_stable` guards the MCP contract against future refactors.
+
+### Added
+- `tests/test_repositories.py` and `tests/test_validation.py` (23 new tests, 89 total), covering endpoint routing, cache-key distinctness, exact-symbol resolution, URL absolutisation, and every validator.
+- `packaging` in the dev group, imported directly by the image check.
+
 ## [0.2.0] - 2026-07-30
 
 ### Added

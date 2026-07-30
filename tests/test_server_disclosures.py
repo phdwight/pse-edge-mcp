@@ -221,3 +221,26 @@ async def test_endpoint_drift_surfaces_as_endpoint_changed():
         build_test_server(), "search_disclosures", start_date="2026-07-01", end_date="2026-07-30"
     )
     assert result["error"] == "ENDPOINT_CHANGED"
+
+
+async def test_tool_surface_is_stable():
+    """Guards the MCP contract against internal refactors.
+
+    The SDK derives each tool's schema from its signature and docstring, so a change in
+    how tools are wired can silently alter the public surface — a wrapper that hides
+    parameters, or a lost docstring, degrades what the client sees without failing any
+    behavioural test.
+    """
+    tools = await build_test_server().list_tools()
+    surface = {t.name: sorted((t.input_schema or {}).get("required", [])) for t in tools}
+    assert surface == {
+        "search_companies": ["query"],
+        "get_stock_quote": ["symbol"],
+        "get_price_history": ["symbol"],
+        "search_disclosures": [],
+        "search_disclosure_fulltext": ["keyword"],
+        "get_disclosure": ["edge_no"],
+    }
+    # Descriptions come from the docstrings and are how the model picks a tool.
+    assert all(t.description for t in tools)
+    assert "EOD-frozen" in dict((t.name, t.description) for t in tools)["get_stock_quote"]

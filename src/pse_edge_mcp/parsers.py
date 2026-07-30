@@ -52,6 +52,11 @@ def _to_datetime(text: str | None) -> datetime | None:
     return naive.replace(tzinfo=_MANILA)
 
 
+def parse_chart_date(raw: str) -> date:
+    """DisclosureCht.ax emits CHART_DATE as e.g. 'Jun 01, 2026 00:00:00'."""
+    return datetime.strptime(raw, "%b %d, %Y %H:%M:%S").date()
+
+
 def _squash(text: str | None) -> str:
     return re.sub(r"\s+", " ", text or "").strip()
 

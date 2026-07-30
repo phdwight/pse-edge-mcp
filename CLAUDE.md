@@ -63,8 +63,39 @@ Unofficial — Edge has no public API; we speak to the portal's own internal end
   `FreezeService.get(..., immutable=True)` for those. The open-market freeze still applies
   to their first fetch.
 - Timestamps ISO-8601 in Asia/Manila. Accounting negatives `(1,234)` → `-1234`.
-- Layering: `server.py` (MCP tools) → `service.py` (freeze policy) → `client.py`
-  (pure HTTP, MCP-agnostic) + `parsers.py` (HTML → dicts). Keep it that way.
+- **Layering (revised — a domain layer was added; keep it that way):**
+
+  ```
+  server.py        MCP boundary only: validate args, delegate, shape the reply.
+                   No domain logic, no cache keys, no parsing, no endpoint choices.
+    ↓
+  repositories.py  One repository per data domain. Owns cache key + freeze read +
+                   parse + model for that domain. Endpoint routing lives HERE.
+    ↓
+  service.py       Freeze policy (FreezeService). Repositories depend on the
+  sources.py       `FrozenCache` protocol, and on the narrow per-domain source
+                   protocols — never on the concrete client or service.
+    ↓
+  client.py        Pure HTTP, MCP-agnostic.  parsers.py  HTML/JSON → dicts.
+  ```
+
+  Supporting modules: `validation.py` (arg validators raising `INVALID_ARGUMENT`),
+  `models.py` (Pydantic), `errors.py`, `cache.py` (`Storage` protocol), `ratelimit.py`,
+  `market_calendar.py`, `config.py`.
+
+  Rules that follow from it:
+  - A new data domain (Phase 3: financials, dividends, indices) = a new repository +
+    thin tools. Don't add fetch/parse orchestration to `server.py`.
+  - Tools never build cache keys or call `parse_*` — that's the repository's job.
+  - Repositories take the narrow protocols from `sources.py`, so they're testable with
+    a few-line fake and no HTTP mocking (see `tests/test_repositories.py`).
+  - Error mapping happens once in `server.reply()`; don't add per-tool try/except.
+  - `reply()` is a helper taking a callable, deliberately **not** a decorator: the MCP
+    SDK builds each tool's output schema from its return annotation, and a
+    `functools.wraps` wrapper makes `inspect.signature` follow `__wrapped__` to the
+    inner annotation, which breaks tool-schema generation. Tools must stay annotated
+    `-> dict[str, Any]`. `tests/test_server_disclosures.py::test_tool_surface_is_stable`
+    guards this.
 
 ## Roadmap (details in docs/plan.md §7)
 

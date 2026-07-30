@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Protocol
 
 from .cache import CacheEntry, InMemoryStorage, Storage
 from .errors import MarketOpenNoCacheError
@@ -22,10 +22,38 @@ from .models import Meta
 from .ratelimit import SingleFlight
 
 
-@dataclass
-class Served:
-    value: Any
+@dataclass(frozen=True)
+class Served[T]:
+    """A value plus the freshness metadata that must travel with it.
+
+    Generic so the layers above can carry their own types (`Served[StockQuote]`)
+    while the cache itself stays type-agnostic (`Served[Any]`).
+    """
+
+    value: T
     meta: Meta
+
+    def map[U](self, transform: Callable[[T], U]) -> Served[U]:
+        """Re-type the payload while preserving the metadata unchanged.
+
+        Callers parse or validate `value` constantly and must not have to remember to
+        carry `meta` across by hand — forgetting it is how freshness information gets
+        silently dropped from a tool result.
+        """
+        return Served(value=transform(self.value), meta=self.meta)
+
+
+class FrozenCache(Protocol):
+    """What the domain layer needs from the freeze policy — nothing more.
+
+    Depending on this rather than on `FreezeService` keeps repositories testable with a
+    trivial stub and leaves the policy free to change (Postgres-backed, different
+    calendar) without touching them.
+    """
+
+    async def get(
+        self, key: str, fetch: Callable[[], Awaitable[Any]], *, immutable: bool = False
+    ) -> Served[Any]: ...
 
 
 class FreezeService:
@@ -36,7 +64,7 @@ class FreezeService:
 
     async def get(
         self, key: str, fetch: Callable[[], Awaitable[Any]], *, immutable: bool = False
-    ) -> Served:
+    ) -> Served[Any]:
         """`immutable=True` marks objects that never change upstream (plan §5a) — a
         disclosure keyed by edge_no, for instance. Once cached they are never refetched
         at any boundary. The open-market freeze still applies to the *first* fetch:
@@ -72,7 +100,7 @@ class FreezeService:
 
     def _served(
         self, entry: CacheEntry, *, from_cache: bool, stale: bool, immutable: bool = False
-    ) -> Served:
+    ) -> Served[Any]:
         return Served(
             value=entry.value,
             meta=Meta(
