@@ -32,6 +32,7 @@ from .client import PseEdgeClient
 from .config import Settings
 from .errors import PseEdgeMcpError
 from .market_calendar import MarketCalendar
+from .memo import ParsedMemo
 from .repositories import (
     CompanyInfoRepository,
     CompanyRepository,
@@ -143,11 +144,16 @@ def build_server(
     client = PseEdgeClient(settings)
     cache = FreezeService(calendar=calendar, storage=storage)
 
+    # One memo shared by every repository: parsing is the dominant per-request cost and
+    # its result cannot change before the freeze boundary, so reusing it is free
+    # correctness-wise. See memo.py.
+    memo = ParsedMemo()
+
     companies = CompanyRepository(client, cache)
-    quotes = QuoteRepository(client, companies, cache, archive)
-    disclosures = DisclosureRepository(client, cache, settings.base_url, archive)
-    company_info = CompanyInfoRepository(client, companies, cache)
-    market = MarketRepository(client, cache)
+    quotes = QuoteRepository(client, companies, cache, archive, memo)
+    disclosures = DisclosureRepository(client, cache, settings.base_url, archive, memo)
+    company_info = CompanyInfoRepository(client, companies, cache, memo)
+    market = MarketRepository(client, cache, memo)
 
     mcp = MCPServer("pse-edge", instructions=INSTRUCTIONS)
 

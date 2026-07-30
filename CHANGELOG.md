@@ -6,6 +6,14 @@ Format: [Keep a Changelog](https://keepachangelog.com/) · Versioning: [SemVer](
 
 ## [Unreleased]
 
+### Fixed
+- **Archiving ran on cache hits.** `search_disclosures` and `get_price_history` recorded to the archive unconditionally, so a request served entirely from cache still wrote up to 50 `ON CONFLICT DO NOTHING` rows. At 1,000 req/s that is ~50k no-op upserts per second of write churn that would dominate database load while adding no information. Archiving now happens only on a genuine upstream fetch.
+
+### Added
+- **`ParsedMemo`** (`memo.py`): repositories memoise parsed results in-process, valid while the cache entry's `as_of` is unchanged. Parsing was the dominant per-request cost and produced an identical answer for every user — measured 2.17 ms for the homepage and 1.03 ms for a disclosure page, against 0.04 ms to build models and 0.04 ms to serialise them. End-to-end effect: `get_market_summary` 2.26 ms → ~0 ms per request (~440 → ~500k req/s/core for the parse step), `search_disclosures` 1.12 ms → ~0 ms.
+  Safe by construction rather than by a TTL guess: a cached value cannot change before its freeze boundary, so neither can anything derived from it, and a new fetch carries a new `as_of` which misses the memo automatically. Bounded LRU, since cache keys are unbounded. Metadata always comes from the `Served`, never the memo, so `from_cache`/`stale` keep describing the upstream fetch.
+- 11 scaling tests, including a guard on the memo-key collision between `get_indices` and `get_market_summary` — they share one cache key but parse it into different shapes, so a key that omitted the projection would silently hand one tool the other's result.
+
 ## [0.4.0] - 2026-07-30
 
 ### Added
