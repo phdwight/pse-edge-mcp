@@ -18,14 +18,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/) · Versioning: [SemVer](
 - `docs/endpoints.md` v4 documents the company-info and market endpoints, replacing the "parse TBD" stubs.
 
 ### Fixed
+- `search_disclosures(symbol=...)` with no date range returned rows in **no order at all**, so page 1 mixed 2024/2025/2026 filings and "this company's recent disclosures" answered with two-year-old ones — while the tool description promised "newest first". `companyDisclosures/search.ax` ignores `dateSortType` unless `sortType="date"` is also sent, and the client was sending `sortType=""`. Found by manually driving the running server; verified live that `date`+DESC gives newest-first, `date`+ASC oldest-first, and `""` no ordering. `announcements/search.ax` was unaffected — verified byte-identical with and without `sortType`, as it defaults to date DESC. Fixtures re-recorded against the corrected request, and page ordering is now asserted rather than assumed.
 - Financial figures are passed through verbatim and never rescaled: Edge's units labels contradict each other between the annual (`Php (in thousands)`) and quarterly (`Php (in Millions)`) sections, with the same figure appearing under both. Each period reports its own `currency_units`, and the tool tells the model to check it before quoting a number.
 - Index `change`/`change_percent` are signed. Edge prints them unsigned and encodes direction only in a CSS colour and a ▲/▼ glyph, so a naive parse would report every decline as a gain — PSEi printed `47.29` on a day it fell 47.29.
 - `parse_financial_reports` and `parse_market_summary` walk `tree.root.traverse` for true document order. `Node.iter()` sees no nested nodes, and a comma CSS selector returns matches grouped by selector, which filed all four financial statements under the last heading and left the annual section empty.
-
-## [0.2.1] - 2026-07-30
-
-### Fixed
-- `search_disclosures(symbol=...)` with no date range returned rows in **no order at all**, so page 1 mixed 2024/2025/2026 filings and "this company's recent disclosures" answered with two-year-old ones — while the tool description promised "newest first". `companyDisclosures/search.ax` ignores `dateSortType` unless `sortType="date"` is also sent, and the client was sending `sortType=""`. Found by manually driving the running server; verified live that `date`+DESC gives newest-first, `date`+ASC oldest-first, and `""` no ordering. `announcements/search.ax` was unaffected — verified byte-identical with and without `sortType`, as it defaults to date DESC. Fixtures re-recorded against the corrected request, and page ordering is now asserted rather than assumed.
 
 ## [0.2.0] - 2026-07-30
 
