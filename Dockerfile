@@ -5,12 +5,16 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy UV_PYTHON_DOWNLOADS=never
 WORKDIR /app
 COPY pyproject.toml uv.lock* ./
+# No --extra postgres: the Postgres storage backend is Phase 4 and nothing in src/
+# imports sqlalchemy/asyncpg/alembic yet, so shipping them cost 44 MB (a third of the
+# venv) and broke the <200 MB budget in CI. Re-add the extra when Phase 4 lands code
+# that actually uses it.
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-install-project --no-dev --extra postgres || \
-    uv sync --no-install-project --no-dev --extra postgres
+    uv sync --frozen --no-install-project --no-dev || \
+    uv sync --no-install-project --no-dev
 COPY src ./src
 COPY README.md ./
-RUN --mount=type=cache,target=/root/.cache/uv uv sync --no-dev --extra postgres
+RUN --mount=type=cache,target=/root/.cache/uv uv sync --no-dev
 
 # ---- runtime: slim, non-root, no build tools, no secrets -----------------------
 FROM python:3.14-slim
