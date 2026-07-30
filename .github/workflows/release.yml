@@ -1,13 +1,20 @@
 name: Release
 
-# Merges to main publish a container image to GHCR:
-#   docker pull ghcr.io/phdwight/pse-edge-mcp:latest
+# Merges to main publish a multi-arch container image to GHCR:
+#   docker pull ghcr.io/phdwight/pse-edge-mcp:latest        # linux/amd64 + linux/arm64
 #
 # A merge that bumps `version` in pyproject.toml also cuts a GitHub Release and a
 # matching immutable image tag; merges that don't bump only move :latest and :sha-*.
 #
-# The image is built, gated, and smoke-tested BEFORE it is pushed — invariant #5
-# (thin, secret-free images) must hold for anything that reaches the registry.
+# Each architecture is built on its OWN NATIVE RUNNER (free for public repos) rather
+# than emulated under QEMU, which keeps builds fast and — more importantly — lets the
+# gates run natively per arch. Invariant #5 (thin, secret-free images) is enforced on
+# every architecture BEFORE anything reaches the registry, so a bloated or broken
+# arm64 image can't ride along behind a passing amd64 one.
+#
+# Publishing is two-phase: each arch pushes an untagged blob addressed by digest, then
+# the merge job stitches those digests into one manifest list under the real tags. That
+# way a tag never exists in a half-published state.
 
 on:
   push:
@@ -28,20 +35,12 @@ env:
   IMAGE: ghcr.io/${{ github.repository }}
 
 jobs:
-  test:
+  version:
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
-        with:
-          python-version: "3.14"
-      - run: uv sync --all-extras
-      - run: uv run ruff check .
-      - run: uv run pytest -q
-
-  publish:
-    needs: test
-    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      bumped: ${{ steps.version.outputs.bumped }}
+      tags: ${{ steps.version.outputs.tags }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -67,15 +66,12 @@ jobs:
             echo "Version unchanged at $VERSION (no release; :latest still moves)"
           fi
           echo "bumped=$BUMPED" >> "$GITHUB_OUTPUT"
-          # Build the tag list here rather than with an inline conditional in the push
-          # step, so a no-bump build can never emit a blank tag line.
-          {
-            echo "tags<<TAGS_EOF"
-            echo "${IMAGE}:latest"
-            echo "${IMAGE}:sha-${GITHUB_SHA}"
-            if [ "$BUMPED" = "true" ]; then echo "${IMAGE}:${VERSION}"; fi
-            echo "TAGS_EOF"
-          } >> "$GITHUB_OUTPUT"
+          # Assembled here, not with an inline conditional at the point of use, so a
+          # no-bump build can never emit an empty tag.
+          TAGS="${IMAGE}:latest ${IMAGE}:sha-${GITHUB_SHA}"
+          if [ "$BUMPED" = "true" ]; then TAGS="$TAGS ${IMAGE}:${VERSION}"; fi
+          echo "tags=$TAGS" >> "$GITHUB_OUTPUT"
+          echo "Tags: $TAGS"
 
       - name: Fail if this release tag already exists
         if: steps.version.outputs.bumped == 'true'
@@ -88,25 +84,52 @@ jobs:
             exit 1
           fi
 
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.14"
+      - run: uv sync --all-extras
+      - run: uv run ruff check .
+      - run: uv run pytest -q
+
+  build:
+    needs: [test, version]
+    strategy:
+      fail-fast: false # report both arches' problems in one run, not just the first
+      matrix:
+        include:
+          - arch: amd64
+            platform: linux/amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            platform: linux/arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
 
-      # Build once into the local daemon so the gates below run on the exact image
-      # that gets pushed. The push step reuses this cache, so it costs seconds.
-      - name: Build image
+      # Load into the local daemon first so the gates below run on the exact bits that
+      # get pushed. Native runner => no QEMU, and `docker run` works for the smoke test.
+      - name: Build ${{ matrix.platform }}
         uses: docker/build-push-action@v6
         with:
           context: .
+          platforms: ${{ matrix.platform }}
           load: true
           tags: pse-edge-mcp:candidate
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.arch }}
 
       - name: Enforce image size budget (<200MB)
         run: |
           SIZE=$(docker image inspect pse-edge-mcp:candidate --format '{{.Size}}')
           MB=$((SIZE / 1024 / 1024))
-          echo "Image size: ${MB} MB"
-          echo "Image size: **${MB} MB** (budget 200 MB)" >> "$GITHUB_STEP_SUMMARY"
+          echo "Image size (${{ matrix.arch }}): ${MB} MB"
+          echo "\`${{ matrix.arch }}\` image: **${MB} MB** (budget 200 MB)" >> "$GITHUB_STEP_SUMMARY"
           test "$SIZE" -lt $((200 * 1024 * 1024))
 
       - name: Scan image for secrets
@@ -119,6 +142,9 @@ jobs:
       - name: Smoke-test the image
         run: |
           # A published image that cannot build the server is worse than no publish.
+          ARCH=$(docker image inspect pse-edge-mcp:candidate --format '{{.Architecture}}')
+          echo "Image architecture: $ARCH (expected ${{ matrix.arch }})"
+          test "$ARCH" = "${{ matrix.arch }}"
           TOOLS=$(docker run --rm --entrypoint python pse-edge-mcp:candidate -c '
           import asyncio
           from pse_edge_mcp.server import build_server
@@ -133,24 +159,90 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ github.token }}
 
-      - name: Push image
+      # Push untagged, addressed only by digest. The merge job gives these real tags.
+      # provenance/sbom off so the manifest list holds exactly one entry per arch.
+      - name: Push ${{ matrix.platform }} by digest
+        id: push
         uses: docker/build-push-action@v6
         with:
           context: .
-          push: true
-          cache-from: type=gha
-          tags: ${{ steps.version.outputs.tags }}
+          platforms: ${{ matrix.platform }}
+          provenance: false
+          sbom: false
+          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=${{ matrix.arch }}
+
+      - name: Export digest
+        run: |
+          DIGEST="${{ steps.push.outputs.digest }}"
+          if [ -z "$DIGEST" ]; then
+            echo "::error::push produced no digest"
+            exit 1
+          fi
+          echo "Pushed ${{ matrix.arch }} as $DIGEST"
+          mkdir -p /tmp/digests
+          touch "/tmp/digests/${DIGEST#sha256:}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: digest-${{ matrix.arch }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  merge:
+    needs: [build, version]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digest-*
+          merge-multiple: true
+
+      - uses: docker/setup-buildx-action@v3
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Create the multi-arch manifest list
+        env:
+          TAGS: ${{ needs.version.outputs.tags }}
+        run: |
+          cd /tmp/digests
+          COUNT=$(ls -1 | wc -l)
+          echo "Digests to combine: $COUNT"
+          test "$COUNT" -eq 2 # one per architecture; fewer means an arch silently dropped
+          TAG_ARGS=""
+          for t in $TAGS; do TAG_ARGS="$TAG_ARGS -t $t"; done
+          # shellcheck disable=SC2086
+          docker buildx imagetools create $TAG_ARGS \
+            $(printf "${IMAGE}@sha256:%s " *)
+
+      - name: Verify both architectures are published
+        run: |
+          PLATFORMS=$(docker buildx imagetools inspect "${IMAGE}:latest" --format '{{json .Manifest}}' \
+            | jq -r '.manifests[]? | select(.platform.architecture != "unknown")
+                     | .platform.os + "/" + .platform.architecture' | sort -u)
+          echo "Published platforms:"; echo "$PLATFORMS"
+          echo "$PLATFORMS" | grep -qx "linux/amd64" || { echo "::error::linux/amd64 missing"; exit 1; }
+          echo "$PLATFORMS" | grep -qx "linux/arm64" || { echo "::error::linux/arm64 missing"; exit 1; }
 
       - name: Create release
-        if: steps.version.outputs.bumped == 'true'
+        if: needs.version.outputs.bumped == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ steps.version.outputs.version }}
+          VERSION: ${{ needs.version.outputs.version }}
         run: |
           gh release create "v${VERSION}" \
+            --repo "${{ github.repository }}" \
+            --target "${{ github.sha }}" \
             --title "v${VERSION}" \
             --notes "$(cat <<EOF
-          Container image for v${VERSION}:
+          Multi-arch container image (\`linux/amd64\`, \`linux/arm64\`) for v${VERSION}:
 
           \`\`\`bash
           docker pull ${IMAGE}:${VERSION}
@@ -177,12 +269,12 @@ jobs:
       - name: Summarise the download
         run: |
           {
-            echo "## Published"
+            echo "## Published (linux/amd64 + linux/arm64)"
             echo
             echo '```bash'
             echo "docker pull ${IMAGE}:latest"
-            if [ "${{ steps.version.outputs.bumped }}" = "true" ]; then
-              echo "docker pull ${IMAGE}:${{ steps.version.outputs.version }}"
+            if [ "${{ needs.version.outputs.bumped }}" = "true" ]; then
+              echo "docker pull ${IMAGE}:${{ needs.version.outputs.version }}"
             fi
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"

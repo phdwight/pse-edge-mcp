@@ -13,8 +13,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/) · Versioning: [SemVer](
 - `immutable=True` in `FreezeService`: objects with a stable natural key (disclosures by `edge_no`) are fetched once and never refetched at a boundary. Reported as `data_policy: "immutable"` with `valid_until: null`.
 - `INVALID_ARGUMENT` error code for malformed arguments, rejected before any upstream request.
 - Seven recorded disclosure fixtures and 32 new tests (parsers, drift detection, wire dialects, tool routing, cache behaviour).
-- Release workflow: merging to `main` builds, gates, smoke-tests, and publishes `ghcr.io/phdwight/pse-edge-mcp` (`:latest` and `:sha-<sha>`). A merge that bumps `version` in `pyproject.toml` also cuts a GitHub Release and an immutable `:<version>` tag.
-- Branch workflow: `develop` is the integration branch and reaches `main` only by pull request. `main` is protected (PR required, `test` + `image` must pass, no force pushes or deletions).
+- Release workflow: merging to `main` builds, gates, smoke-tests, and publishes a multi-arch image (`linux/amd64` + `linux/arm64`) to `ghcr.io/phdwight/pse-edge-mcp` (`:latest` and `:sha-<sha>`). Each arch builds on a native runner and is gated independently, then the digests are combined into one manifest list so a tag is never half-published. A merge that bumps `version` in `pyproject.toml` also cuts a GitHub Release and an immutable `:<version>` tag.
+- Branch workflow: `develop` is the integration branch and reaches `main` only by pull request. `main` is protected (PR required, `test` + `image (amd64)` + `image (arm64)` must pass, no force pushes or deletions).
 
 ### Changed
 - `search_disclosures` uses `/announcements/search.ax`, not `/keyword/search.ax` as originally planned: the latter is an attachment full-text index that is partial and stale (measured: nothing from 2026), so it became a separate, clearly-labelled tool. See docs/endpoints.md v3.

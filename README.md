@@ -63,11 +63,13 @@ Every merge to `main` publishes an image:
 
 ```bash
 docker pull ghcr.io/phdwight/pse-edge-mcp:latest      # or :<version>, :sha-<sha>
+# multi-arch: linux/amd64 and linux/arm64
 docker run --rm -p 8000:8000 ghcr.io/phdwight/pse-edge-mcp:latest   # streamable HTTP
 docker run --rm -i --entrypoint pse-edge-mcp ghcr.io/phdwight/pse-edge-mcp:latest  # stdio
 ```
 
-Images are gated before publishing: <200 MB, secret-scanned, and smoke-tested.
+Both architectures are gated before publishing: <200 MB, secret-scanned, and
+smoke-tested on native runners.
 
 ## Development
 

@@ -19,16 +19,31 @@ jobs:
       - run: uv run ruff check .
       - run: uv run pytest -q
 
+  # Both published architectures are gated here, on native runners (free for public
+  # repos), so arm64 breakage is caught at review time rather than at publish time —
+  # otherwise a green PR could merge and then leave main with no image at all.
+  # `name:` is pinned so the required-check contexts stay exactly "image (amd64)" and
+  # "image (arm64)"; without it GitHub would name them after every matrix value.
   image:
-    runs-on: ubuntu-latest
+    name: image (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
+      # Each runner is native for its own arch, so a plain build needs no buildx or QEMU.
       - name: Build image
         run: docker build -t pse-edge-mcp:ci .
       - name: Enforce image size budget (<200MB)
         run: |
           SIZE=$(docker image inspect pse-edge-mcp:ci --format '{{.Size}}')
-          echo "Image size: $((SIZE / 1024 / 1024)) MB"
+          echo "Image size (${{ matrix.arch }}): $((SIZE / 1024 / 1024)) MB"
           test "$SIZE" -lt $((200 * 1024 * 1024))
       - name: Scan image for secrets & vulns
         uses: aquasecurity/trivy-action@master
@@ -36,3 +51,13 @@ jobs:
           image-ref: pse-edge-mcp:ci
           scanners: secret
           exit-code: "1"
+      - name: Smoke-test the image
+        run: |
+          ARCH=$(docker image inspect pse-edge-mcp:ci --format '{{.Architecture}}')
+          test "$ARCH" = "${{ matrix.arch }}"
+          TOOLS=$(docker run --rm --entrypoint python pse-edge-mcp:ci -c '
+          import asyncio
+          from pse_edge_mcp.server import build_server
+          print(len(asyncio.run(build_server().list_tools())))')
+          echo "Tools registered on $ARCH: $TOOLS"
+          test "$TOOLS" -ge 6

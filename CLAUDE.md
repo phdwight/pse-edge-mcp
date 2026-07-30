@@ -27,11 +27,17 @@ Unofficial — Edge has no public API; we speak to the portal's own internal end
 ## Branching & release (decided)
 
 - **All work lands on `develop`.** No feature branches. `develop` reaches `main` only by
-  pull request; `main` is protected (PR required, `test` + `image` checks must pass, no
-  force pushes or deletions, admins exempt for hotfixes). Never commit to `main` directly.
-- **Merging to `main` publishes** `ghcr.io/phdwight/pse-edge-mcp` (`:latest`, `:sha-<sha>`)
-  via `.github/workflows/release.yml`, which re-runs the test + size + secret gates and
-  smoke-tests the image *before* pushing — nothing violating invariant #5 reaches GHCR.
+  pull request; `main` is protected (PR required, `test` + `image (amd64)` + `image (arm64)`
+  checks must pass, no force pushes or deletions, admins exempt for hotfixes). Never
+  commit to `main` directly.
+- **Merging to `main` publishes a multi-arch image** (`linux/amd64` + `linux/arm64`) to
+  `ghcr.io/phdwight/pse-edge-mcp` (`:latest`, `:sha-<sha>`) via
+  `.github/workflows/release.yml`. Each arch builds on its own **native runner** (free on
+  public repos, no QEMU) and is size-checked, secret-scanned, and smoke-tested *before*
+  publish, so invariant #5 holds per architecture. Publishing is two-phase: each arch
+  pushes by digest, then a merge job stitches the digests into one manifest list under the
+  real tags, so a tag never exists half-published. If you add a platform, update the
+  digest count assertion in the merge job **and** the required-check contexts.
 - **Releases are version-driven:** a merge that changes `version` in `pyproject.toml` also
   cuts a GitHub Release and an immutable `:<version>` tag. Merges without a bump only move
   `:latest`. So bump the version and roll `CHANGELOG.md`'s Unreleased section in the same
