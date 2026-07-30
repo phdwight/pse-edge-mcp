@@ -68,3 +68,37 @@ def keyword_search_html() -> str:
 def disclosure_viewer_html() -> str:
     """openDiscViewer.do for a Lepanto material-information disclosure."""
     return _fixture("disclosure_viewer.html")
+
+
+# Phase 3 fixtures — recorded live 2026-07-30 (see docs/endpoints.md §4-5).
+@pytest.fixture
+def company_profile_html() -> str:
+    """companyInformation/form.do for SM (cmpy_id 599)."""
+    return _fixture("company_profile.html")
+
+
+@pytest.fixture
+def financial_reports_html() -> str:
+    """financial_reports_view.do for SM: annual + quarterly, BS + IS each.
+
+    Note the units labels disagree between sections in this real capture.
+    """
+    return _fixture("financial_reports.html")
+
+
+@pytest.fixture
+def dividends_html() -> str:
+    """dividends_and_rights_list.ax?DividendsOrRights=Dividends for SM (one record)."""
+    return _fixture("dividends.html")
+
+
+@pytest.fixture
+def rights_empty_html() -> str:
+    """The Rights tab for SM: a real 'no data.' response."""
+    return _fixture("rights_empty.html")
+
+
+@pytest.fixture
+def homepage_html() -> str:
+    """The PSE Edge homepage: Index Summary plus every disclosure feed."""
+    return _fixture("homepage.html")

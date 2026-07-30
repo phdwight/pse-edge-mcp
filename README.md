@@ -48,6 +48,11 @@ Serves streamable HTTP on `:8000`, with Postgres 18 as shared cache/archive.
 | `search_disclosures(symbol?, start_date?, end_date?, template?, page?)` | Disclosure metadata, market-wide or per company; 50/page with exact totals |
 | `search_disclosure_fulltext(keyword, ...)` | Search the text *inside* disclosure attachments, with snippets |
 | `get_disclosure(edge_no)` | One disclosure's details plus attachment and body-HTML links |
+| `get_company_profile(symbol)` | Sector, incorporation, auditor, transfer agent, contacts |
+| `get_financial_highlights(symbol)` | Annual + quarterly balance sheet and income statement |
+| `get_dividends_and_rights(symbol)` | Declared dividends and stock rights, linked to their disclosures |
+| `get_indices()` | PSEi and the 7 sector indices, with signed daily change |
+| `get_market_summary()` | Index levels plus PSE Edge's homepage disclosure feeds |
 
 Disclosure tools return metadata and links only — this server never downloads or parses
 attachments, so your MCP client can fetch the returned URLs itself if it needs the files.
@@ -55,7 +60,12 @@ Note that Edge's own full-text index is partial (roughly 2023–2025 at last che
 `search_disclosure_fulltext` is not a substitute for `search_disclosures`; it reports this
 limit in its results.
 
-Roadmap (see `docs/plan.md`): financial reports, dividends, indices & market summary, Postgres archive, OAuth 2.1 accounts with passkeys, remote deployment.
+Financial figures are returned exactly as PSE Edge prints them and are **never rescaled** —
+Edge's own units labels are inconsistent between its annual and quarterly sections, so each
+period reports its `currency_units` for you to check. Index changes are signed here even
+though Edge prints them unsigned (it shows direction only as a colour and an arrow).
+
+Roadmap (see `docs/plan.md`): Postgres archive, OAuth 2.1 accounts with passkeys, remote deployment.
 
 ## Container image
 

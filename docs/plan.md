@@ -165,7 +165,19 @@ Scalability decisions made **now**, paid for **later**:
      `[page / pages]`, so tools return `total`/`pages`/`has_more` and take a `page`
      argument rather than looping until a short page — fewer upstream requests for the
      same information, which the freeze policy's whole purpose recommends.
-- **Phase 3 — Company & market:** profile, financial highlights, dividends/rights, indices, market summary.
+- **Phase 3 — Company & market (delivered):** profile, financial highlights, dividends/rights, indices, market summary.
+  Scope notes from the fixture pass (docs/endpoints.md v4):
+  1. **Financial figures are never rescaled.** Edge's own units labels contradict each other
+     — the annual section said "Php (in thousands)" while quarterly said "Php (in Millions)"
+     for the same company, with one identical figure appearing under both. Each period
+     reports its `currency_units` verbatim and the tool docstring tells the model to check it
+     before quoting a number. Normalising would have encoded Edge's error as fact.
+  2. **Gainers/losers/most-active stay out**, as decided in Phase 0 — Edge publishes them
+     nowhere. `get_market_summary` says so rather than implying the data is merely missing.
+  3. `get_market_summary` keys its feeds by Edge's own group labels instead of invented
+     buckets, so a renamed or added group surfaces instead of being dropped.
+  4. `directors_and_management_list.do` is mapped and trivial to parse but exposes no tool —
+     it is not in the v1 surface in §3. Add when wanted.
 - **Phase 4 — Polish & release:** Postgres storage backend + Alembic schema + archive upserts, README (install for Claude Desktop/Code, ToS note), error-message quality, PyPI publish, tag v0.1.0.
 - **Phase 5 — Accounts & OAuth 2.1:** Authlib authorization server (PKCE, dynamic client registration, resource metadata), signup with email verification + **passkey enrollment (py_webauthn)**, passkey login ceremony on the authorization page, multi-passkey management page, user/credential/token schema in Postgres, tiered quota middleware, admin CLI. Exit criteria: a fresh user can sign up with a passkey, connect from Claude.ai custom connectors via the standard OAuth flow, log in from a second device, and hit their rate limit cleanly.
 - **Phase 6 — Remote deploy:** production Compose overlay (`compose.prod.yaml`: restart policies, resource limits, TLS-terminating reverse proxy service), `--http` mode hardening (health checks, structured logs), deploy target (any Docker host / Fly.io / Railway / VPS via `docker compose -f compose.yaml -f compose.prod.yaml up -d`).

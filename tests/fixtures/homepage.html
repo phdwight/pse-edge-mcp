@@ -1,0 +1,831 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>PSE EDGE portal</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<meta http-equiv="X-UA-Compatible" content="IE=edge" />
+<link href="/css/common.css" type="text/css" rel="stylesheet" />
+<link href="/css/main.css" type="text/css" rel="stylesheet" />
+<link href="/js/lib/themes/base/jquery-ui.css" rel="stylesheet" />
+<meta http-equiv="X-UA-Compatible" content="IE=edge" />
+<script src="/js/lib/jquery-1.10.2.min.js"></script>
+<script src="/js/lib/jquery-ui-1.10.3.min.js"></script>
+<script src="/js/lib/jquery.blockUI.js"></script>
+<script src="/js/lib/jquery.ezmark.js"></script>
+<script src="/js/lib/jquery.cycle.js"></script>
+<script src="/js/common/epCommon.js?version=20220325"></script><script type="text/javascript">
+var bannerIdx = 1;
+
+$(document).ready(function() {
+  $('#fader')
+    .cycle({
+      fx: 'fade',
+      speed: '3000',
+  });
+});
+
+function goDividendsOrRights() {
+	var url = "/disclosureData/dividends_and_rights_info_form.do?DividendsOrRights=";
+	if (document.getElementById("dividends_div").style.display == "none") {
+		url += "Rights";
+	} else {
+		url += "Dividends";
+	}
+	document.location.href = url;
+}
+
+function goTabDAR(sel){
+  if ("dividends" == sel) {
+    document.getElementById("dividends_div").style.display = "block";
+    document.getElementById("rights_div").style.display = "none";
+
+    document.getElementById("dividends_span").className = "select";
+    document.getElementById("rights_span").className = "";
+  } else {
+    document.getElementById("dividends_div").style.display = "none";
+    document.getElementById("rights_div").style.display = "block";
+
+    document.getElementById("dividends_span").className = "";
+    document.getElementById("rights_span").className = "select";
+  }
+}
+
+function setBanner(idx) {
+  if (1 == idx) {
+    document.getElementById("bannerImg").src = "/images/main/banner_01.jpg";
+
+    document.getElementById("bannerIcon1").style.background = "#35bbe2";
+    document.getElementById("bannerIcon2").style.background = "#b5b5b5";
+    document.getElementById("bannerIcon3").style.background = "#b5b5b5";
+    document.getElementById("bannerIcon4").style.background = "#b5b5b5";
+    document.getElementById("bannerIcon5").style.background = "#b5b5b5";
+    document.getElementById("bannerIcon6").style.background = "#b5b5b5";
+  } else if (2 == idx) {
+    document.getElementById("bannerImg").src = "/images/main/banner_02.jpg";
+
+    document.getElementById("bannerIcon1").style.background = "#b5b5b5";
+    document.getElementById("bannerIcon2").style.background = "#35bbe2";
+    document.getElementById("bannerIcon3").style.background = "#b5b5b5";
+    document.getElementById("bannerIcon4").style.background = "#b5b5b5";
+    document.getElementById("bannerIcon5").style.background = "#b5b5b5";
+    document.getElementById("bannerIcon6").style.background = "#b5b5b5";
+  } else if (3 == idx) {
+    document.getElementById("bannerImg").src = "/images/main/banner_03.jpg";
+
+    document.getElementById("bannerIcon1").style.background = "#b5b5b5";
+    document.getElementById("bannerIcon2").style.background = "#b5b5b5";
+    document.getElementById("bannerIcon3").style.background = "#35bbe2";
+    document.getElementById("bannerIcon4").style.background = "#b5b5b5";
+    document.getElementById("bannerIcon5").style.background = "#b5b5b5";
+    document.getElementById("bannerIcon6").style.background = "#b5b5b5";
+  } else if (4 == idx) {
+    document.getElementById("bannerImg").src = "/images/main/banner_04.jpg";
+
+    document.getElementById("bannerIcon1").style.background = "#b5b5b5";
+    document.getElementById("bannerIcon2").style.background = "#b5b5b5";
+    document.getElementById("bannerIcon3").style.background = "#b5b5b5";
+    document.getElementById("bannerIcon4").style.background = "#35bbe2";
+    document.getElementById("bannerIcon5").style.background = "#b5b5b5";
+    document.getElementById("bannerIcon6").style.background = "#b5b5b5";
+  } else if (5 == idx) {
+    document.getElementById("bannerImg").src = "/images/main/banner_05.jpg";
+
+    document.getElementById("bannerIcon1").style.background = "#b5b5b5";
+    document.getElementById("bannerIcon2").style.background = "#b5b5b5";
+    document.getElementById("bannerIcon3").style.background = "#b5b5b5";
+    document.getElementById("bannerIcon4").style.background = "#b5b5b5";
+    document.getElementById("bannerIcon5").style.background = "#35bbe2";
+    document.getElementById("bannerIcon6").style.background = "#b5b5b5";
+  } else {
+    document.getElementById("bannerImg").src = "/images/main/banner_06.jpg";
+
+    document.getElementById("bannerIcon1").style.background = "#b5b5b5";
+    document.getElementById("bannerIcon2").style.background = "#b5b5b5";
+    document.getElementById("bannerIcon3").style.background = "#b5b5b5";
+    document.getElementById("bannerIcon4").style.background = "#b5b5b5";
+    document.getElementById("bannerIcon5").style.background = "#b5b5b5";
+    document.getElementById("bannerIcon6").style.background = "#35bbe2";
+  }
+}
+
+function execBannerTimer(idx) {
+  setBanner(idx);
+  bannerIdx++;
+
+  if (7 == bannerIdx) {
+    bannerIdx = 1;
+  }
+}
+
+function setStrEllipsis(str, maxLen) {
+  if (str.length > maxLen) {
+    return str.substring(0, maxLen - 2) + "..";
+  }
+
+  return str;
+}
+</script>
+</head>
+<body><a href="https://edge.pse.com.ph/cdn-cgi/content?id=KpieetrEFBB30fJJS37WduuUTX4Js7oPY7thXMofrwE-1785406358.272968-1.2.1.1-8JapMeDggfpx6SiAt7irGZdRM5.nshUjqPxTOZTL2zQ" aria-hidden="true" rel="nofollow noopener" style="display: none !important; visibility: hidden !important"></a>
+<script type="text/javascript">
+$(function() {
+  $("#searchKeyTop").autocomplete({
+    minLength: 1,
+    source: "/autoComplete/searchCompanyNameSymbol.ax",
+    focus: function(event, ui) {
+      //$("#searchKeyTop").val(ui.item.cmpyNm);
+      return false;
+    },
+    select: function(event, ui) {
+      location.href = "/companyInformation/form.do?cmpy_id=" + ui.item.cmpyId;
+      return false;
+    }
+  })
+  .data("ui-autocomplete")._renderItem = function(ul, item) {
+    return $("<li>").append("<a><div class='nm'>" + item.cmpyNm + "</div><span class='sym'>" + item.symbol + "</span></a>").appendTo(ul);
+  };
+});
+</script>
+<div id="header">
+  <div id="top">
+  <h1><a href="/"><img src="/images/common/top_logo.png" alt="PSE Edge"/></a></h1>
+  <fieldset class="totalSearch">
+    <form id="frmTop" onsubmit="return false;">
+    <input type="text" class="topSearch" id="searchKeyTop" value="" title="Type in company name or security code" />
+    <p><a href="/keyword/form.do"><img src="/images/main/advanced_search.png" alt="Advanced Search" /></a></p>
+    </form>
+  </fieldset>
+<ul id="topNav">
+    <li><a href="/companyDirectory/form.do"><img src="/images/common/top_company.png" alt="Company List" /></a></li>
+    <li><a href="/disclosureData/listing_applicants_list.do"><img src="/images/common/top_listing.png" alt="Listing Applicants" /></a></li>
+    <li><a href="/disclosureData/watchlist_view.do"><img src="/images/common/top_watch.png" alt="Watch List" /></a></li>
+    <li><a href="/psei/form.do"><img src="/images/common/top_psei.png" alt="PSEi" /></a></li>
+    <li><a href="/disclosureData/etf_form.do"><img src="/images/common/top_etf.png" alt="ETF" /></a></li>
+    <li class="about"><a href="/page/aboutPseEdge.do"><img src="/images/common/top_about.png" alt="About PSE EDGE" /></a></li>
+  </ul>
+</div></div>
+<div id="mainContents">
+
+<div id="fader">
+  <img src="/images/main/banner_01.jpg" alt="banner01" width="1000" height="213" />
+  <img src="/images/main/banner_02.jpg" alt="banner02" width="1000" height="213" />
+  <img src="/images/main/banner_03.jpg" alt="banner03" width="1000" height="213" />
+</div>
+<h2>Company Disclosures</h2>
+
+<!--group01-->
+<div class="disclosure">
+  <!--Company Announcements-->
+  <dl><dt>Company Announcements
+    <a href="/announcements/form.do"><img src="/images/main/icon_more.gif" alt="more" /></a></dt>
+    <dd>Corporate acts, developments or events relating to the operations and business of listed companies.</dd>
+  </dl>
+  <ul class="report01">
+<li><a href="#viewer" onclick="openPopup('a24373d4cd10d90864d70b69f0a3140b');return false;">Daily Trading Information</a>
+    <span style="width:60px;"><a href="/companyInformation/form.do?cmpy_id=649" style="display:inline;color:#2a6f9d;">FMETF</a></span>
+    <span style="width:150px;">Jul 30, 2026 05:19 PM</span>
+    <span>C05756-2026</span>
+    </li>
+<li><a href="#viewer" onclick="openPopup('1344ce0712724b4764d70b69f0a3140b');return false;">Change in Directors and/or Officers (Resignation, Removal or Appointment, Election and/or Promotion)</a>
+    <span style="width:60px;"><a href="/companyInformation/form.do?cmpy_id=167" style="display:inline;color:#2a6f9d;">UBP</a></span>
+    <span style="width:150px;">Jul 30, 2026 04:20 PM</span>
+    <span>C05755-2026</span>
+    </li>
+<li><a href="#viewer" onclick="openPopup('ff4c7557aee1d72b64d70b69f0a3140b');return false;">Material Information/Transactions</a>
+    <span style="width:60px;"><a href="/companyInformation/form.do?cmpy_id=98" style="display:inline;color:#2a6f9d;">LC</a></span>
+    <span style="width:150px;">Jul 30, 2026 03:47 PM</span>
+    <span>C05754-2026</span>
+    </li>
+<li><a href="#viewer" onclick="openPopup('d70c5508e155ea2064d70b69f0a3140b');return false;">Press Release</a>
+    <span style="width:60px;"><a href="/companyInformation/form.do?cmpy_id=98" style="display:inline;color:#2a6f9d;">LC</a></span>
+    <span style="width:150px;">Jul 30, 2026 03:47 PM</span>
+    <span>C05753-2026</span>
+    </li>
+<li><a href="#viewer" onclick="openPopup('a0eac287c2639c4764d70b69f0a3140b');return false;">[Amend-1]Amendments to Articles of Incorporation</a>
+    <span style="width:60px;"><a href="/companyInformation/form.do?cmpy_id=635" style="display:inline;color:#2a6f9d;">ROCK</a></span>
+    <span style="width:150px;">Jul 30, 2026 03:18 PM</span>
+    <span>C05752-2026</span>
+    </li>
+<li><a href="#viewer" onclick="openPopup('cd93893172cf0e8464d70b69f0a3140b');return false;">Change in Shareholdings of Directors and Principal Officers</a>
+    <span style="width:60px;"><a href="/companyInformation/form.do?cmpy_id=150" style="display:inline;color:#2a6f9d;">PPC</a></span>
+    <span style="width:150px;">Jul 30, 2026 03:17 PM</span>
+    <span>C05751-2026</span>
+    </li>
+<li><a href="#viewer" onclick="openPopup('071c5a2fc855b5c064d70b69f0a3140b');return false;">Clarification of News Reports</a>
+    <span style="width:60px;"><a href="/companyInformation/form.do?cmpy_id=609" style="display:inline;color:#2a6f9d;">AP</a></span>
+    <span style="width:150px;">Jul 30, 2026 03:15 PM</span>
+    <span>C05750-2026</span>
+    </li>
+<li><a href="#viewer" onclick="openPopup('6b56d612f1c092ee64d70b69f0a3140b');return false;">Material Information/Transactions</a>
+    <span style="width:60px;"><a href="/companyInformation/form.do?cmpy_id=150" style="display:inline;color:#2a6f9d;">PPC</a></span>
+    <span style="width:150px;">Jul 30, 2026 02:31 PM</span>
+    <span>C05749-2026</span>
+    </li>
+<li><a href="#viewer" onclick="openPopup('8321e6d4ebfd92d064d70b69f0a3140b');return false;">Press Release</a>
+    <span style="width:60px;"><a href="/companyInformation/form.do?cmpy_id=150" style="display:inline;color:#2a6f9d;">PPC</a></span>
+    <span style="width:150px;">Jul 30, 2026 02:30 PM</span>
+    <span>C05748-2026</span>
+    </li>
+<li><a href="#viewer" onclick="openPopup('61d3ac661c491d0164d70b69f0a3140b');return false;">Press Release</a>
+    <span style="width:60px;"><a href="/companyInformation/form.do?cmpy_id=635" style="display:inline;color:#2a6f9d;">ROCK</a></span>
+    <span style="width:150px;">Jul 30, 2026 01:39 PM</span>
+    <span>C05747-2026</span>
+    </li>
+</ul>
+
+  <!--Financial Reports-->
+  <dl><dt>Financial Reports
+    <a href="/financialReports/form.do"><img src="/images/main/icon_more.gif" alt="more" /></a></dt>
+    <dd>Periodical reports containing the financial condition and results of operations of listed companies.</dd>
+  </dl>
+  <ul class="report02">
+<li><a href="#viewer" onclick="openPopup('1c150595c7408e4064d70b69f0a3140b');return false;">Quarterly Report</a>
+    <span style="width:60px;"><a href="/companyInformation/form.do?cmpy_id=21" style="display:inline;color:#2a6f9d;">BEL</a></span>
+    <span style="width:150px;">Jul 30, 2026 01:46 PM</span>
+    <span>CR05798-2026</span>
+    </li>
+<li><a href="#viewer" onclick="openPopup('3433fd5248ff848864d70b69f0a3140b');return false;">Quarterly Report</a>
+    <span style="width:60px;"><a href="/companyInformation/form.do?cmpy_id=605" style="display:inline;color:#2a6f9d;">LOTO</a></span>
+    <span style="width:150px;">Jul 30, 2026 12:14 PM</span>
+    <span>CR05796-2026</span>
+    </li>
+<li><a href="#viewer" onclick="openPopup('821aab7009e2f82664d70b69f0a3140b');return false;">Quarterly Report</a>
+    <span style="width:60px;"><a href="/companyInformation/form.do?cmpy_id=685" style="display:inline;color:#2a6f9d;">MREIT</a></span>
+    <span style="width:150px;">Jul 30, 2026 09:11 AM</span>
+    <span>CR05794-2026</span>
+    </li>
+<li><a href="#viewer" onclick="openPopup('547bfe20d4b0010e64d70b69f0a3140b');return false;">Quarterly Report</a>
+    <span style="width:60px;"><a href="/companyInformation/form.do?cmpy_id=153" style="display:inline;color:#2a6f9d;">REG</a></span>
+    <span style="width:150px;">Jul 29, 2026 08:42 AM</span>
+    <span>CR05785-2026</span>
+    </li>
+<li><a href="#viewer" onclick="openPopup('6efc6496d0b3b01c64d70b69f0a3140b');return false;">Quarterly Report</a>
+    <span style="width:60px;"><a href="/companyInformation/form.do?cmpy_id=103" style="display:inline;color:#2a6f9d;">NI</a></span>
+    <span style="width:150px;">Jul 27, 2026 03:28 PM</span>
+    <span>CR05762-2026</span>
+    </li>
+<li><a href="#viewer" onclick="openPopup('87f6473bd063474a64d70b69f0a3140b');return false;">Quarterly Report</a>
+    <span style="width:60px;"><a href="/companyInformation/form.do?cmpy_id=260" style="display:inline;color:#2a6f9d;">BDO</a></span>
+    <span style="width:150px;">Jul 27, 2026 09:58 AM</span>
+    <span>CR05753-2026</span>
+    </li>
+<li><a href="#viewer" onclick="openPopup('542ae7d1e3bba95764d70b69f0a3140b');return false;">Quarterly Report</a>
+    <span style="width:60px;"><a href="/companyInformation/form.do?cmpy_id=648" style="display:inline;color:#2a6f9d;">CIC</a></span>
+    <span style="width:150px;">Jul 24, 2026 03:26 PM</span>
+    <span>CR05744-2026</span>
+    </li>
+<li><a href="#viewer" onclick="openPopup('67829e779b29f06464d70b69f0a3140b');return false;">Quarterly Report</a>
+    <span style="width:60px;"><a href="/companyInformation/form.do?cmpy_id=220" style="display:inline;color:#2a6f9d;">FPI</a></span>
+    <span style="width:150px;">Jul 22, 2026 02:44 PM</span>
+    <span>CR05707-2026</span>
+    </li>
+<li><a href="#viewer" onclick="openPopup('2bc053ab3b1339fb64d70b69f0a3140b');return false;">Quarterly Report</a>
+    <span style="width:60px;"><a href="/companyInformation/form.do?cmpy_id=37" style="display:inline;color:#2a6f9d;">LODE</a></span>
+    <span style="width:150px;">Jul 22, 2026 09:15 AM</span>
+    <span>CR05698-2026</span>
+    </li>
+<li><a href="#viewer" onclick="openPopup('316ee834e093a77664d70b69f0a3140b');return false;">Annual Report</a>
+    <span style="width:60px;"><a href="/companyInformation/form.do?cmpy_id=656" style="display:inline;color:#2a6f9d;">X</a></span>
+    <span style="width:150px;">Jul 20, 2026 02:57 PM</span>
+    <span>CR05675-2026</span>
+    </li>
+</ul>
+
+  <!--Other Reports-->
+  <dl class="end"><dt>Other Reports
+    <a href="/otherReports/form.do"><img src="/images/main/icon_more.gif" alt="more" /></a></dt>
+    <dd>Other periodic SEC and PSE reportorial requirements.</dd>
+  </dl>
+  <ul class="report03 end">
+<li><a href="#viewer" onclick="openPopup('5f20abe283ac8a0a64d70b69f0a3140b');return false;">Statement of Changes in Beneficial Ownership of Securities</a>
+    <span style="width:60px;"><a href="/companyInformation/form.do?cmpy_id=652" style="display:inline;color:#2a6f9d;">CNPF</a></span>
+    <span style="width:150px;">Jul 30, 2026 01:09 PM</span>
+    <span>CR05797-2026</span>
+    </li>
+<li><a href="#viewer" onclick="openPopup('7b15db65718c12e464d70b69f0a3140b');return false;">[Amend-7]Annual Verification of the Department of Energy</a>
+    <span style="width:60px;"><a href="/companyInformation/form.do?cmpy_id=701" style="display:inline;color:#2a6f9d;">ALTER</a></span>
+    <span style="width:150px;">Jul 30, 2026 10:57 AM</span>
+    <span>CR05795-2026</span>
+    </li>
+<li><a href="#viewer" onclick="openPopup('cb0cdcdde4411c0064d70b69f0a3140b');return false;">Statement of Changes in Beneficial Ownership of Securities</a>
+    <span style="width:60px;"><a href="/companyInformation/form.do?cmpy_id=175" style="display:inline;color:#2a6f9d;">MARC</a></span>
+    <span style="width:150px;">Jul 30, 2026 07:26 AM</span>
+    <span>CR05793-2026</span>
+    </li>
+<li><a href="#viewer" onclick="openPopup('800c1f4ff883206f64d70b69f0a3140b');return false;">Other SEC Forms, Reports and Requirements</a>
+    <span style="width:60px;"><a href="/companyInformation/form.do?cmpy_id=692" style="display:inline;color:#2a6f9d;">BNCOM</a></span>
+    <span style="width:150px;">Jul 30, 2026 07:20 AM</span>
+    <span>CR05792-2026</span>
+    </li>
+<li><a href="#viewer" onclick="openPopup('fb1dc20385e0dfba64d70b69f0a3140b');return false;">[Amend-1]Other SEC Forms, Reports and Requirements</a>
+    <span style="width:60px;"><a href="/companyInformation/form.do?cmpy_id=123" style="display:inline;color:#2a6f9d;">VMC</a></span>
+    <span style="width:150px;">Jul 29, 2026 03:31 PM</span>
+    <span>CR05791-2026</span>
+    </li>
+<li><a href="#viewer" onclick="openPopup('4f35375d0ddd8aba64d70b69f0a3140b');return false;">Statement of Changes in Beneficial Ownership of Securities</a>
+    <span style="width:60px;"><a href="/companyInformation/form.do?cmpy_id=63" style="display:inline;color:#2a6f9d;">BHI</a></span>
+    <span style="width:150px;">Jul 29, 2026 01:54 PM</span>
+    <span>CR05790-2026</span>
+    </li>
+<li><a href="#viewer" onclick="openPopup('6d98a9b236a37c7764d70b69f0a3140b');return false;">Statement of Changes in Beneficial Ownership of Securities</a>
+    <span style="width:60px;"><a href="/companyInformation/form.do?cmpy_id=63" style="display:inline;color:#2a6f9d;">BHI</a></span>
+    <span style="width:150px;">Jul 29, 2026 01:54 PM</span>
+    <span>CR05789-2026</span>
+    </li>
+<li><a href="#viewer" onclick="openPopup('1551cdbaafedfe7364d70b69f0a3140b');return false;">Initial Statement of Beneficial Ownership of Securities</a>
+    <span style="width:60px;"><a href="/companyInformation/form.do?cmpy_id=648" style="display:inline;color:#2a6f9d;">CIC</a></span>
+    <span style="width:150px;">Jul 29, 2026 12:23 PM</span>
+    <span>CR05788-2026</span>
+    </li>
+<li><a href="#viewer" onclick="openPopup('0e420c0c760a811564d70b69f0a3140b');return false;">Statement of Changes in Beneficial Ownership of Securities</a>
+    <span style="width:60px;"><a href="/companyInformation/form.do?cmpy_id=234" style="display:inline;color:#2a6f9d;">BPI</a></span>
+    <span style="width:150px;">Jul 29, 2026 11:29 AM</span>
+    <span>CR05787-2026</span>
+    </li>
+<li><a href="#viewer" onclick="openPopup('cd6de103339ddf8364d70b69f0a3140b');return false;">Other SEC Forms, Reports and Requirements</a>
+    <span style="width:60px;"><a href="/companyInformation/form.do?cmpy_id=624" style="display:inline;color:#2a6f9d;">CEB</a></span>
+    <span style="width:150px;">Jul 29, 2026 09:47 AM</span>
+    <span>CR05786-2026</span>
+    </li>
+</ul>
+</div>
+
+<!--group02-->
+<div class="index">
+  <h3>Index Summary
+  <a href="/index/form.do"><img src="/images/main/icon_more.gif" alt="more" /></a></h3>
+  <table>
+  <colgroup>
+    <col width="35%"/>
+    <col width="25%"/>
+    <col width="22%"/>
+    <col width="23%"/>
+  </colgroup>
+  <thead>
+  <tr>
+    <th>Index</th>
+    <th>Value</th>
+    <th>Chg</th>
+    <th class="end">%Chg</th>
+  </tr>
+  </thead>
+  <tbody>
+<tr>
+    <td class="label">PSEi</td>
+    <td class="alignR">6,305.75</td>
+    <td class="alignR" style="color:red">
+       47.29</td>
+    <td class="alignR" style="color:red">
+       0.74▼</td>
+  </tr>
+<tr>
+    <td class="label">All Shares</td>
+    <td class="alignR">3,415.35</td>
+    <td class="alignR" style="color:red">
+       31.99</td>
+    <td class="alignR" style="color:red">
+       0.93▼</td>
+  </tr>
+<tr>
+    <td class="label">Financials</td>
+    <td class="alignR">1,936.87</td>
+    <td class="alignR" style="color:green">
+      4.73</td>
+    <td class="alignR" style="color:green">
+      0.25▲</td>
+  </tr>
+<tr>
+    <td class="label">Industrial</td>
+    <td class="alignR">8,037.39</td>
+    <td class="alignR" style="color:red">
+       318.09</td>
+    <td class="alignR" style="color:red">
+       3.81▼</td>
+  </tr>
+<tr>
+    <td class="label">Holding Firms</td>
+    <td class="alignR">4,511.85</td>
+    <td class="alignR" style="color:red">
+       30.96</td>
+    <td class="alignR" style="color:red">
+       0.68▼</td>
+  </tr>
+<tr>
+    <td class="label">Services</td>
+    <td class="alignR">3,434.59</td>
+    <td class="alignR" style="color:red">
+       3.10</td>
+    <td class="alignR" style="color:red">
+       0.09▼</td>
+  </tr>
+<tr>
+    <td class="label">Mining and Oil</td>
+    <td class="alignR">16,208.35</td>
+    <td class="alignR" style="color:green">
+      241.19</td>
+    <td class="alignR" style="color:green">
+      1.51▲</td>
+  </tr>
+<tr>
+    <td class="label">Property</td>
+    <td class="alignR">1,939.49</td>
+    <td class="alignR" style="color:green">
+      1.77</td>
+    <td class="alignR" style="color:green">
+      0.09▲</td>
+  </tr>
+</tbody>
+  </table>
+</div>
+
+<div class="dividends">
+  <h3>
+  <a href="#dividends" onclick="goTabDAR('dividends');return false;">
+    <span id="dividends_span" class="select">Dividends</span></a>
+  <a href="#rights" onclick="goTabDAR('rights');return false;">
+    <span id="rights_span">Rights</span></a>
+  <a href="#more" onclick="goDividendsOrRights();return false;" class="more"><img src="/images/main/icon_more.gif" alt="more" /></a>
+  </h3>
+
+  <!--dividends-->
+  <div id="dividends_div">
+  <table>
+  <colgroup>
+    <col width="*"/>
+    <col width="130"/>
+  </colgroup>
+  <thead>
+    <tr>
+      <th>Company Name</th>
+      <th class="end">Type of Dividend</th>
+    </tr>
+  </thead>
+  <tbody>
+<tr>
+      <td class="label"><a href="/companyInformation/form.do?cmpy_id=685" style="display:inline;color:#2a6f9d;">MREIT, Inc.</a></td>
+      <td class="alignC"><a href="#viewer" onclick="openPopup('8cacb7e8e82ec1e264d70b69f0a3140b');return false;">Cash</a></td>
+    </tr>
+<tr>
+      <td class="label"><a href="/companyInformation/form.do?cmpy_id=118" style="display:inline;color:#2a6f9d;">Manila Electric Company</a></td>
+      <td class="alignC"><a href="#viewer" onclick="openPopup('b4a264915bb578a064d70b69f0a3140b');return false;">Cash</a></td>
+    </tr>
+<tr>
+      <td class="label"><a href="/companyInformation/form.do?cmpy_id=635" style="display:inline;color:#2a6f9d;">Rockwell Land Corporation</a></td>
+      <td class="alignC"><a href="#viewer" onclick="openPopup('5c08cb438d79781d64d70b69f0a3140b');return false;">Cash</a></td>
+    </tr>
+<tr>
+      <td class="label"><a href="/companyInformation/form.do?cmpy_id=39" style="display:inline;color:#2a6f9d;">Cityland Development Corporation</a></td>
+      <td class="alignC"><a href="#viewer" onclick="openPopup('b0a1674bc031b18e64d70b69f0a3140b');return false;">Cash</a></td>
+    </tr>
+<tr>
+      <td class="label"><a href="/companyInformation/form.do?cmpy_id=658" style="display:inline;color:#2a6f9d;">SBS Philippines Corporation</a></td>
+      <td class="alignC"><a href="#viewer" onclick="openPopup('1df10da1868a963964d70b69f0a3140b');return false;">Cash</a></td>
+    </tr>
+<tr>
+      <td class="label"><a href="/companyInformation/form.do?cmpy_id=189" style="display:inline;color:#2a6f9d;">Century Properties Group, Inc.</a></td>
+      <td class="alignC"><a href="#viewer" onclick="openPopup('0d4bb43923b209f064d70b69f0a3140b');return false;">Cash</a></td>
+    </tr>
+<tr>
+      <td class="label"><a href="/companyInformation/form.do?cmpy_id=627" style="display:inline;color:#2a6f9d;">Megawide Construction Corporation</a></td>
+      <td class="alignC"><a href="#viewer" onclick="openPopup('e826f4cf5597b6b464d70b69f0a3140b');return false;">Cash</a></td>
+    </tr>
+<tr>
+      <td class="label"><a href="/companyInformation/form.do?cmpy_id=627" style="display:inline;color:#2a6f9d;">Megawide Construction Corporation</a></td>
+      <td class="alignC"><a href="#viewer" onclick="openPopup('2fcf9bbc4760dbdf64d70b69f0a3140b');return false;">Cash</a></td>
+    </tr>
+<tr>
+      <td class="label"><a href="/companyInformation/form.do?cmpy_id=142" style="display:inline;color:#2a6f9d;">Philippine Savings Bank</a></td>
+      <td class="alignC"><a href="#viewer" onclick="openPopup('64997c160aa5852a64d70b69f0a3140b');return false;">Cash</a></td>
+    </tr>
+<tr>
+      <td class="label"><a href="/companyInformation/form.do?cmpy_id=143" style="display:inline;color:#2a6f9d;">Philippine Seven Corporation</a></td>
+      <td class="alignC"><a href="#viewer" onclick="openPopup('1c418c70950fb58364d70b69f0a3140b');return false;">Cash</a></td>
+    </tr>
+</tbody>
+  </table>
+  </div>
+
+  <!--rights-->
+  <div id="rights_div" style="display:none">
+  <table>
+  <colgroup>
+    <col width="*"/>
+    <col width="130"/>
+  </colgroup>
+  <thead>
+  <tr>
+    <th>Company Name</th>
+    <th class="end">Entitlement Ratio</th>
+  </tr>
+  </thead>
+  <tbody>
+<tr>
+    <td class="label"><a href="/companyInformation/form.do?cmpy_id=698" style="display:inline;color:#2a6f9d;">LFM Properties Corporation</a></td>
+    <td class="alignC"><a href="#viewer" onclick="openPopup('506b63ff2917d47aec6e1601ccee8f59');return false;">TBA</a></td>
+  </tr>
+<tr>
+    <td class="label"><a href="/companyInformation/form.do?cmpy_id=233" style="display:inline;color:#2a6f9d;">ACEN CORPORATION</a></td>
+    <td class="alignC"><a href="#viewer" onclick="openPopup('2e74c55b586ac6d4ec6e1601ccee8f59');return false;">TBA</a></td>
+  </tr>
+<tr>
+    <td class="label"><a href="/companyInformation/form.do?cmpy_id=98" style="display:inline;color:#2a6f9d;">Lepanto Consolidated Mining Company</a></td>
+    <td class="alignC"><a href="#viewer" onclick="openPopup('10bdc3b3b829f2d73470cea4b051ca8f');return false;">1 share for every 3.95 shares held</a></td>
+  </tr>
+<tr>
+    <td class="label"><a href="/companyInformation/form.do?cmpy_id=187" style="display:inline;color:#2a6f9d;">DFNN, Inc.</a></td>
+    <td class="alignC"><a href="#viewer" onclick="openPopup('cdbe9d009b56057c3470cea4b051ca8f');return false;">1 share for every 2 shares owned</a></td>
+  </tr>
+<tr>
+    <td class="label"><a href="/companyInformation/form.do?cmpy_id=36" style="display:inline;color:#2a6f9d;">DITO CME Holdings Corp.</a></td>
+    <td class="alignC"><a href="#viewer" onclick="openPopup('d907a11d0fe115803470cea4b051ca8f');return false;">TBA</a></td>
+  </tr>
+<tr>
+    <td class="label"><a href="/companyInformation/form.do?cmpy_id=619" style="display:inline;color:#2a6f9d;">AgriNurture, Inc.</a></td>
+    <td class="alignC"><a href="#viewer" onclick="openPopup('499d5022301c00a65d542af6f1e997b9');return false;">1 stock rights share for every 2.5 shares held</a></td>
+  </tr>
+<tr>
+    <td class="label"><a href="/companyInformation/form.do?cmpy_id=24" style="display:inline;color:#2a6f9d;">MJC Investments Corporation</a></td>
+    <td class="alignC"><a href="#viewer" onclick="openPopup('634e59a0235218eb43ca035510b6ec2b');return false;">One (1) Rights Share for every Two (2) Common Shares held as of Record Date</a></td>
+  </tr>
+<tr>
+    <td class="label"><a href="/companyInformation/form.do?cmpy_id=48" style="display:inline;color:#2a6f9d;">Acesite (Phils.) Hotel Corporation</a></td>
+    <td class="alignC"><a href="#viewer" onclick="openPopup('43b5a8d21121c637b15effbf9088d1ab');return false;">1:1</a></td>
+  </tr>
+<tr>
+    <td class="label"><a href="/companyInformation/form.do?cmpy_id=145" style="display:inline;color:#2a6f9d;">Macay Holdings, Inc.</a></td>
+    <td class="alignC"><a href="#viewer" onclick="openPopup('08961e384bae08bab15effbf9088d1ab');return false;">1 Rights Share for every 50 Common Shares held as of Record Date</a></td>
+  </tr>
+<tr>
+    <td class="label"><a href="/companyInformation/form.do?cmpy_id=48" style="display:inline;color:#2a6f9d;">Acesite (Phils.) Hotel Corporation</a></td>
+    <td class="alignC"><a href="#viewer" onclick="openPopup('1cfc6b261f7b46481db82e377ee70f3b');return false;">1:1</a></td>
+  </tr>
+</tbody>
+  </table>
+  </div>
+</div>
+
+<!--Halts-->
+  <div class="halts">
+  <h3>Halts and Suspensions <a href="/disclosureData/halts_and_suspensions_list.do"><img src="/images/main/icon_more.gif" alt="more" /></a></h3>
+  <table>
+  <colgroup>
+    <col width="30%"/>
+    <col width="35%"/>
+    <col width="30%"/>
+  </colgroup>
+  <thead>
+    <tr>
+      <th>Stock Symbol</th>
+      <th>Market Action</th>
+      <th class="end">Execution Date</th>
+    </tr>
+  </thead>
+  <tbody>
+<tr>
+    <td class="label"><a href="/companyInformation/form.do?cmpy_id=656" style="display:inline;color:#2a6f9d;">X</a></td>
+    <td class="alignC"><a href="#viewer" onclick="openPopup('5e032d1bfcec2bfb64d70b69f0a3140b');return false;">Suspension</a></td>
+    <td class="alignR"><a href="#viewer" onclick="openPopup('5e032d1bfcec2bfb64d70b69f0a3140b');return false;">Jun 2, 2026</a></td>
+  </tr>
+<tr>
+    <td class="label"><a href="/companyInformation/form.do?cmpy_id=646" style="display:inline;color:#2a6f9d;">RRHI</a></td>
+    <td class="alignC"><a href="#viewer" onclick="openPopup('da066f898e7c2adb64d70b69f0a3140b');return false;">Suspension</a></td>
+    <td class="alignR"><a href="#viewer" onclick="openPopup('da066f898e7c2adb64d70b69f0a3140b');return false;">Jul 13, 2026</a></td>
+  </tr>
+<tr>
+    <td class="label"><a href="/companyInformation/form.do?cmpy_id=122" style="display:inline;color:#2a6f9d;">WEB</a></td>
+    <td class="alignC"><a href="#viewer" onclick="openPopup('8cf898c71840649064d70b69f0a3140b');return false;">Halt</a></td>
+    <td class="alignR"><a href="#viewer" onclick="openPopup('8cf898c71840649064d70b69f0a3140b');return false;">Jul 2, 2026</a></td>
+  </tr>
+<tr>
+    <td class="label"><a href="/companyInformation/form.do?cmpy_id=161" style="display:inline;color:#2a6f9d;">SOC</a></td>
+    <td class="alignC"><a href="#viewer" onclick="openPopup('c83d5d20edbc601864d70b69f0a3140b');return false;">Suspension</a></td>
+    <td class="alignR"><a href="#viewer" onclick="openPopup('c83d5d20edbc601864d70b69f0a3140b');return false;">Jun 17, 2026</a></td>
+  </tr>
+<tr>
+    <td class="label"><a href="/companyInformation/form.do?cmpy_id=619" style="display:inline;color:#2a6f9d;">ANI</a></td>
+    <td class="alignC"><a href="#viewer" onclick="openPopup('2c5233d1703165fb64d70b69f0a3140b');return false;">Suspension</a></td>
+    <td class="alignR"><a href="#viewer" onclick="openPopup('2c5233d1703165fb64d70b69f0a3140b');return false;">Jun 17, 2026</a></td>
+  </tr>
+<tr>
+    <td class="label"><a href="/companyInformation/form.do?cmpy_id=677" style="display:inline;color:#2a6f9d;">MM</a></td>
+    <td class="alignC"><a href="#viewer" onclick="openPopup('0f48caee3cb5565f64d70b69f0a3140b');return false;">Suspension</a></td>
+    <td class="alignR"><a href="#viewer" onclick="openPopup('0f48caee3cb5565f64d70b69f0a3140b');return false;">Jun 2, 2026</a></td>
+  </tr>
+</tbody>
+  </table>
+  <a href="/companyPage/marketCalendar.do" class="calendar"><img src="/images/main/market_calendar.gif" alt="Market Calendar" /></a>
+</div>
+
+<!--group03-->
+<div class="exchange">
+
+  <h2>Exchange Notices</h2>
+  <div class="notice">
+
+  <!--Listing Notices-->
+  <dl><dt>Listing Notices
+    <a href="/listingNotices/form.do"><img src="/images/main/icon_more.gif" alt="more" /></a></dt>
+    <dd>Listing-related announcements from the PSE Listings Department.</dd>
+  </dl>
+  <ul class="report01">
+<li><a href="#viewer" onclick="openPopup('e51b30ba12f25c2364d70b69f0a3140b');return false;">San Miguel Corporation: Follow-on Offering of Series 2V, 2W, and 2X Preferred Shares – Listing Date and Trading Symbol</a>
+    <span>Jul 30, 2026 12:17 PM</span>
+  </li>
+<li><a href="#viewer" onclick="openPopup('9efac26a702af69964d70b69f0a3140b');return false;">DigiPlus Interactive Corp.: Employee Stock Option Plan – Additional Listing</a>
+    <span>Jul 27, 2026 03:37 PM</span>
+  </li>
+<li><a href="#viewer" onclick="openPopup('b72f80a0465da0c264d70b69f0a3140b');return false;">San Miguel Corporation: Follow-on Offering of Series 2V, 2W, and 2X Preferred Shares – Final Prospectus</a>
+    <span>Jul 15, 2026 10:26 AM</span>
+  </li>
+<li><a href="#viewer" onclick="openPopup('e6491df819f177a464d70b69f0a3140b');return false;">San Miguel Corporation: Follow-on Offering of Series 2V, 2W, and 2X Preferred Shares – Implementing Guidelines for the Reservation and Allocation of the Series 2 Preferred Shares to the TPs through the Joint Issue Managers and the Joint Lead Underwriters and Bookrunners</a>
+    <span>Jul 15, 2026 09:42 AM</span>
+  </li>
+<li><a href="#viewer" onclick="openPopup('71588b259189ab0464d70b69f0a3140b');return false;">[Amend-1]San Miguel Corporation: Follow-on Offering of Series 2V, 2W, and 2X Preferred Shares – Application and Settlement Procedures for Local Small Investors</a>
+    <span>Jul 15, 2026 09:42 AM</span>
+  </li>
+<li><a href="#viewer" onclick="openPopup('22e24e3938a2365164d70b69f0a3140b');return false;">San Miguel Corporation: Follow-on Offering of Series 2V, 2W, and 2X Preferred Shares – Application and Settlement Procedures for Local Small Investors</a>
+    <span>Jul 15, 2026 09:36 AM</span>
+  </li>
+<li><a href="#viewer" onclick="openPopup('c6a94e898d63522464d70b69f0a3140b');return false;">San Miguel Corporation: Follow-on Offering of Series 2V, 2W, and 2X Preferred Shares – Final Terms and Conditions</a>
+    <span>Jul 15, 2026 08:36 AM</span>
+  </li>
+<li><a href="#viewer" onclick="openPopup('b54f77b00efc69cb64d70b69f0a3140b');return false;">AREIT, Inc. – Adjustment of Listed Shares</a>
+    <span>Jul 14, 2026 04:28 PM</span>
+  </li>
+<li><a href="#viewer" onclick="openPopup('70340327d9bfd51864d70b69f0a3140b');return false;">San Miguel Corporation: Follow-on Offering of Series 2V, 2W, and 2X Preferred Shares – Dividend Rates</a>
+    <span>Jul 14, 2026 08:21 AM</span>
+  </li>
+<li><a href="#viewer" onclick="openPopup('1edad4f62032b15664d70b69f0a3140b');return false;">Sun Life Financial Inc. – Adjustment of Listed Shares</a>
+    <span>Jul 13, 2026 05:06 PM</span>
+  </li>
+</ul>
+
+  <!--Disclosure Notices-->
+  <dl class="end"><dt>Disclosure Notices
+    <a href="/disclosureNotices/form.do"><img src="/images/main/icon_more.gif" alt="more" /></a></dt>
+    <dd>Disclosure-related announcements from the PSE Disclosure Department.</dd>
+  </dl>
+  <ul class="end report02">
+<li><a href="#viewer" onclick="openPopup('1054d46804e5834064d70b69f0a3140b');return false;">Publication of Penalties</a>
+    <span>Jul 30, 2026 05:24 PM</span>
+  </li>
+<li><a href="#viewer" onclick="openPopup('e95123fe025fa74264d70b69f0a3140b');return false;">Publication of Penalties</a>
+    <span>Jul 28, 2026 04:58 PM</span>
+  </li>
+<li><a href="#viewer" onclick="openPopup('f5e7dd4b1d1861a164d70b69f0a3140b');return false;">Publication of Penalties</a>
+    <span>Jul 24, 2026 04:26 PM</span>
+  </li>
+<li><a href="#viewer" onclick="openPopup('d7db8c4dc1268cd164d70b69f0a3140b');return false;">Publication of Penalties</a>
+    <span>Jul 22, 2026 05:01 PM</span>
+  </li>
+<li><a href="#viewer" onclick="openPopup('e177ed24811cce1464d70b69f0a3140b');return false;">Publication of Penalties</a>
+    <span>Jul 21, 2026 05:11 PM</span>
+  </li>
+<li><a href="#viewer" onclick="openPopup('5e032d1bfcec2bfb64d70b69f0a3140b');return false;">[Amend-1]X - Compliance with Structured Reportorial Requirements and Lifting of Trading Suspension</a>
+    <span>Jul 20, 2026 05:25 PM</span>
+  </li>
+<li><a href="#viewer" onclick="openPopup('27cb85b9ac136a0e64d70b69f0a3140b');return false;">Publication of Penalties</a>
+    <span>Jul 14, 2026 05:59 PM</span>
+  </li>
+<li><a href="#viewer" onclick="openPopup('da066f898e7c2adb64d70b69f0a3140b');return false;">RRHI - Trading Suspension pursuant to the Amended Rule on Minimum Public Ownership </a>
+    <span>Jul 13, 2026 09:15 AM</span>
+  </li>
+<li><a href="#viewer" onclick="openPopup('37660f334fb8861964d70b69f0a3140b');return false;">Publication of Penalties</a>
+    <span>Jul 09, 2026 04:04 PM</span>
+  </li>
+<li><a href="#viewer" onclick="openPopup('e7cc5e0277b976da64d70b69f0a3140b');return false;">Publication of Penalties</a>
+    <span>Jul 07, 2026 12:14 PM</span>
+  </li>
+</ul>
+  </div>
+</div>
+
+<!--5Most-->
+<div id="most" class="most">
+   <h2>5 Most Viewed Disclosures</h2>
+   <h3>Today</h3>
+   <ul>
+<li><a href="/companyInformation/form.do?cmpy_id=234" style="display:inline;color:#2a6f9d;"><span>BPI</span></a>
+  <a href="#viewer" onclick="openPopup('c361ba0e8e3fac9d64d70b69f0a3140b');return false;">Notice of Analysts&#039;/Investors&#039; Briefing</a>
+  </li>
+<li><a href="/companyInformation/form.do?cmpy_id=118" style="display:inline;color:#2a6f9d;"><span>MER</span></a>
+  <a href="#viewer" onclick="openPopup('b4a264915bb578a064d70b69f0a3140b');return false;">Declaration of Cash Dividends</a>
+  </li>
+<li><a href="/companyInformation/form.do?cmpy_id=685" style="display:inline;color:#2a6f9d;"><span>MREIT</span></a>
+  <a href="#viewer" onclick="openPopup('8cacb7e8e82ec1e264d70b69f0a3140b');return false;">Declaration of Cash Dividends</a>
+  </li>
+<li><a href="/companyInformation/form.do?cmpy_id=16" style="display:inline;color:#2a6f9d;"><span>AEV</span></a>
+  <a href="#viewer" onclick="openPopup('f5932721e880c5c764d70b69f0a3140b');return false;">Material Information/Transactions</a>
+  </li>
+<li><a href="/companyInformation/form.do?cmpy_id=118" style="display:inline;color:#2a6f9d;"><span>MER</span></a>
+  <a href="#viewer" onclick="openPopup('20f90971510cc53a64d70b69f0a3140b');return false;">Press Release</a>
+  </li>
+</ul>
+
+   <h3>This Week</h3>
+   <ul>
+<li><a href="/companyInformation/form.do?cmpy_id=233" style="display:inline;color:#2a6f9d;"><span>ACEN</span></a>
+  <a href="#viewer" onclick="openPopup('f8ba38d74a86f3ef64d70b69f0a3140b');return false;">Press Release</a>
+  </li>
+<li><a href="/companyInformation/form.do?cmpy_id=260" style="display:inline;color:#2a6f9d;"><span>BDO</span></a>
+  <a href="#viewer" onclick="openPopup('87f6473bd063474a64d70b69f0a3140b');return false;">Quarterly Report</a>
+  </li>
+<li><a href="/companyInformation/form.do?cmpy_id=66" style="display:inline;color:#2a6f9d;"><span>BKR</span></a>
+  <a href="#viewer" onclick="openPopup('20114d9c71e74d4864d70b69f0a3140b');return false;">Reply to Inquiry of Unusual Price Movement</a>
+  </li>
+<li><a href="/companyInformation/form.do?cmpy_id=69" style="display:inline;color:#2a6f9d;"><span>GLO</span></a>
+  <a href="#viewer" onclick="openPopup('30d160edc0f2914e64d70b69f0a3140b');return false;">Disbursement of Proceeds and Progress Report</a>
+  </li>
+<li><a href="/companyInformation/form.do?cmpy_id=83" style="display:inline;color:#2a6f9d;"><span>ICT</span></a>
+  <a href="#viewer" onclick="openPopup('b2d9a39540d05bd564d70b69f0a3140b');return false;">Acquisition or Disposition of Shares of Another Corporation</a>
+  </li>
+</ul>
+  </div>
+</div>
+
+<div id="footer">
+<div class="bottom">
+  <ul class="util">
+  <li><a href="/page/disclaimer.do">Disclaimer</a></li>
+  <li><a href="/page/privacyPolicy.do">Privacy Policy</a></li>
+  <li><a href="/page/linkPolicy.do">Link Policy</a></li>
+  <li><a href="/page/siteMap.do">Site Map</a></li>
+  <li><a href="/page/contactUs.do">Contact Us</a></li>
+  <li><a href="/page/faqs.do">FAQs</a></li>
+  </ul>
+  <ul class="social">
+  <li><a href="#rss" onclick="rssPage();return false;"><img src="/images/common/icon_rss.gif" alt="rss" /></a></li>
+  </ul>
+  <ul class="copyright">
+  <li><img src="/images/common/pse_logo.gif" alt="PSE" /></li>
+  <li class="text">
+All materials on this website are protected by copyright and intellectual property laws and are the property of The Philippine Stock Exchange, Inc.<br/>
+Unless stated otherwise, you may access and download the materials located on the website only for personal, non-commercial use. <br/>
+&copy; 2012 The Philippine Stock Exchange, Inc. All Rights Reserved.
+  </li>
+  <li class="qrcode">
+    <a href="http://itunes.apple.com/ph/app/pse-edge/id813302884" target="_new" title="iOS App">
+      <img src="/images/common/icon_ios.png" alt="iOS App" /></a>
+    <a href="http://play.google.com/store/apps/details?id=com.pse.edge" target="_new" title="Android App">
+      <img src="/images/common/icon_android.png" alt="Android App" /></a>
+  </li>
+  </ul>
+</div>
+</div>
+<div id="policy" style="display:none; width:100%; position:fixed; bottom:0px; background-color:#074d90;">
+    <div style="width:89%; color:white; padding:1.4em 0.7em; float:left; font-family: tahoma; font-size: 14px;">
+      The Philippine Stock Exchange Inc. ("PSE") respects and protects your personal data privacy. 
+	    To learn how the PSE processes and protects the confidentiality of any personal 
+	    and sensitive personal information that you may provide, please read carefully, 
+	    and click the “I AGREE” button if you agree to the terms stated in 
+	    <a href="/page/privacyPolicy" style="text-decoration:underline; color:yellow">PSE's Privacy Policy</a>.
+    
+    </div>
+    <div id="agree_button" style="text-align:center; border-radius:10px; background-color:#82ccdd; border-color:transparent; margin:1.4em 0; padding:0.7em; float:left; font-weight:700; font-size:16px">
+        <a href="" style="color:white; padding:7px 7px">I Agree</a>
+    </div>
+</div>
+<script type="text/javascript">
+$(document).ready(function(){
+	
+	if(getCookie('access')=='approve') {
+		$('#policy').css('display', 'none');
+	} else {
+		$('#policy').css('display', 'block');
+	}
+	
+});
+
+$('#agree_button').on('click', function(){
+    setCookie('access', 'approve', '-1');
+    $('#policy').hide();
+});
+
+function setCookie(cookie_name, value, days) {
+    var exdate = new Date();
+    exdate.setDate(exdate.getDate() + days);
+    // 설정 일수만큼 현재시간에 만료값으로 지정
+
+    var cookie_value = escape(value) + ((days == null) ? '' : ';    expires=' + exdate.toUTCString()) + ';    path=/';
+    document.cookie = cookie_name + '=' + cookie_value;
+}
+
+function getCookie(cookie_name) {
+    var x, y;
+    var val = document.cookie.split(';');
+
+    for (var i = 0; i < val.length; i++) {
+        x = val[i].substr(0, val[i].indexOf('='));
+        y = val[i].substr(val[i].indexOf('=') + 1);
+        x = x.replace(/^\s+|\s+$/g, ''); // 앞과 뒤의 공백 제거하기
+        if (x == cookie_name) {
+            return unescape(y); // unescape로 디코딩 후 값 리턴
+        }
+    }
+}
+
+
+</script>
+<form id="addInfoForm" name="addInfoForm" onsubmit="return false;"></form>
+</body>
+</html>

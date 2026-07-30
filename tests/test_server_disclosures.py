@@ -240,6 +240,11 @@ async def test_tool_surface_is_stable():
         "search_disclosures": [],
         "search_disclosure_fulltext": ["keyword"],
         "get_disclosure": ["edge_no"],
+        "get_company_profile": ["symbol"],
+        "get_financial_highlights": ["symbol"],
+        "get_dividends_and_rights": ["symbol"],
+        "get_indices": [],
+        "get_market_summary": [],
     }
     # Descriptions come from the docstrings and are how the model picks a tool.
     assert all(t.description for t in tools)

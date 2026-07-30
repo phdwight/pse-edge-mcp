@@ -232,3 +232,37 @@ class PseEdgeClient:
         """GET /openDiscViewer.do — disclosure detail page (metadata + attachment ids)."""
         resp = await self._get("/openDiscViewer.do", edge_no=edge_no)
         return resp.text
+
+    # ---- company info & market (Phase 3) -----------------------------------
+
+    async def fetch_company_information(self, company_id: str) -> str:
+        """GET /companyInformation/form.do — profile page (th/td label rows)."""
+        resp = await self._get("/companyInformation/form.do", cmpy_id=company_id)
+        return resp.text
+
+    async def fetch_financial_reports(self, company_id: str) -> str:
+        """GET /companyPage/financial_reports_view.do — annual + quarterly statements."""
+        resp = await self._get("/companyPage/financial_reports_view.do", cmpy_id=company_id)
+        return resp.text
+
+    async def fetch_dividends_or_rights(self, company_id: str, kind: str) -> str:
+        """POST /companyPage/dividends_and_rights_list.ax (form dialect).
+
+        The `dividends_and_rights_form.do` page is only a shell — it holds no data and
+        posts here for each tab. `DividendsOrRights` travels in the QUERY STRING while
+        `cmpy_id` goes in the form body, which is how the page's own goTab() does it.
+        `kind` is "Dividends" or "Rights", capitalised as Edge expects.
+        """
+        return await self._post_form(
+            f"/companyPage/dividends_and_rights_list.ax?DividendsOrRights={kind}",
+            {"cmpy_id": company_id},
+        )
+
+    async def fetch_homepage(self) -> str:
+        """GET / — indices and the market-wide feeds are server-rendered here.
+
+        No AJAX feed exists for indices (verified Phase 0), so the homepage itself is the
+        source for both get_indices and get_market_summary. One fetch serves both.
+        """
+        resp = await self._get("/")
+        return resp.text

@@ -1,0 +1,461 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>Financial Reports</title>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+<meta http-equiv="X-UA-Compatible" content="IE=edge" />
+<script src="/js/lib/jquery-1.10.2.min.js"></script>
+<script src="/js/lib/jquery-ui-1.10.3.min.js"></script>
+<script src="/js/lib/jquery.blockUI.js"></script>
+<!-- <script src="/js/lib/jquery.selectbox-0.2.js"></script> -->
+<script src="/js/lib/jquery.ezmark.js"></script>
+<script src="/js/lib/jquery.cycle.js"></script>
+<script src="/js/common/epCommon.js?version=20220325"></script>
+<script src="/js/common/epPopup.js"></script>
+<!--script src="http://steema.us/files/jscript/src/teechart.js" type="text/javascript"></script -->
+<script src="/js/teechart/teechart.js"></script>
+<script src="/js/teechart/teechart-table.js"></script>  
+<script src="/js/teechart/teechart-extras.js"></script>
+<script src="/js/teechart/teechart-data.js"></script>
+<script src="/js/teechart/date.format.js"></script>
+<link href="/js/lib/themes/base/jquery-ui.css" rel="stylesheet" />
+<!-- <link href="/js/lib/themes/jquery.selectbox.css" rel="stylesheet" /> -->
+<link href="/js/lib/themes/jquery.ezmark.css" rel="stylesheet" />
+<link href="/css/common.css" type="text/css" rel="stylesheet" />
+<link href="/css/contents.css?version=20220601" type="text/css" rel="stylesheet" />
+</head>
+<body><a href="https://edge.pse.com.ph/cdn-cgi/content?id=BapB.DBvM6CO3sNds.NxwKcdnhGXITHzgk1D.at_u.E-1785406349.7382522-1.2.1.1-BHtR7n0VoWucyX4hTLuh.4da5wYFXEeQRr7kBeweWwQ" aria-hidden="true" rel="nofollow noopener" style="display: none !important; visibility: hidden !important"></a>
+<script type="text/javascript">
+$(function() {
+  $("#searchKeyTop").autocomplete({
+    minLength: 1,
+    source: "/autoComplete/searchCompanyNameSymbol.ax",
+    focus: function(event, ui) {
+      //$("#searchKeyTop").val(ui.item.cmpyNm);
+      return false;
+    },
+    select: function(event, ui) {
+      location.href = "/companyInformation/form.do?cmpy_id=" + ui.item.cmpyId;
+      return false;
+    }
+  })
+  .data("ui-autocomplete")._renderItem = function(ul, item) {
+    return $("<li>").append("<a><div class='nm'>" + item.cmpyNm + "</div><span class='sym'>" + item.symbol + "</span></a>").appendTo(ul);
+  };
+});
+</script>
+<div id="header">
+  <div id="top">
+  <h1><a href="/"><img src="/images/common/top_logo.png" alt="PSE Edge"/></a></h1>
+  <fieldset class="totalSearch">
+    <form id="frmTop" onsubmit="return false;">
+    <input type="text" class="topSearch" id="searchKeyTop" value="" title="Type in company name or security code" />
+    <p><a href="/keyword/form.do"><img src="/images/main/advanced_search.png" alt="Advanced Search" /></a></p>
+    </form>
+  </fieldset>
+</div><ul id="topNav">
+    <li><a href="/companyDirectory/form.do"><img src="/images/common/top_company.png" alt="Company List" /></a></li>
+    <li><a href="/disclosureData/listing_applicants_list.do"><img src="/images/common/top_listing.png" alt="Listing Applicants" /></a></li>
+    <li><a href="/disclosureData/watchlist_view.do"><img src="/images/common/top_watch.png" alt="Watch List" /></a></li>
+    <li><a href="/psei/form.do"><img src="/images/common/top_psei.png" alt="PSEi" /></a></li>
+    <li><a href="/disclosureData/etf_form.do"><img src="/images/common/top_etf.png" alt="ETF" /></a></li>
+    <li class="about"><a href="/page/aboutPseEdge.do"><img src="/images/common/top_about.png" alt="About PSE EDGE" /></a></li>
+  </ul>
+</div>
+<div id="wrapper">
+  <div id="side">
+    <ul>
+    <li class="menu01"><a href="#" onclick="return false;">Company Disclosures</a></li>
+    <li class="sub1">
+      <ul class="sub">
+      <li class="sub101"><a href="/announcements/form.do">Company Announcements</a></li>
+      <li class="sub102"><a href="/financialReports/form.do">Financial Reports</a></li>
+      <li class="sub103"><a href="/otherReports/form.do">Other Reports</a></li>
+      </ul>
+    </li>
+    <li class="menu02"><a href="/index/form.do">Index Summary</a></li>
+    <li class="menu03"><a href="/disclosureData/dividends_and_rights_info_form.do">Dividends and Rights</a></li>
+    <li class="menu04"><a href="/disclosureData/halts_and_suspensions_list.do">Halts and Suspensions</a></li>
+    <li class="menu05"><a href="#" onclick="return false;">Exchange Notices</a></li>
+    <li class="sub5">
+      <ul class="sub">
+      <li class="sub501"><a href="/disclosureNotices/form.do">Disclosure Notices</a></li>
+      <li class="sub502"><a href="/listingNotices/form.do">Listing Notices</a></li>
+      </ul>
+    </li>
+    <li class="menu06"><a href="/companyPage/marketCalendar.do">Market Calendar</a></li>
+    </ul>
+  </div>
+
+  <div id="contents">
+  <h2>Financial Reports</h2>
+  <p class="location">Home > Company List > Financial Reports</p>
+  <ul class="companyTab">
+<li style="width:90px;"><a href="/companyPage/stockData.do?cmpy_id=599" >Stock Data</a></li>
+<li style="width:140px;"><a href="/companyInformation/form.do?cmpy_id=599" >Company Information</a></li>
+<li style="width:160px;"><a href="/companyPage/directors_and_management_list.do?cmpy_id=599" >Directors and Management</a></li>
+<li style="width:125px;"><a href="/companyPage/financial_reports_view.do?cmpy_id=599" class="select">Financial Reports</a></li>
+<li style="width:135px;"><a href="/companyDisclosures/form.do?cmpy_id=599" >Company Disclosures</a></li>
+<li style="width:138px;" class="end"><a href="/companyPage/dividends_and_rights_form.do?cmpy_id=599" >Dividends and Rights</a></li>
+</ul><div class="compInfo">
+  <p style="margin-top:0px;">SM Investments Corporation</p>
+  </div>
+
+<p class="textCont" style="margin-top:0;margin-bottom:0;font-size:1em;">
+Information in this page will become available upon submission of the Company of its latest financial statements.
+To view previous financial statements of the Company, kindly proceed to the Company's page in the PSE Main website
+(<a href="http://www.pse.com.ph/" target="_new">http://www.pse.com.ph</a>).
+</p>
+
+<h3>Annual</h3>
+
+<p class="textCont" style="margin-top:0;margin-bottom:0;font-size:1em;">
+For the fiscal year ended : Dec 31, 2025<br>
+Currency(and units, if applicable) :  Php (in thousands)</p>
+
+
+<table class="view">
+<caption>Balance Sheet</caption>
+<colgroup>
+  <col width="24%"/>
+  <col width="38%"/>
+  <col width="38%"/>
+</colgroup>
+<tr>
+  <th>Item</th>
+  <th class="alignC">Current Year</th>
+  <th class="alignC">Previous Year</th>
+</tr>
+<tr>
+  <th>Current Assets</th>
+  <td class="alignR">361,402</td>
+  <td class="alignR">383,800</td>
+</tr>
+<tr>
+  <th>Total Assets</th>
+  <td class="alignR">1,811,801</td>
+  <td class="alignR">1,699,052</td>
+</tr>
+<tr>
+  <th>Current Liabilities</th>
+  <td class="alignR">337,254</td>
+  <td class="alignR">343,168</td>
+</tr>
+<tr>
+  <th>Total Liabilities</th>
+  <td class="alignR">856,166</td>
+  <td class="alignR">832,627</td>
+</tr>
+<tr>
+  <th>Retained Earnings/(Deficit)</th>
+  <td class="alignR">627,230</td>
+  <td class="alignR">551,901</td>
+</tr>
+<tr>
+  <th>Stockholders' Equity</th>
+  <td class="alignR">955,635</td>
+  <td class="alignR">866,425</td>
+</tr>
+<tr>
+  <th>Stockholders' Equity - Parent</th>
+  <td class="alignR">695,258</td>
+  <td class="alignR">627,304</td>
+</tr>
+<tr>
+  <th>Book Value Per Share</th>
+  <td class="alignR">572.3</td>
+  <td class="alignR">513.3</td>
+</tr>
+</table>
+
+<table class="view">
+<caption>Income Statement</caption>
+<colgroup>
+  <col width="24%"/>
+  <col width="38%"/>
+  <col width="38%"/>
+</colgroup>
+<tr>
+  <th>Item</th>
+  <th class="alignC">Current Year</th>
+  <th class="alignC">Previous Year</th>
+</tr>
+<tr>
+  <th>Gross Revenue</th>
+  <td class="alignR">681,733</td>
+  <td class="alignR">654,777</td>
+</tr>
+<tr>
+  <th>Gross Expense</th>
+  <td class="alignR">521,380</td>
+  <td class="alignR">502,951</td>
+</tr>
+<tr>
+  <th>Income/(Loss) Before Tax</th>
+  <td class="alignR">142,763</td>
+  <td class="alignR">132,911</td>
+</tr>
+<tr>
+  <th>Net Income/(Loss) After Tax</th>
+  <td class="alignR">123,772</td>
+  <td class="alignR">114,653</td>
+</tr>
+<tr>
+  <th>Net Income/(Loss) Attributable to Parent</th>
+  <td class="alignR">90,482</td>
+  <td class="alignR">82,609</td>
+</tr>
+<tr>
+  <th>Earnings/(Loss) Per Share (Basic)</th>
+  <td class="alignR">74.16</td>
+  <td class="alignR">67.60</td>
+</tr>
+<tr>
+  <th>Earnings/(Loss) Per Share (Diluted)</th>
+  <td class="alignR">74.16</td>
+  <td class="alignR">67.60</td>
+</tr>
+</table>
+
+<h3>Quarterly</h3>
+
+<p class="textCont" style="margin-top:0;margin-bottom:0;font-size:1em;">
+For the period ended : Mar 31, 2026<br>
+Currency(and units, if applicable) : Php (in Millions)</p>
+
+<table class="view">
+<caption>Balance Sheet</caption>
+<colgroup>
+  <col width="24%"/>
+  <col width="38%"/>
+  <col width="38%"/>
+</colgroup>
+<tr>
+  <th>Item</th>
+  <th class="alignC">Period Ended</th>
+  <th class="alignC">Fiscal Year Ended(Audited)</th>
+</tr>
+<tr>
+  <th>Current Assets</th>
+  <td class="alignR">360,287</td>
+  <td class="alignR">361,402</td>
+</tr>
+<tr>
+  <th>Total Assets</th>
+  <td class="alignR">1,826,789</td>
+  <td class="alignR">1,811,801</td>
+</tr>
+<tr>
+  <th>Current Liabilities</th>
+  <td class="alignR">320,597</td>
+  <td class="alignR">337,254</td>
+</tr>
+<tr>
+  <th>Total Liabilities</th>
+  <td class="alignR">853,517</td>
+  <td class="alignR">856,166</td>
+</tr>
+<tr>
+  <th>Retained Earnings/(Deficit)</th>
+  <td class="alignR">648,743</td>
+  <td class="alignR">627,230</td>
+</tr>
+<tr>
+  <th>Stockholders' Equity</th>
+  <td class="alignR">973,272</td>
+  <td class="alignR">955,635</td>
+</tr>
+<tr>
+  <th>Stockholders' Equity - Parent</th>
+  <td class="alignR">708,884</td>
+  <td class="alignR">695,258</td>
+</tr>
+<tr>
+  <th>Book Value Per Share</th>
+  <td class="alignR">585.01</td>
+  <td class="alignR">572.26</td>
+</tr>
+</table>
+
+<table class="view">
+<caption>Income Statement</caption>
+<colgroup>
+  <col width="24%"/>
+  <col width="19%"/>
+  <col width="19%"/>
+  <col width="19%"/>
+  <col width="19%"/>
+</colgroup>
+<tr>
+  <th>Item</th>
+  <th class="alignC">Current Year (3 Months)</th>
+  <th class="alignC">Previous Year (3 Months)</th>
+  <th class="alignC">Current Year-To-Date</th>
+  <th class="alignC">Previous Year-To-Date</th>
+</tr>
+<tr>
+  <th>Gross Revenue</th>
+  <td class="alignR">159,405</td>
+  <td class="alignR">152,014</td>
+  <td class="alignR">159,405</td>
+  <td class="alignR">152,014</td>
+</tr>
+<tr>
+  <th>Gross Expense</th>
+  <td class="alignR">121,003</td>
+  <td class="alignR">115,960</td>
+  <td class="alignR">121,003</td>
+  <td class="alignR">115,960</td>
+</tr>
+<tr>
+  <th>Income/(Loss) Before Tax</th>
+  <td class="alignR">33,306</td>
+  <td class="alignR">31,551</td>
+  <td class="alignR">33,306</td>
+  <td class="alignR">31,551</td>
+</tr>
+<tr>
+  <th>Net Income/(Loss) After Tax</th>
+  <td class="alignR">29,189</td>
+  <td class="alignR">27,606</td>
+  <td class="alignR">29,189</td>
+  <td class="alignR">27,606</td>
+</tr>
+<tr>
+  <th>Net Income/(Loss) Attributable to Parent</th>
+  <td class="alignR">21,513</td>
+  <td class="alignR">20,055</td>
+  <td class="alignR">21,513</td>
+  <td class="alignR">20,055</td>
+</tr>
+<tr>
+  <th>Earnings/(Loss) Per Share (Basic)</th>
+  <td class="alignR">17.72</td>
+  <td class="alignR">16.41</td>
+  <td class="alignR">17.72</td>
+  <td class="alignR">16.41</td>
+</tr>
+<tr>
+  <th>Earnings/(Loss) Per Share (Diluted)</th>
+  <td class="alignR">17.72</td>
+  <td class="alignR">16.41</td>
+  <td class="alignR">17.72</td>
+  <td class="alignR">16.41</td>
+</tr>
+</table>
+</div>
+</div>
+
+<div id="footer">
+<div class="bottom">
+  <ul class="util">
+  <li><a href="/page/disclaimer.do">Disclaimer</a></li>
+  <li><a href="/page/privacyPolicy.do">Privacy Policy</a></li>
+  <li><a href="/page/linkPolicy.do">Link Policy</a></li>
+  <li><a href="/page/siteMap.do">Site Map</a></li>
+  <li><a href="/page/contactUs.do">Contact Us</a></li>
+  <li><a href="/page/faqs.do">FAQs</a></li>
+  </ul>
+  <ul class="social">
+  <li><a href="#rss" onclick="rssPage();return false;"><img src="/images/common/icon_rss.gif" alt="rss" /></a></li>
+  </ul>
+  <ul class="copyright">
+  <li><img src="/images/common/pse_logo.gif" alt="PSE" /></li>
+  <li class="text">
+All materials on this website are protected by copyright and intellectual property laws and are the property of The Philippine Stock Exchange, Inc.<br/>
+Unless stated otherwise, you may access and download the materials located on the website only for personal, non-commercial use. <br/>
+&copy; 2012 The Philippine Stock Exchange, Inc. All Rights Reserved.
+  </li>
+  <li class="qrcode">
+    <a href="http://itunes.apple.com/ph/app/pse-edge/id813302884" target="_new" title="iOS App">
+      <img src="/images/common/icon_ios.png" alt="iOS App" /></a>
+    <a href="http://play.google.com/store/apps/details?id=com.pse.edge" target="_new" title="Android App">
+      <img src="/images/common/icon_android.png" alt="Android App" /></a>
+  </li>
+  </ul>
+</div>
+</div>
+<div id="policy" style="display:none; width:100%; position:fixed; bottom:0px; background-color:#074d90;">
+    <div style="width:89%; color:white; padding:1.4em 0.7em; float:left; font-family: tahoma; font-size: 14px;">
+      The Philippine Stock Exchange Inc. ("PSE") respects and protects your personal data privacy. 
+	    To learn how the PSE processes and protects the confidentiality of any personal 
+	    and sensitive personal information that you may provide, please read carefully, 
+	    and click the “I AGREE” button if you agree to the terms stated in 
+	    <a href="/page/privacyPolicy" style="text-decoration:underline; color:yellow">PSE's Privacy Policy</a>.
+    
+    </div>
+    <div id="agree_button" style="text-align:center; border-radius:10px; background-color:#82ccdd; border-color:transparent; margin:1.4em 0; padding:0.7em; float:left; font-weight:700; font-size:16px">
+        <a href="" style="color:white; padding:7px 7px">I Agree</a>
+    </div>
+</div>
+<script type="text/javascript">
+$(document).ready(function(){
+	
+	if(getCookie('access')=='approve') {
+		$('#policy').css('display', 'none');
+	} else {
+		$('#policy').css('display', 'block');
+	}
+	
+});
+
+$('#agree_button').on('click', function(){
+    setCookie('access', 'approve', '-1');
+    $('#policy').hide();
+});
+
+function setCookie(cookie_name, value, days) {
+    var exdate = new Date();
+    exdate.setDate(exdate.getDate() + days);
+    // 설정 일수만큼 현재시간에 만료값으로 지정
+
+    var cookie_value = escape(value) + ((days == null) ? '' : ';    expires=' + exdate.toUTCString()) + ';    path=/';
+    document.cookie = cookie_name + '=' + cookie_value;
+}
+
+function getCookie(cookie_name) {
+    var x, y;
+    var val = document.cookie.split(';');
+
+    for (var i = 0; i < val.length; i++) {
+        x = val[i].substr(0, val[i].indexOf('='));
+        y = val[i].substr(val[i].indexOf('=') + 1);
+        x = x.replace(/^\s+|\s+$/g, ''); // 앞과 뒤의 공백 제거하기
+        if (x == cookie_name) {
+            return unescape(y); // unescape로 디코딩 후 값 리턴
+        }
+    }
+}
+
+
+</script>
+<script type="text/javascript">
+  var left = 'no';
+  var topNav = 'no';
+
+  $('#topNav a:eq('+topNav+')').addClass("select");
+  $('.'+left).find('a:first').addClass("select");
+
+  if (left.indexOf("sub1") == 0){
+    $('.sub1').css("display", "inline");
+  } else if (left.indexOf("sub5") == 0){
+    $('.sub5').css("display", "inline");
+  }
+
+  $(".menu01").click(function(){
+    if ($(".sub1").css("display") == "none") {
+      $(".sub1").css("display", "inline");
+    } else {
+      $(".sub1").css("display", "none");
+    }
+  });
+  $(".menu05").click(function(){
+    if ($(".sub5").css("display") == "none") {
+      $(".sub5").css("display", "inline");
+    } else {
+      $(".sub5").css("display", "none");
+    }
+  });
+</script>
+</body>
+</html>

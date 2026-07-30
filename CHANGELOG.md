@@ -6,6 +6,22 @@ Format: [Keep a Changelog](https://keepachangelog.com/) · Versioning: [SemVer](
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-07-30
+
+### Added
+- Phase 3 company & market tools: `get_company_profile`, `get_financial_highlights`, `get_dividends_and_rights`, `get_indices`, `get_market_summary` (11 tools total).
+- Five recorded fixtures and 19 new tests (109 total), covering both real captures and the empty/unfiled cases.
+- `CompanyInfoRepository` and `MarketRepository`, plus `CompanyInfoSource`/`MarketSource` protocols — Phase 3 added no orchestration to `server.py`, which is what the Phase 2 refactor was for.
+
+### Changed
+- `get_indices` and `get_market_summary` share one cached homepage fetch, so asking for both costs PSE Edge a single request.
+- `docs/endpoints.md` v4 documents the company-info and market endpoints, replacing the "parse TBD" stubs.
+
+### Fixed
+- Financial figures are passed through verbatim and never rescaled: Edge's units labels contradict each other between the annual (`Php (in thousands)`) and quarterly (`Php (in Millions)`) sections, with the same figure appearing under both. Each period reports its own `currency_units`, and the tool tells the model to check it before quoting a number.
+- Index `change`/`change_percent` are signed. Edge prints them unsigned and encodes direction only in a CSS colour and a ▲/▼ glyph, so a naive parse would report every decline as a gain — PSEi printed `47.29` on a day it fell 47.29.
+- `parse_financial_reports` and `parse_market_summary` walk `tree.root.traverse` for true document order. `Node.iter()` sees no nested nodes, and a comma CSS selector returns matches grouped by selector, which filed all four financial statements under the last heading and left the annual section empty.
+
 ## [0.2.1] - 2026-07-30
 
 ### Fixed

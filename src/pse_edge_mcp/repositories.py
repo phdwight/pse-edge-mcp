@@ -25,24 +25,46 @@ from typing import Any, Literal
 from .errors import InvalidArgumentError, SymbolNotFoundError
 from .models import (
     CompanyHit,
+    CompanyProfile,
     DisclosureDetail,
     DisclosureHit,
     DisclosureSearchResult,
+    DividendRecord,
+    DividendsAndRights,
+    FeedItem,
+    FinancialHighlights,
+    FinancialPeriod,
+    IndexQuote,
     KeywordHit,
     KeywordSearchResult,
+    MarketIndices,
+    MarketSummary,
     OhlcBar,
     PriceHistory,
+    RightsRecord,
     StockQuote,
 )
 from .parsers import (
     parse_chart_date,
+    parse_company_profile,
     parse_disclosure_table,
     parse_disclosure_viewer,
+    parse_dividends,
+    parse_financial_reports,
+    parse_indices,
     parse_keyword_results,
+    parse_market_summary,
+    parse_rights,
     parse_stock_data_page,
 )
 from .service import FrozenCache, Served
-from .sources import CompanySource, DisclosureSource, QuoteSource
+from .sources import (
+    CompanyInfoSource,
+    CompanySource,
+    DisclosureSource,
+    MarketSource,
+    QuoteSource,
+)
 
 SearchSource = Literal["announcements", "company_disclosures"]
 
@@ -286,3 +308,115 @@ class DisclosureRepository:
     def _absolute(self, path: str | None) -> str | None:
         """Parsers emit site-relative paths; callers outside this process need absolute."""
         return f"{self._base_url}{path}" if path else None
+
+
+class CompanyInfoRepository:
+    """Profile, financial highlights, and dividends/rights for one company."""
+
+    def __init__(
+        self, source: CompanyInfoSource, companies: CompanyRepository, cache: FrozenCache
+    ) -> None:
+        self._source = source
+        self._companies = companies
+        self._cache = cache
+
+    async def profile(self, symbol: str) -> Served[CompanyProfile]:
+        company = await self._companies.resolve(symbol)
+        company_id = company.value.company_id
+        served = await self._cache.get(
+            f"company_info:{company_id}",
+            lambda: self._source.fetch_company_information(company_id),
+        )
+
+        def build(html: str) -> CompanyProfile:
+            parsed = parse_company_profile(html)
+            parsed["company_id"] = company_id
+            # The profile page's own header is thinner than autocomplete's JSON.
+            parsed["company_name"] = parsed.get("company_name") or company.value.name
+            return CompanyProfile(**parsed)
+
+        return served.map(build)
+
+    async def financials(self, symbol: str) -> Served[FinancialHighlights]:
+        company = await self._companies.resolve(symbol)
+        company_id = company.value.company_id
+        served = await self._cache.get(
+            f"financials:{company_id}",
+            lambda: self._source.fetch_financial_reports(company_id),
+        )
+
+        def build(html: str) -> FinancialHighlights:
+            parsed = parse_financial_reports(html)
+            return FinancialHighlights(
+                company_id=company_id,
+                company_name=company.value.name,
+                periods=[FinancialPeriod(**period) for period in parsed["periods"]],
+                note=parsed["note"],
+            )
+
+        return served.map(build)
+
+    async def dividends_and_rights(self, symbol: str) -> Served[DividendsAndRights]:
+        """Two upstream calls: the page is a shell with a tab per kind.
+
+        Both go through the freeze cache under their own keys, so a repeat request costs
+        PSE Edge nothing, and the pair is combined into one result for the caller.
+        """
+        company = await self._companies.resolve(symbol)
+        company_id = company.value.company_id
+
+        dividends = await self._cache.get(
+            f"dividends:{company_id}",
+            lambda: self._source.fetch_dividends_or_rights(company_id, "Dividends"),
+        )
+        rights = await self._cache.get(
+            f"rights:{company_id}",
+            lambda: self._source.fetch_dividends_or_rights(company_id, "Rights"),
+        )
+
+        combined = DividendsAndRights(
+            company_id=company_id,
+            dividends=[DividendRecord(**r) for r in parse_dividends(dividends.value)],
+            rights=[RightsRecord(**r) for r in parse_rights(rights.value)],
+        )
+        # Report the older of the two fetches, so freshness is never overstated.
+        meta = dividends.meta if dividends.meta.as_of <= rights.meta.as_of else rights.meta
+        return Served(value=combined, meta=meta)
+
+
+class MarketRepository:
+    """Market-wide indices and the homepage summary.
+
+    Both come off the same server-rendered homepage, cached under one key, so asking for
+    indices and then the summary costs a single upstream fetch.
+    """
+
+    HOMEPAGE_KEY = "homepage"
+
+    def __init__(self, source: MarketSource, cache: FrozenCache) -> None:
+        self._source = source
+        self._cache = cache
+
+    async def _homepage(self) -> Served[str]:
+        return await self._cache.get(self.HOMEPAGE_KEY, lambda: self._source.fetch_homepage())
+
+    async def indices(self) -> Served[MarketIndices]:
+        served = await self._homepage()
+        return served.map(
+            lambda html: MarketIndices(indices=[IndexQuote(**row) for row in parse_indices(html)])
+        )
+
+    async def summary(self) -> Served[MarketSummary]:
+        served = await self._homepage()
+
+        def build(html: str) -> MarketSummary:
+            parsed = parse_market_summary(html)
+            return MarketSummary(
+                indices=[IndexQuote(**row) for row in parsed["indices"]],
+                feeds={
+                    label: [FeedItem(**item) for item in items]
+                    for label, items in parsed["feeds"].items()
+                },
+            )
+
+        return served.map(build)
