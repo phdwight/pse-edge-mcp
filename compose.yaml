@@ -1,0 +1,38 @@
+# Compose v2 spec (no legacy `version:` key).
+# `docker compose up` -> full dev stack (server on :8000 + Postgres 18).
+name: pse-edge-mcp
+
+services:
+  app:
+    build: .
+    ports:
+      - "8000:8000"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DATABASE_URL: postgresql+asyncpg://pse:${POSTGRES_PASSWORD:-pse-dev-only}@db:5432/pse_edge
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+
+  db:
+    image: postgres:18
+    environment:
+      POSTGRES_USER: pse
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-pse-dev-only}
+      POSTGRES_DB: pse_edge
+    volumes:
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pse -d pse_edge"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  pgdata:

@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.14"
+      - run: uv sync --all-extras
+      - run: uv run ruff check .
+      - run: uv run pytest -q
+
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build -t pse-edge-mcp:ci .
+      - name: Enforce image size budget (<200MB)
+        run: |
+          SIZE=$(docker image inspect pse-edge-mcp:ci --format '{{.Size}}')
+          echo "Image size: $((SIZE / 1024 / 1024)) MB"
+          test "$SIZE" -lt $((200 * 1024 * 1024))
+      - name: Scan image for secrets & vulns
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: pse-edge-mcp:ci
+          scanners: secret
+          exit-code: "1"

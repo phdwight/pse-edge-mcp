@@ -1,0 +1,18 @@
+# Keep the build context minimal and secret-free.
+.git
+.github
+.env*
+!.env.example
+tests
+docs
+**/__pycache__
+**/*.pyc
+.venv
+.pytest_cache
+.mypy_cache
+.ruff_cache
+compose*.yaml
+Dockerfile
+CHANGELOG.md
+*.md
+!README.md

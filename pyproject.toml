@@ -1,0 +1,66 @@
+[project]
+name = "pse-edge-mcp"
+version = "0.1.0"
+description = "MCP server exposing Philippine Stock Exchange (PSE Edge) data — quotes, price history, disclosures, and more"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.14"
+authors = [{ name = "Dwight" }]
+keywords = ["mcp", "pse", "philippine-stock-exchange", "stocks", "finance"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Office/Business :: Financial :: Investment",
+]
+dependencies = [
+    "mcp>=1.2.0",
+    "httpx>=0.28.0",
+    "pydantic>=2.10.0",
+    "selectolax>=0.3.27",
+    "tenacity>=9.0.0",
+]
+
+[project.optional-dependencies]
+postgres = [
+    "sqlalchemy[asyncio]>=2.0.36",
+    "asyncpg>=0.30.0",
+    "alembic>=1.14.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3.0",
+    "pytest-asyncio>=0.25.0",
+    "respx>=0.22.0",
+    "ruff>=0.8.0",
+    "mypy>=1.13.0",
+]
+
+[project.scripts]
+pse-edge-mcp = "pse_edge_mcp.__main__:main"
+
+[project.urls]
+Homepage = "https://github.com/phdwight/pse-edge-mcp"
+Issues = "https://github.com/phdwight/pse-edge-mcp/issues"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pse_edge_mcp"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py314"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "ASYNC"]
+
+[tool.mypy]
+strict = true
+python_version = "3.14"
