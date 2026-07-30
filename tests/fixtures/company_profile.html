@@ -1,0 +1,300 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>Company Information</title>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+<meta http-equiv="X-UA-Compatible" content="IE=edge" />
+<script src="/js/lib/jquery-1.10.2.min.js"></script>
+<script src="/js/lib/jquery-ui-1.10.3.min.js"></script>
+<script src="/js/lib/jquery.blockUI.js"></script>
+<!-- <script src="/js/lib/jquery.selectbox-0.2.js"></script> -->
+<script src="/js/lib/jquery.ezmark.js"></script>
+<script src="/js/lib/jquery.cycle.js"></script>
+<script src="/js/common/epCommon.js?version=20220325"></script>
+<script src="/js/common/epPopup.js"></script>
+<!--script src="http://steema.us/files/jscript/src/teechart.js" type="text/javascript"></script -->
+<script src="/js/teechart/teechart.js"></script>
+<script src="/js/teechart/teechart-table.js"></script>  
+<script src="/js/teechart/teechart-extras.js"></script>
+<script src="/js/teechart/teechart-data.js"></script>
+<script src="/js/teechart/date.format.js"></script>
+<link href="/js/lib/themes/base/jquery-ui.css" rel="stylesheet" />
+<!-- <link href="/js/lib/themes/jquery.selectbox.css" rel="stylesheet" /> -->
+<link href="/js/lib/themes/jquery.ezmark.css" rel="stylesheet" />
+<link href="/css/common.css" type="text/css" rel="stylesheet" />
+<link href="/css/contents.css?version=20220601" type="text/css" rel="stylesheet" />
+</head>
+<body><a href="https://edge.pse.com.ph/cdn-cgi/content?id=57X4BxpsFECS2rmXx0_ShvF8J.cJaWkszsScZfeOpdY-1785406346.3737388-1.2.1.1-yWwC8KLvILNiYZ8Pbf8O9lNAgzFGqXZM7ycj81b8YMI" aria-hidden="true" rel="nofollow noopener" style="display: none !important; visibility: hidden !important"></a>
+<script type="text/javascript">
+$(function() {
+  $("#searchKeyTop").autocomplete({
+    minLength: 1,
+    source: "/autoComplete/searchCompanyNameSymbol.ax",
+    focus: function(event, ui) {
+      //$("#searchKeyTop").val(ui.item.cmpyNm);
+      return false;
+    },
+    select: function(event, ui) {
+      location.href = "/companyInformation/form.do?cmpy_id=" + ui.item.cmpyId;
+      return false;
+    }
+  })
+  .data("ui-autocomplete")._renderItem = function(ul, item) {
+    return $("<li>").append("<a><div class='nm'>" + item.cmpyNm + "</div><span class='sym'>" + item.symbol + "</span></a>").appendTo(ul);
+  };
+});
+</script>
+<div id="header">
+  <div id="top">
+  <h1><a href="/"><img src="/images/common/top_logo.png" alt="PSE Edge"/></a></h1>
+  <fieldset class="totalSearch">
+    <form id="frmTop" onsubmit="return false;">
+    <input type="text" class="topSearch" id="searchKeyTop" value="" title="Type in company name or security code" />
+    <p><a href="/keyword/form.do"><img src="/images/main/advanced_search.png" alt="Advanced Search" /></a></p>
+    </form>
+  </fieldset>
+</div><ul id="topNav">
+    <li><a href="/companyDirectory/form.do"><img src="/images/common/top_company.png" alt="Company List" /></a></li>
+    <li><a href="/disclosureData/listing_applicants_list.do"><img src="/images/common/top_listing.png" alt="Listing Applicants" /></a></li>
+    <li><a href="/disclosureData/watchlist_view.do"><img src="/images/common/top_watch.png" alt="Watch List" /></a></li>
+    <li><a href="/psei/form.do"><img src="/images/common/top_psei.png" alt="PSEi" /></a></li>
+    <li><a href="/disclosureData/etf_form.do"><img src="/images/common/top_etf.png" alt="ETF" /></a></li>
+    <li class="about"><a href="/page/aboutPseEdge.do"><img src="/images/common/top_about.png" alt="About PSE EDGE" /></a></li>
+  </ul>
+</div>
+<div id="wrapper">
+  <div id="side">
+    <ul>
+    <li class="menu01"><a href="#" onclick="return false;">Company Disclosures</a></li>
+    <li class="sub1">
+      <ul class="sub">
+      <li class="sub101"><a href="/announcements/form.do">Company Announcements</a></li>
+      <li class="sub102"><a href="/financialReports/form.do">Financial Reports</a></li>
+      <li class="sub103"><a href="/otherReports/form.do">Other Reports</a></li>
+      </ul>
+    </li>
+    <li class="menu02"><a href="/index/form.do">Index Summary</a></li>
+    <li class="menu03"><a href="/disclosureData/dividends_and_rights_info_form.do">Dividends and Rights</a></li>
+    <li class="menu04"><a href="/disclosureData/halts_and_suspensions_list.do">Halts and Suspensions</a></li>
+    <li class="menu05"><a href="#" onclick="return false;">Exchange Notices</a></li>
+    <li class="sub5">
+      <ul class="sub">
+      <li class="sub501"><a href="/disclosureNotices/form.do">Disclosure Notices</a></li>
+      <li class="sub502"><a href="/listingNotices/form.do">Listing Notices</a></li>
+      </ul>
+    </li>
+    <li class="menu06"><a href="/companyPage/marketCalendar.do">Market Calendar</a></li>
+    </ul>
+  </div>
+
+  <div id="contents">
+  <h2>Company Information</h2>
+  <p class="location">Home > Company List > Company Information</p>
+  <ul class="companyTab">
+<li style="width:90px;"><a href="/companyPage/stockData.do?cmpy_id=599" >Stock Data</a></li>
+<li style="width:140px;"><a href="/companyInformation/form.do?cmpy_id=599" class="select">Company Information</a></li>
+<li style="width:160px;"><a href="/companyPage/directors_and_management_list.do?cmpy_id=599" >Directors and Management</a></li>
+<li style="width:125px;"><a href="/companyPage/financial_reports_view.do?cmpy_id=599" >Financial Reports</a></li>
+<li style="width:135px;"><a href="/companyDisclosures/form.do?cmpy_id=599" >Company Disclosures</a></li>
+<li style="width:138px;" class="end"><a href="/companyPage/dividends_and_rights_form.do?cmpy_id=599" >Dividends and Rights</a></li>
+</ul><div class="compInfo">
+  <p style="margin-top:0px;">SM Investments Corporation</p>
+  </div>
+
+<div id="dataList">
+  <table class="view">
+    <caption>Company Description</caption>
+    <tr>
+      <td>SM Investments Corporation (SM) was incorporated on January 15, 1960 to serve as the holding company of the SM Group with interests in retail, property and banking. The Company is engaged in businesses through its subsidiaries, namely: retail (The SM Store, SM Supermarket, SM Hypermarket, SaveMore, Waltermart Supermarket, Inc., and Alfamart); property (SM Prime Holdings, Inc.); and financial services (BDO Unibank, Inc. and China Banking Corporation).<br/><br/>The Company also has equity investments in other sectors such as premium commercial buildings (Neo Group, Philippine Urban Living Solutions and CityMall Commercial Centers Inc.); leisure (Belle Corporation), logistics (2GO Group, Inc. and Airspeed), food (Goldilocks) and mining (Atlas Consolidated Mining & Development Corporation).<br/><br/>Source: SEC Form 17-A (2024)</td>
+    </tr>
+  </table>
+  <table class="view">
+  <caption>Security Information</caption>
+    <colgroup>
+      <col width="28%"/>
+      <col width="72%"/>
+    </colgroup>
+    <tr>
+      <th>Sector</th>
+      <td>Holding Firms</td>
+    </tr>
+    <tr>
+      <th>Subsector</th>
+      <td>Holding Firms</td>
+    </tr>
+    <tr>
+      <th>Corporate Life</th>
+      <td>0</td>
+    </tr>
+    <tr>
+      <th>Incorporation Date</th>
+      <td>May 15, 1960</td>
+    </tr>
+    <tr>
+      <th>Number of Directors</th>
+      <td>8</td>
+    </tr>
+    <tr>
+      <th>Stockholders' Meeting as per By-Laws</th>
+      <td>April - last Wednesday</td>
+    </tr>
+    <tr>
+      <th>Fiscal Year</th>
+      <td>12/31
+      (Month/Day)
+      </td>
+    </tr>
+    <tr>
+      <th>External Auditor</th>
+      <td>SyCip, Gorres, Velayo &amp; Company </td>
+    </tr>
+    <tr>
+      <th>Transfer Agent</th>
+      <td>BDO Unibank, Inc. - Trust and Investments Group</td>
+    </tr>
+  </table>
+
+  <table class="view">
+  <caption>Contact Information</caption>
+    <colgroup>
+      <col width="28%"/>
+      <col width="72%"/>
+    </colgroup>
+    <tr>
+      <th>Business Address</th>
+      <td>10th Flr, OneE-com Center, Harbor Drive, Mall of Asia Complex, CBP-1, Pasay City</td>
+    </tr>
+    <tr>
+      <th>E-mail Address</th>
+      <td><a href="/cdn-cgi/l/email-protection" class="__cf_email__" data-cfemail="11786351627c787f677462657c747f65623f727e7c">[email&#160;protected]</a></td>
+    </tr>
+    <tr>
+      <th>Telephone Number</th>
+      <td>(632) 8857-0100</td>
+    </tr>
+    <tr>
+      <th>Fax Number</th>
+      <td>(632) 8857-0132</td>
+    </tr>
+    <tr>
+      <th>Website</th>
+      <td>http://www.sminvestments.com</td>
+    </tr>
+  </table>
+</div>
+</div>
+</div>
+
+<div id="footer">
+<div class="bottom">
+  <ul class="util">
+  <li><a href="/page/disclaimer.do">Disclaimer</a></li>
+  <li><a href="/page/privacyPolicy.do">Privacy Policy</a></li>
+  <li><a href="/page/linkPolicy.do">Link Policy</a></li>
+  <li><a href="/page/siteMap.do">Site Map</a></li>
+  <li><a href="/page/contactUs.do">Contact Us</a></li>
+  <li><a href="/page/faqs.do">FAQs</a></li>
+  </ul>
+  <ul class="social">
+  <li><a href="#rss" onclick="rssPage();return false;"><img src="/images/common/icon_rss.gif" alt="rss" /></a></li>
+  </ul>
+  <ul class="copyright">
+  <li><img src="/images/common/pse_logo.gif" alt="PSE" /></li>
+  <li class="text">
+All materials on this website are protected by copyright and intellectual property laws and are the property of The Philippine Stock Exchange, Inc.<br/>
+Unless stated otherwise, you may access and download the materials located on the website only for personal, non-commercial use. <br/>
+&copy; 2012 The Philippine Stock Exchange, Inc. All Rights Reserved.
+  </li>
+  <li class="qrcode">
+    <a href="http://itunes.apple.com/ph/app/pse-edge/id813302884" target="_new" title="iOS App">
+      <img src="/images/common/icon_ios.png" alt="iOS App" /></a>
+    <a href="http://play.google.com/store/apps/details?id=com.pse.edge" target="_new" title="Android App">
+      <img src="/images/common/icon_android.png" alt="Android App" /></a>
+  </li>
+  </ul>
+</div>
+</div>
+<div id="policy" style="display:none; width:100%; position:fixed; bottom:0px; background-color:#074d90;">
+    <div style="width:89%; color:white; padding:1.4em 0.7em; float:left; font-family: tahoma; font-size: 14px;">
+      The Philippine Stock Exchange Inc. ("PSE") respects and protects your personal data privacy. 
+	    To learn how the PSE processes and protects the confidentiality of any personal 
+	    and sensitive personal information that you may provide, please read carefully, 
+	    and click the “I AGREE” button if you agree to the terms stated in 
+	    <a href="/page/privacyPolicy" style="text-decoration:underline; color:yellow">PSE's Privacy Policy</a>.
+    
+    </div>
+    <div id="agree_button" style="text-align:center; border-radius:10px; background-color:#82ccdd; border-color:transparent; margin:1.4em 0; padding:0.7em; float:left; font-weight:700; font-size:16px">
+        <a href="" style="color:white; padding:7px 7px">I Agree</a>
+    </div>
+</div>
+<script data-cfasync="false" src="/cdn-cgi/scripts/5c5dd728/cloudflare-static/email-decode.min.js"></script><script type="text/javascript">
+$(document).ready(function(){
+	
+	if(getCookie('access')=='approve') {
+		$('#policy').css('display', 'none');
+	} else {
+		$('#policy').css('display', 'block');
+	}
+	
+});
+
+$('#agree_button').on('click', function(){
+    setCookie('access', 'approve', '-1');
+    $('#policy').hide();
+});
+
+function setCookie(cookie_name, value, days) {
+    var exdate = new Date();
+    exdate.setDate(exdate.getDate() + days);
+    // 설정 일수만큼 현재시간에 만료값으로 지정
+
+    var cookie_value = escape(value) + ((days == null) ? '' : ';    expires=' + exdate.toUTCString()) + ';    path=/';
+    document.cookie = cookie_name + '=' + cookie_value;
+}
+
+function getCookie(cookie_name) {
+    var x, y;
+    var val = document.cookie.split(';');
+
+    for (var i = 0; i < val.length; i++) {
+        x = val[i].substr(0, val[i].indexOf('='));
+        y = val[i].substr(val[i].indexOf('=') + 1);
+        x = x.replace(/^\s+|\s+$/g, ''); // 앞과 뒤의 공백 제거하기
+        if (x == cookie_name) {
+            return unescape(y); // unescape로 디코딩 후 값 리턴
+        }
+    }
+}
+
+
+</script>
+<script type="text/javascript">
+  var left = 'no';
+  var topNav = 'no';
+
+  $('#topNav a:eq('+topNav+')').addClass("select");
+  $('.'+left).find('a:first').addClass("select");
+
+  if (left.indexOf("sub1") == 0){
+    $('.sub1').css("display", "inline");
+  } else if (left.indexOf("sub5") == 0){
+    $('.sub5').css("display", "inline");
+  }
+
+  $(".menu01").click(function(){
+    if ($(".sub1").css("display") == "none") {
+      $(".sub1").css("display", "inline");
+    } else {
+      $(".sub1").css("display", "none");
+    }
+  });
+  $(".menu05").click(function(){
+    if ($(".sub5").css("display") == "none") {
+      $(".sub5").css("display", "inline");
+    } else {
+      $(".sub5").css("display", "none");
+    }
+  });
+</script>
+</body>
+</html>

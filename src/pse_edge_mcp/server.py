@@ -10,6 +10,8 @@ was six copies of the same try/except before.
 
 Tools (Phase 1): search_companies, get_stock_quote, get_price_history.
 Tools (Phase 2): search_disclosures, search_disclosure_fulltext, get_disclosure.
+Tools (Phase 3): get_company_profile, get_financial_highlights, get_dividends_and_rights,
+                 get_indices, get_market_summary.
 """
 
 from __future__ import annotations
@@ -28,7 +30,13 @@ from .client import PseEdgeClient
 from .config import Settings
 from .errors import PseEdgeMcpError
 from .market_calendar import MarketCalendar
-from .repositories import CompanyRepository, DisclosureRepository, QuoteRepository
+from .repositories import (
+    CompanyInfoRepository,
+    CompanyRepository,
+    DisclosureRepository,
+    MarketRepository,
+    QuoteRepository,
+)
 from .service import FreezeService, Served
 from .validation import (
     optional_date,
@@ -105,6 +113,8 @@ def build_server(
     companies = CompanyRepository(client, cache)
     quotes = QuoteRepository(client, companies, cache)
     disclosures = DisclosureRepository(client, cache, settings.base_url)
+    company_info = CompanyInfoRepository(client, companies, cache)
+    market = MarketRepository(client, cache)
 
     mcp = MCPServer("pse-edge", instructions=INSTRUCTIONS)
 
@@ -241,5 +251,77 @@ def build_server(
         (meta.data_policy is "immutable").
         """
         return await reply(lambda: disclosures.detail(require_edge_no(edge_no)))
+
+    # ---- Phase 3: company info & market ------------------------------------
+
+    @mcp.tool()
+    async def get_company_profile(symbol: str) -> dict[str, Any]:
+        """Get a PSE-listed company's profile: sector, incorporation, auditor, contacts.
+
+        Includes sector and subsector, incorporation date, corporate life, number of
+        directors, fiscal year end, stockholders' meeting schedule, external auditor,
+        transfer agent, business address, phone, fax, email and website. Every label on
+        the page is also returned verbatim in raw_fields.
+        """
+        return await reply(lambda: company_info.profile(require_text(symbol, "symbol")))
+
+    @mcp.tool()
+    async def get_financial_highlights(symbol: str) -> dict[str, Any]:
+        """Get the financial highlights PSE Edge publishes for a company.
+
+        Returns an annual and a quarterly section, each with a balance sheet and an income
+        statement, using Edge's own line-item labels and column headings (annual compares
+        Current/Previous Year; quarterly compares Period Ended against the audited fiscal
+        year, and its income statement has four columns including year-to-date).
+
+        IMPORTANT — units: figures are returned exactly as Edge prints them and are never
+        rescaled. Each period carries its own `currency_units` label, and the two sections
+        disagree in practice (observed: annual "Php (in thousands)" while quarterly said
+        "Php (in Millions)" for the same company, with the same figure appearing in both).
+        Read `currency_units` before quoting any number, and say the scale is uncertain
+        rather than presenting these as exact peso amounts. Only the highlights Edge
+        serves as data are here — this server does not parse filed PDF statements.
+        """
+        return await reply(lambda: company_info.financials(require_text(symbol, "symbol")))
+
+    @mcp.tool()
+    async def get_dividends_and_rights(symbol: str) -> dict[str, Any]:
+        """Get a company's declared dividends and stock rights offers.
+
+        Dividends carry the security and dividend type, the rate as printed, and the
+        ex-dividend, record and payment dates. Rights carry the entitlement ratio, offer
+        price, ex-rights date and offer period. Each record includes the `edge_no` of the
+        disclosure that announced it, so you can pass it to get_disclosure for the notice
+        itself. Empty lists mean Edge lists none for this company.
+        """
+        return await reply(
+            lambda: company_info.dividends_and_rights(require_text(symbol, "symbol"))
+        )
+
+    @mcp.tool()
+    async def get_indices() -> dict[str, Any]:
+        """Get PSEi and the PSE sector index levels with their daily change.
+
+        Covers PSEi, All Shares, Financials, Industrial, Holding Firms, Property, Services
+        and Mining and Oil. `change` and `change_percent` are signed, and `direction` is
+        "up"/"down"/"flat" — PSE Edge prints these unsigned and shows direction only as a
+        colour and an arrow, so the signs here are derived from that. EOD-frozen: during a
+        session you get the previous close's figures (see meta.stale).
+        """
+        return await reply(market.indices)
+
+    @mcp.tool()
+    async def get_market_summary() -> dict[str, Any]:
+        """Get a market-wide snapshot: index levels plus PSE Edge's homepage feeds.
+
+        `feeds` is keyed by Edge's own group labels — Company Announcements, Financial
+        Reports, Other Reports, Listing Notices, Disclosure Notices, and the most-viewed
+        disclosures for Today and This Week. Each entry carries its symbol, timestamp,
+        circular number and `edge_no` for get_disclosure.
+
+        Note: PSE Edge publishes no gainers/losers/most-active data anywhere, so this
+        cannot include them — say so rather than implying the data is missing or stale.
+        """
+        return await reply(market.summary)
 
     return mcp

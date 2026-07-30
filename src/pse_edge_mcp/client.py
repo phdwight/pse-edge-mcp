@@ -171,6 +171,15 @@ class PseEdgeClient:
 
         `keyword` on the wire is the numeric company id (a symbol yields 0 rows).
         No date filter: use this for complete history, announcements for date ranges.
+
+        **`sortType` must be `"date"`, not empty.** `dateSortType=DESC` alone is ignored
+        here: with `sortType=""` the rows come back in no discernible order (page 1 mixed
+        2024, 2025 and 2026 filings), so "this company's recent disclosures" silently
+        returned old ones. The page's own sort control posts
+        `goSort('/companyDisclosures/search.ax','date','DESC')`, which is where the value
+        comes from. Verified live 2026-07-30: `date`+DESC → newest first, `date`+ASC →
+        oldest first, `""` → unordered. Unlike announcements/search.ax, which defaults to
+        date DESC whether or not sortType is set.
         """
         return await self._post_form(
             "/companyDisclosures/search.ax",
@@ -178,7 +187,7 @@ class PseEdgeClient:
                 "pageNo": str(page),
                 "keyword": company_id,
                 "tmplNm": template,
-                "sortType": "",
+                "sortType": "date",
                 "dateSortType": "DESC",
                 "cmpySortType": "",
             },
@@ -222,4 +231,38 @@ class PseEdgeClient:
     async def fetch_disclosure_viewer(self, edge_no: str) -> str:
         """GET /openDiscViewer.do — disclosure detail page (metadata + attachment ids)."""
         resp = await self._get("/openDiscViewer.do", edge_no=edge_no)
+        return resp.text
+
+    # ---- company info & market (Phase 3) -----------------------------------
+
+    async def fetch_company_information(self, company_id: str) -> str:
+        """GET /companyInformation/form.do — profile page (th/td label rows)."""
+        resp = await self._get("/companyInformation/form.do", cmpy_id=company_id)
+        return resp.text
+
+    async def fetch_financial_reports(self, company_id: str) -> str:
+        """GET /companyPage/financial_reports_view.do — annual + quarterly statements."""
+        resp = await self._get("/companyPage/financial_reports_view.do", cmpy_id=company_id)
+        return resp.text
+
+    async def fetch_dividends_or_rights(self, company_id: str, kind: str) -> str:
+        """POST /companyPage/dividends_and_rights_list.ax (form dialect).
+
+        The `dividends_and_rights_form.do` page is only a shell — it holds no data and
+        posts here for each tab. `DividendsOrRights` travels in the QUERY STRING while
+        `cmpy_id` goes in the form body, which is how the page's own goTab() does it.
+        `kind` is "Dividends" or "Rights", capitalised as Edge expects.
+        """
+        return await self._post_form(
+            f"/companyPage/dividends_and_rights_list.ax?DividendsOrRights={kind}",
+            {"cmpy_id": company_id},
+        )
+
+    async def fetch_homepage(self) -> str:
+        """GET / — indices and the market-wide feeds are server-rendered here.
+
+        No AJAX feed exists for indices (verified Phase 0), so the homepage itself is the
+        source for both get_indices and get_market_summary. One fetch serves both.
+        """
+        resp = await self._get("/")
         return resp.text

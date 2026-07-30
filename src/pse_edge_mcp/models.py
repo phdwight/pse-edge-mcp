@@ -163,3 +163,156 @@ class DisclosureDetail(BaseModel):
         description="Absolute URL of the rendered disclosure body HTML. Not fetched or "
         "parsed by this server (v1 scope is metadata + links); fetch it if you need the text.",
     )
+
+
+# --- Phase 3: company info & market -----------------------------------------
+
+
+class CompanyProfile(BaseModel):
+    company_id: str
+    company_name: str
+    sector: str | None = None
+    subsector: str | None = None
+    incorporation_date: date | None = None
+    corporate_life: str | None = None
+    number_of_directors: int | None = None
+    fiscal_year: str | None = Field(default=None, description="Fiscal year end, as Month/Day")
+    stockholders_meeting: str | None = None
+    external_auditor: str | None = None
+    transfer_agent: str | None = None
+    business_address: str | None = None
+    email: str | None = None
+    telephone: str | None = None
+    fax: str | None = None
+    website: str | None = None
+    raw_fields: dict[str, str] = Field(
+        default_factory=dict, description="Every label->value pair on the page, unmapped included"
+    )
+
+
+class FinancialStatement(BaseModel):
+    """One statement table (balance sheet or income statement) for one period.
+
+    `columns` names the two value columns as Edge labels them — annual reports
+    "Current Year"/"Previous Year", quarterly "Period Ended"/"Fiscal Year Ended(Audited)".
+    `items` preserves Edge's own line-item labels and order rather than mapping them to a
+    fixed schema, because the label set varies by company and industry.
+    """
+
+    statement: str = Field(description="e.g. 'Balance Sheet', 'Income Statement'")
+    columns: list[str] = Field(default_factory=list)
+    items: dict[str, list[float | None]] = Field(
+        default_factory=dict, description="Line item -> one value per column, in column order"
+    )
+
+
+class FinancialPeriod(BaseModel):
+    """Annual or quarterly section of the financial-reports page."""
+
+    period_type: Literal["annual", "quarterly"]
+    period_label: str | None = Field(
+        default=None, description="Verbatim, e.g. 'For the fiscal year ended : Dec 31, 2025'"
+    )
+    period_ended: date | None = None
+    currency_units: str | None = Field(
+        default=None,
+        description="Edge's own units label, e.g. 'Php (in thousands)'. Values are NOT "
+        "rescaled — see the note on FinancialHighlights.",
+    )
+    statements: list[FinancialStatement] = Field(default_factory=list)
+
+
+class FinancialHighlights(BaseModel):
+    """Financial highlights as PSE Edge publishes them.
+
+    **Values are reported exactly as Edge prints them and are never rescaled.** Each
+    period carries its own `currency_units` label, and the labels differ between sections
+    (observed 2026-07-30: annual said "Php (in thousands)" while quarterly said
+    "Php (in Millions)" for the same company). Treat `currency_units` as the authority on
+    scale, and be aware Edge's own label may not be reliable — do not present these as
+    absolute peso amounts without checking it.
+    """
+
+    company_id: str
+    company_name: str | None = None
+    periods: list[FinancialPeriod] = Field(default_factory=list)
+    note: str | None = Field(
+        default=None, description="Any page-level notice, e.g. that no statements are filed yet"
+    )
+
+
+class DividendRecord(BaseModel):
+    security_type: str | None = None
+    dividend_type: str | None = Field(default=None, description="e.g. Cash, Stock, Property")
+    dividend_rate: str | None = Field(
+        default=None, description="Verbatim, e.g. 'Php17.00' or a percentage"
+    )
+    ex_dividend_date: date | None = None
+    record_date: date | None = None
+    payment_date: date | None = None
+    circular_number: str | None = None
+    edge_no: str | None = Field(
+        default=None, description="Disclosure key for the notice; pass to get_disclosure"
+    )
+
+
+class RightsRecord(BaseModel):
+    entitlement_ratio: str | None = None
+    offer_price: str | None = None
+    ex_rights_date: date | None = None
+    offer_start: date | None = None
+    offer_end: date | None = None
+    circular_number: str | None = None
+    edge_no: str | None = None
+
+
+class DividendsAndRights(BaseModel):
+    company_id: str
+    dividends: list[DividendRecord] = Field(default_factory=list)
+    rights: list[RightsRecord] = Field(default_factory=list)
+
+
+class IndexQuote(BaseModel):
+    name: str
+    value: float | None = None
+    change: float | None = Field(
+        default=None,
+        description="Signed. Edge prints this unsigned and encodes direction in a colour "
+        "and a ▲/▼ glyph; the sign here is derived from that.",
+    )
+    change_percent: float | None = None
+    direction: Literal["up", "down", "flat"] | None = None
+
+
+class MarketIndices(BaseModel):
+    indices: list[IndexQuote] = Field(default_factory=list)
+
+
+class FeedItem(BaseModel):
+    """One entry in a homepage feed."""
+
+    title: str
+    symbol: str | None = None
+    company_id: str | None = None
+    announced_at: datetime | None = None
+    circular_number: str | None = None
+    edge_no: str | None = None
+
+
+class MarketSummary(BaseModel):
+    """Whole-market snapshot from the PSE Edge homepage.
+
+    `feeds` is keyed by Edge's own group labels — observed: `Company Announcements`,
+    `Financial Reports`, `Other Reports`, `Listing Notices`, `Disclosure Notices`,
+    `Today`, `This Week` — rather than folded into invented buckets, so a caller sees the
+    site's own taxonomy and a new or renamed group appears instead of being dropped.
+
+    Note: Edge publishes no gainers/losers/most-active data anywhere (verified Phase 0),
+    so those are absent by necessity rather than oversight — the PSE main site, not Edge,
+    would be the source.
+    """
+
+    indices: list[IndexQuote] = Field(default_factory=list)
+    feeds: dict[str, list[FeedItem]] = Field(
+        default_factory=dict, description="Edge's feed group label -> its entries"
+    )

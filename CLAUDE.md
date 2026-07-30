@@ -106,8 +106,17 @@ Unofficial — Edge has no public API; we speak to the portal's own internal end
   `get_disclosure(edge_no)` via `openDiscViewer.do`. Disclosure tables are parsed by
   `<thead>` label, never by column position — the two endpoints order columns differently.
   See docs/endpoints.md §"v3 corrections" for the three v2 claims this phase disproved.
-- **Phase 3 (next):** financial reports, dividends & rights, indices, market summary (all HTML parses).
-- **Phase 4:** Postgres storage backend (same `Storage` protocol) + Alembic + opportunistic archive.
+- **Phase 3 (done):** `get_company_profile`, `get_financial_highlights`,
+  `get_dividends_and_rights`, `get_indices`, `get_market_summary`. Findings that shape the
+  code (details in docs/endpoints.md v4): financial-report **units labels contradict each
+  other** between the annual and quarterly sections, so values are passed through verbatim
+  and never rescaled; index `Chg`/`%Chg` are printed **unsigned** with direction only in a
+  colour and a ▲/▼ glyph, so signs are derived from the glyph; `dividends_and_rights_form.do`
+  is an empty shell that posts to `dividends_and_rights_list.ax` once per tab, with
+  `DividendsOrRights` in the query string and `cmpy_id` in the body; homepage feeds are keyed
+  by Edge's own group labels rather than invented buckets. `directors_and_management_list.do`
+  is mapped but has no tool yet.
+- **Phase 4 (next):** Postgres storage backend (same `Storage` protocol) + Alembic + opportunistic archive.
 - **Phase 5:** OAuth 2.1 (Authlib) + passkey signup (py_webauthn), tiered quotas, admin CLI.
 - **Phase 6:** production deploy (compose.prod.yaml overlay, TLS, backups).
 
