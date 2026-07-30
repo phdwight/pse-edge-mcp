@@ -22,7 +22,9 @@ from __future__ import annotations
 from datetime import date
 from typing import Any, Literal
 
+from .archive import Archive, NullArchive
 from .errors import InvalidArgumentError, SymbolNotFoundError
+from .memo import ParsedMemo
 from .models import (
     CompanyHit,
     CompanyProfile,
@@ -126,11 +128,20 @@ class QuoteRepository:
     """Quotes and OHLC history. Both need a security_id, which only the quote page has."""
 
     def __init__(
-        self, source: QuoteSource, companies: CompanyRepository, cache: FrozenCache
+        self,
+        source: QuoteSource,
+        companies: CompanyRepository,
+        cache: FrozenCache,
+        archive: Archive | None = None,
+        memo: ParsedMemo | None = None,
     ) -> None:
         self._source = source
         self._companies = companies
         self._cache = cache
+        # NullArchive by default, so stdio use needs no database and nothing above this
+        # layer has to know whether an archive exists.
+        self._archive = archive or NullArchive()
+        self._memo = memo or ParsedMemo()
 
     async def quote(self, symbol: str) -> Served[StockQuote]:
         parsed = await self._quote_page(symbol)
@@ -141,11 +152,14 @@ class QuoteRepository:
         company_id = parsed.value["company_id"]
         security_id = parsed.value["security_id"]
 
+        key = f"ohlc:{company_id}:{security_id}:{start.isoformat()}:{end.isoformat()}"
         served = await self._cache.get(
-            f"ohlc:{company_id}:{security_id}:{start.isoformat()}:{end.isoformat()}",
+            key,
             lambda: self._source.fetch_price_history(company_id, security_id, start, end),
         )
-        return served.map(
+        history = self._memo.resolve(
+            f"{key}#history",
+            served,
             lambda data: PriceHistory(
                 symbol=parsed.value["symbol"],
                 company_id=company_id,
@@ -163,8 +177,24 @@ class QuoteRepository:
                     )
                     for row in data["chartData"]
                 ],
-            )
+            ),
         )
+        # Opportunistic archive (plan §6a): bars fetched for this caller are recorded on
+        # the way past, so history deepens without a single extra request to PSE Edge.
+        # Failures are logged, never raised — see archive.py.
+        #
+        # Only on a genuine upstream fetch. A cache hit carries nothing new, so archiving
+        # it would re-write the same rows on every request — up to 50 no-op upserts per
+        # call — and that write churn would dominate database load under real traffic
+        # while adding zero information.
+        if not served.meta.from_cache:
+            await self._archive.record_bars(
+                company_id=company_id,
+                security_id=security_id,
+                symbol=history.value.symbol,
+                bars=history.value.bars,
+            )
+        return history
 
     async def _quote_page(self, symbol: str) -> Served[dict[str, Any]]:
         """Fetch and parse the quote page, backfilling identity from autocomplete.
@@ -178,7 +208,11 @@ class QuoteRepository:
             f"stock_data:{company_id}",
             lambda: self._source.fetch_stock_data_page(company_id),
         )
-        return served.map(lambda html: _quote_fields(html, company.value))
+        return self._memo.resolve(
+            f"stock_data:{company_id}#fields",
+            served,
+            lambda html: _quote_fields(html, company.value),
+        )
 
 
 def _quote_fields(html: str, company: CompanyHit) -> dict[str, Any]:
@@ -195,10 +229,19 @@ class DisclosureRepository:
     presentation one, so the routing lives here (see docs/endpoints.md v3).
     """
 
-    def __init__(self, source: DisclosureSource, cache: FrozenCache, base_url: str) -> None:
+    def __init__(
+        self,
+        source: DisclosureSource,
+        cache: FrozenCache,
+        base_url: str,
+        archive: Archive | None = None,
+        memo: ParsedMemo | None = None,
+    ) -> None:
         self._source = source
         self._cache = cache
         self._base_url = base_url.rstrip("/")
+        self._archive = archive or NullArchive()
+        self._memo = memo or ParsedMemo()
 
     async def search(
         self,
@@ -213,8 +256,9 @@ class DisclosureRepository:
         query."""
         source_name: SearchSource
         if company_id and window is None:
+            key = f"company_disclosures:{company_id}:{template}:{page}"
             served = await self._cache.get(
-                f"company_disclosures:{company_id}:{template}:{page}",
+                key,
                 lambda: self._source.search_company_disclosures(
                     company_id, template=template, page=page
                 ),
@@ -222,9 +266,12 @@ class DisclosureRepository:
             source_name = "company_disclosures"
         elif window is not None:
             start, end = window
-            served = await self._cache.get(
+            key = (
                 f"announcements:{company_id or ''}:{start.isoformat()}:"
-                f"{end.isoformat()}:{template}:{page}",
+                f"{end.isoformat()}:{template}:{page}"
+            )
+            served = await self._cache.get(
+                key,
                 lambda: self._source.search_announcements(
                     from_date=start,
                     to_date=end,
@@ -249,7 +296,13 @@ class DisclosureRepository:
                 source=source_name,
             )
 
-        return served.map(build)
+        result = self._memo.resolve(f"{key}#search", served, build)
+        # Archived only on a genuine upstream fetch. Previously this ran unconditionally,
+        # so a cached search still wrote up to 50 rows per request — write churn that would
+        # dominate database load at scale while adding nothing.
+        if not served.meta.from_cache:
+            await self._archive.record_disclosures(result.value.hits)
+        return result
 
     async def fulltext(
         self,
@@ -261,8 +314,9 @@ class DisclosureRepository:
         page: int,
     ) -> Served[KeywordSearchResult]:
         start, end = window
+        key = f"keyword:{keyword}:{start}:{end}:{company_id}:{subject_title}:{page}"
         served = await self._cache.get(
-            f"keyword:{keyword}:{start}:{end}:{company_id}:{subject_title}:{page}",
+            key,
             lambda: self._source.search_disclosure_fulltext(
                 keyword,
                 from_date=start,
@@ -284,7 +338,7 @@ class DisclosureRepository:
                 has_more=_has_more(reported_page, parsed.get("pages")),
             )
 
-        return served.map(build)
+        return self._memo.resolve(f"{key}#fulltext", served, build)
 
     async def detail(self, edge_no: str) -> Served[DisclosureDetail]:
         """A published disclosure never changes, so this is cached permanently."""
@@ -303,7 +357,7 @@ class DisclosureRepository:
             parsed.pop("body_file_id", None)
             return DisclosureDetail(**parsed)
 
-        return served.map(build)
+        return self._memo.resolve(f"disclosure:{edge_no}#detail", served, build)
 
     def _absolute(self, path: str | None) -> str | None:
         """Parsers emit site-relative paths; callers outside this process need absolute."""
@@ -314,18 +368,23 @@ class CompanyInfoRepository:
     """Profile, financial highlights, and dividends/rights for one company."""
 
     def __init__(
-        self, source: CompanyInfoSource, companies: CompanyRepository, cache: FrozenCache
+        self,
+        source: CompanyInfoSource,
+        companies: CompanyRepository,
+        cache: FrozenCache,
+        memo: ParsedMemo | None = None,
     ) -> None:
         self._source = source
         self._companies = companies
         self._cache = cache
+        self._memo = memo or ParsedMemo()
 
     async def profile(self, symbol: str) -> Served[CompanyProfile]:
         company = await self._companies.resolve(symbol)
         company_id = company.value.company_id
+        key = f"company_info:{company_id}"
         served = await self._cache.get(
-            f"company_info:{company_id}",
-            lambda: self._source.fetch_company_information(company_id),
+            key, lambda: self._source.fetch_company_information(company_id)
         )
 
         def build(html: str) -> CompanyProfile:
@@ -335,14 +394,14 @@ class CompanyInfoRepository:
             parsed["company_name"] = parsed.get("company_name") or company.value.name
             return CompanyProfile(**parsed)
 
-        return served.map(build)
+        return self._memo.resolve(f"{key}#profile", served, build)
 
     async def financials(self, symbol: str) -> Served[FinancialHighlights]:
         company = await self._companies.resolve(symbol)
         company_id = company.value.company_id
+        key = f"financials:{company_id}"
         served = await self._cache.get(
-            f"financials:{company_id}",
-            lambda: self._source.fetch_financial_reports(company_id),
+            key, lambda: self._source.fetch_financial_reports(company_id)
         )
 
         def build(html: str) -> FinancialHighlights:
@@ -354,7 +413,7 @@ class CompanyInfoRepository:
                 note=parsed["note"],
             )
 
-        return served.map(build)
+        return self._memo.resolve(f"{key}#financials", served, build)
 
     async def dividends_and_rights(self, symbol: str) -> Served[DividendsAndRights]:
         """Two upstream calls: the page is a shell with a tab per kind.
@@ -393,17 +452,24 @@ class MarketRepository:
 
     HOMEPAGE_KEY = "homepage"
 
-    def __init__(self, source: MarketSource, cache: FrozenCache) -> None:
+    def __init__(
+        self, source: MarketSource, cache: FrozenCache, memo: ParsedMemo | None = None
+    ) -> None:
         self._source = source
         self._cache = cache
+        self._memo = memo or ParsedMemo()
 
     async def _homepage(self) -> Served[str]:
         return await self._cache.get(self.HOMEPAGE_KEY, lambda: self._source.fetch_homepage())
 
     async def indices(self) -> Served[MarketIndices]:
         served = await self._homepage()
-        return served.map(
-            lambda html: MarketIndices(indices=[IndexQuote(**row) for row in parse_indices(html)])
+        # `#indices` matters: summary() memoises a different shape from the same cached
+        # homepage, and a shared memo key would hand one tool the other's result.
+        return self._memo.resolve(
+            f"{self.HOMEPAGE_KEY}#indices",
+            served,
+            lambda html: MarketIndices(indices=[IndexQuote(**row) for row in parse_indices(html)]),
         )
 
     async def summary(self) -> Served[MarketSummary]:
@@ -419,4 +485,4 @@ class MarketRepository:
                 },
             )
 
-        return served.map(build)
+        return self._memo.resolve(f"{self.HOMEPAGE_KEY}#summary", served, build)

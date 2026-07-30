@@ -52,7 +52,7 @@ jobs:
           # check would pass silently.
           set -eo pipefail
           uv sync --all-extras --quiet
-          uv run python scripts/check_image.py pse-edge-mcp:ci | tee -a "$GITHUB_STEP_SUMMARY"
+          uv run python scripts/check_image.py pse-edge-mcp:ci --extra postgres | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Scan image for secrets & vulns
         uses: aquasecurity/trivy-action@master
         with:

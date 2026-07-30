@@ -36,7 +36,34 @@ cp .env.example .env   # set POSTGRES_PASSWORD
 docker compose up --build
 ```
 
-Serves streamable HTTP on `:8000`, with Postgres 18 as shared cache/archive.
+Serves streamable HTTP on `:8000`, with Postgres 18 as shared cache and archive. A one-shot
+`migrate` service applies the Alembic schema before the app starts.
+
+HTTP mode is **stateless with plain JSON responses by default**. This server is read-only
+tools over data the freeze policy holds still, and it uses none of the features MCP sessions
+exist to enable — no notifications, no resource subscriptions, no sampling, no elicitation,
+no progress — so every request is self-contained. That means any replica can serve any
+request behind plain round-robin: no sticky routing, no per-session memory, no event store.
+Without SSE, idle clients hold no connection either, so N users stop meaning N concurrent
+connections. Combined with all shared state living in Postgres, that is the whole of "any
+replica, any request".
+
+Use `--stateful` if you need MCP sessions (resumability or server-initiated messages) and
+`--sse` for event-stream framing; they are independent flags. Note `--stateful` requires
+clients to complete the `initialize` handshake and forces sticky routing behind a balancer.
+
+**Postgres is optional.** Without `DATABASE_URL` the server uses an in-memory cache and keeps
+no archive — the zero-config path for local stdio use, and it needs neither the `postgres`
+extra nor a database. With `DATABASE_URL` set you get two things: replicas **share one cache**,
+so the market-boundary freeze still means one upstream fetch per boundary however many
+processes run; and every read **accumulates into an EOD archive** (daily bars and disclosures)
+that deepens over time at zero extra cost to PSE Edge, which serves only limited history
+itself. Nothing crawls — the archive fills solely from fetches you already made.
+
+```bash
+# applying the schema by hand, outside compose
+DATABASE_URL=postgresql+asyncpg://user:pass@host/db uv run alembic upgrade head
+```
 
 ## Tools
 
@@ -65,7 +92,7 @@ Edge's own units labels are inconsistent between its annual and quarterly sectio
 period reports its `currency_units` for you to check. Index changes are signed here even
 though Edge prints them unsigned (it shows direction only as a colour and an arrow).
 
-Roadmap (see `docs/plan.md`): Postgres archive, OAuth 2.1 accounts with passkeys, remote deployment.
+Roadmap (see `docs/plan.md`): OAuth 2.1 accounts with passkeys, per-user quotas, production deployment.
 
 ## Container image
 
@@ -78,8 +105,12 @@ docker run --rm -p 8000:8000 ghcr.io/phdwight/pse-edge-mcp:latest   # streamable
 docker run --rm -i --entrypoint pse-edge-mcp ghcr.io/phdwight/pse-edge-mcp:latest  # stdio
 ```
 
-Both architectures are gated before publishing: <200 MB, secret-scanned, and
-smoke-tested on native runners.
+Both architectures are gated before publishing, on native runners. The rule is
+**necessity, not size**: the image must contain exactly the resolved runtime dependency
+closure and nothing else — no build toolchain, no package manager, no dev dependencies, no
+bytecode caches, no source tree — plus a secret scan and a smoke test that the server
+starts and registers its tools. A stray dependency fails the build; a large but genuinely
+required one does not. Image size is reported for information and never gated.
 
 ## Development
 
@@ -92,7 +123,7 @@ uv run ruff check .
 Tests run entirely against recorded fixtures — CI never touches PSE Edge.
 
 Work lands on `develop` and reaches `main` by pull request; `main` is protected and
-requires both CI checks. Bumping `version` in `pyproject.toml` makes the next merge cut
+requires all three CI checks (`test`, `image (amd64)`, `image (arm64)`). Bumping `version` in `pyproject.toml` makes the next merge cut
 a GitHub Release with a matching immutable image tag.
 
 ## License

@@ -21,6 +21,10 @@ Unofficial — Edge has no public API; we speak to the portal's own internal end
    fragments for `search.ax` endpoints. Wire dates are `MM-dd-yyyy`.
 4. **Loud on drift.** If Edge's response shape changes, raise `EndpointChangedError` —
    never silently return partial data.
+5a. **Postgres is optional, and the image declares it.** The runtime image installs
+   `--extra postgres` (compose runs it against Postgres and code uses the driver), so the
+   image check must be passed `--extra postgres` or the drivers look like bloat. The
+   library install stays thin via lazy imports.
 5. **The runtime image contains only what the app needs to run** — and no secrets.
    Multi-stage, non-root, no build tools or package manager in runtime, no dev deps, no
    bytecode caches, no source tree (the project installs `--no-editable`), no credentials
@@ -116,8 +120,18 @@ Unofficial — Edge has no public API; we speak to the portal's own internal end
   `DividendsOrRights` in the query string and `cmpy_id` in the body; homepage feeds are keyed
   by Edge's own group labels rather than invented buckets. `directors_and_management_list.do`
   is mapped but has no tool yet.
-- **Phase 4 (next):** Postgres storage backend (same `Storage` protocol) + Alembic + opportunistic archive.
-- **Phase 5:** OAuth 2.1 (Authlib) + passkey signup (py_webauthn), tiered quotas, admin CLI.
+- **Phase 4 (done):** Postgres storage backend (`storage_postgres.py`, same `Storage`
+  protocol) + Alembic (`migrations/`) + opportunistic archive (`archive.py` protocol,
+  `archive_postgres.py` impl). `DATABASE_URL` unset = in-memory cache + `NullArchive`;
+  set = shared cache + archive. Key rules: **Postgres stays optional** — `db.py`,
+  `storage_postgres.py` and `archive_postgres.py` are imported lazily inside
+  `build_storage()`, so a plain install without the `postgres` extra never hits an
+  ImportError (a test asserts sqlalchemy does not leak into `sys.modules` on
+  `import pse_edge_mcp.server`). **Schema is applied by Alembic only**, never `create_all`
+  at runtime — compose has a one-shot `migrate` service and `check_schema()` fails loudly
+  at startup if migrations were skipped. **A failed archive write never fails a read**
+  (caught broadly: a dead database raises OSError, not just SQLAlchemyError).
+- **Phase 5 (next):** OAuth 2.1
 - **Phase 6:** production deploy (compose.prod.yaml overlay, TLS, backups).
 
 ## Holiday table
