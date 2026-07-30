@@ -5,12 +5,16 @@ Format: [Keep a Changelog](https://keepachangelog.com/) · Versioning: [SemVer](
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-07-30
+
 ### Added
 - Phase 2 disclosures. Tools: `search_disclosures` (market-wide or per company, date-ranged, exact pagination), `search_disclosure_fulltext` (attachment text search with snippets and an honest coverage note), `get_disclosure(edge_no)` (details + attachment/body links).
 - Header-driven disclosure table parser: cells map by `<thead>` label, so the differing column layouts of `announcements/search.ax` and `companyDisclosures/search.ax` share one code path and a reordered column is a non-event.
 - `immutable=True` in `FreezeService`: objects with a stable natural key (disclosures by `edge_no`) are fetched once and never refetched at a boundary. Reported as `data_policy: "immutable"` with `valid_until: null`.
 - `INVALID_ARGUMENT` error code for malformed arguments, rejected before any upstream request.
 - Seven recorded disclosure fixtures and 32 new tests (parsers, drift detection, wire dialects, tool routing, cache behaviour).
+- Release workflow: merging to `main` builds, gates, smoke-tests, and publishes `ghcr.io/phdwight/pse-edge-mcp` (`:latest` and `:sha-<sha>`). A merge that bumps `version` in `pyproject.toml` also cuts a GitHub Release and an immutable `:<version>` tag.
+- Branch workflow: `develop` is the integration branch and reaches `main` only by pull request. `main` is protected (PR required, `test` + `image` must pass, no force pushes or deletions).
 
 ### Changed
 - `search_disclosures` uses `/announcements/search.ax`, not `/keyword/search.ax` as originally planned: the latter is an attachment full-text index that is partial and stale (measured: nothing from 2026), so it became a separate, clearly-labelled tool. See docs/endpoints.md v3.
@@ -19,6 +23,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/) · Versioning: [SemVer](
 
 ### Fixed
 - `mypy --strict` now passes: generic `dict` annotations parameterised across the package, and dead Pydantic aliases removed from `CompanyHit` (`server.py` already mapped those fields explicitly).
+- Image size back inside the <200 MB budget of invariant #5 (206 MB → 167 MB in CI). The runtime image installed `--extra postgres`, but the Postgres backend is Phase 4 and nothing in `src/` imports sqlalchemy, asyncpg, or alembic yet — those four packages were 44 MB of a 103 MB venv. This gate had been failing since the Phase 1 push to `main`.
 
 ## [0.1.0] - 2026-07-30
 

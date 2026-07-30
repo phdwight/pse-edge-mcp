@@ -1,0 +1,181 @@
+name: Release
+
+# Merges to main publish a container image to GHCR:
+#   docker pull ghcr.io/phdwight/pse-edge-mcp:latest
+#
+# A merge that bumps `version` in pyproject.toml also cuts a GitHub Release and a
+# matching immutable image tag; merges that don't bump only move :latest and :sha-*.
+#
+# The image is built, gated, and smoke-tested BEFORE it is pushed — invariant #5
+# (thin, secret-free images) must hold for anything that reaches the registry.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: # lets you re-publish the current main on demand
+
+permissions:
+  contents: write # create the release + tag
+  packages: write # push to GHCR
+
+# Never let two main merges publish concurrently, and never cancel a half-done
+# publish: an interrupted push can leave :latest pointing at nothing useful.
+concurrency:
+  group: release-main
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/${{ github.repository }}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.14"
+      - run: uv sync --all-extras
+      - run: uv run ruff check .
+      - run: uv run pytest -q
+
+  publish:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2 # need HEAD~1 to tell whether the version changed
+
+      - name: Resolve version and detect a bump
+        id: version
+        run: |
+          read_version() { grep -m1 '^version = ' "$1" | cut -d'"' -f2; }
+          VERSION=$(read_version pyproject.toml)
+          if [ -z "$VERSION" ]; then
+            echo "::error::could not read version from pyproject.toml"
+            exit 1
+          fi
+          git show HEAD~1:pyproject.toml > /tmp/prev-pyproject.toml 2>/dev/null || : > /tmp/prev-pyproject.toml
+          PREVIOUS=$(read_version /tmp/prev-pyproject.toml || true)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          if [ "$VERSION" != "$PREVIOUS" ]; then
+            echo "bumped=true" >> "$GITHUB_OUTPUT"
+            echo "Version bump: ${PREVIOUS:-none} -> $VERSION (will cut a release)"
+          else
+            echo "bumped=false" >> "$GITHUB_OUTPUT"
+            echo "Version unchanged at $VERSION (no release; :latest still moves)"
+          fi
+
+      - name: Fail if this release tag already exists
+        if: steps.version.outputs.bumped == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="v${{ steps.version.outputs.version }}"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "::error::release $TAG already exists — bump the version in pyproject.toml"
+            exit 1
+          fi
+
+      - uses: docker/setup-buildx-action@v3
+
+      # Build once into the local daemon so the gates below run on the exact image
+      # that gets pushed. The push step reuses this cache, so it costs seconds.
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: pse-edge-mcp:candidate
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Enforce image size budget (<200MB)
+        run: |
+          SIZE=$(docker image inspect pse-edge-mcp:candidate --format '{{.Size}}')
+          MB=$((SIZE / 1024 / 1024))
+          echo "Image size: ${MB} MB"
+          echo "Image size: **${MB} MB** (budget 200 MB)" >> "$GITHUB_STEP_SUMMARY"
+          test "$SIZE" -lt $((200 * 1024 * 1024))
+
+      - name: Scan image for secrets
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: pse-edge-mcp:candidate
+          scanners: secret
+          exit-code: "1"
+
+      - name: Smoke-test the image
+        run: |
+          # A published image that cannot build the server is worse than no publish.
+          TOOLS=$(docker run --rm --entrypoint python pse-edge-mcp:candidate -c '
+          import asyncio
+          from pse_edge_mcp.server import build_server
+          print(len(asyncio.run(build_server().list_tools())))')
+          echo "Tools registered: $TOOLS"
+          test "$TOOLS" -ge 6
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          cache-from: type=gha
+          tags: |
+            ${{ env.IMAGE }}:latest
+            ${{ env.IMAGE }}:sha-${{ github.sha }}
+            ${{ steps.version.outputs.bumped == 'true' && format('{0}:{1}', env.IMAGE, steps.version.outputs.version) || '' }}
+
+      - name: Create release
+        if: steps.version.outputs.bumped == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          gh release create "v${VERSION}" \
+            --title "v${VERSION}" \
+            --notes "$(cat <<EOF
+          Container image for v${VERSION}:
+
+          \`\`\`bash
+          docker pull ${IMAGE}:${VERSION}
+          \`\`\`
+
+          Also published as \`${IMAGE}:latest\`.
+
+          Serve streamable HTTP on :8000 (the image default):
+
+          \`\`\`bash
+          docker run --rm -p 8000:8000 ${IMAGE}:${VERSION}
+          \`\`\`
+
+          Or stdio, for Claude Desktop/Code (\`--entrypoint\` clears the default HTTP args):
+
+          \`\`\`bash
+          docker run --rm -i --entrypoint pse-edge-mcp ${IMAGE}:${VERSION}
+          \`\`\`
+
+          See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/v${VERSION}/CHANGELOG.md) for what changed.
+          EOF
+          )"
+
+      - name: Summarise the download
+        run: |
+          {
+            echo "## Published"
+            echo
+            echo '```bash'
+            echo "docker pull ${IMAGE}:latest"
+            if [ "${{ steps.version.outputs.bumped }}" = "true" ]; then
+              echo "docker pull ${IMAGE}:${{ steps.version.outputs.version }}"
+            fi
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

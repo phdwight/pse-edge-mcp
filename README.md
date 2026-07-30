@@ -57,6 +57,18 @@ limit in its results.
 
 Roadmap (see `docs/plan.md`): financial reports, dividends, indices & market summary, Postgres archive, OAuth 2.1 accounts with passkeys, remote deployment.
 
+## Container image
+
+Every merge to `main` publishes an image:
+
+```bash
+docker pull ghcr.io/phdwight/pse-edge-mcp:latest      # or :<version>, :sha-<sha>
+docker run --rm -p 8000:8000 ghcr.io/phdwight/pse-edge-mcp:latest   # streamable HTTP
+docker run --rm -i --entrypoint pse-edge-mcp ghcr.io/phdwight/pse-edge-mcp:latest  # stdio
+```
+
+Images are gated before publishing: <200 MB, secret-scanned, and smoke-tested.
+
 ## Development
 
 ```bash
@@ -66,6 +78,10 @@ uv run ruff check .
 ```
 
 Tests run entirely against recorded fixtures — CI never touches PSE Edge.
+
+Work lands on `develop` and reaches `main` by pull request; `main` is protected and
+requires both CI checks. Bumping `version` in `pyproject.toml` makes the next merge cut
+a GitHub Release with a matching immutable image tag.
 
 ## License
 

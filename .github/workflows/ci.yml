@@ -1,8 +1,10 @@
 name: CI
 
 on:
+  # develop is the integration branch; main is covered by release.yml, which reruns
+  # these same gates before it publishes anything.
   push:
-    branches: [main, develop]
+    branches: [develop]
   pull_request:
 
 jobs:

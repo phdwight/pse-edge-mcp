@@ -24,6 +24,21 @@ Unofficial — Edge has no public API; we speak to the portal's own internal end
 5. **Docker images stay thin and secret-free.** Multi-stage, non-root, no build tools
    in runtime, no credentials in any layer/ARG/ENV. CI enforces <200 MB + secret scan.
 
+## Branching & release (decided)
+
+- **All work lands on `develop`.** No feature branches. `develop` reaches `main` only by
+  pull request; `main` is protected (PR required, `test` + `image` checks must pass, no
+  force pushes or deletions, admins exempt for hotfixes). Never commit to `main` directly.
+- **Merging to `main` publishes** `ghcr.io/phdwight/pse-edge-mcp` (`:latest`, `:sha-<sha>`)
+  via `.github/workflows/release.yml`, which re-runs the test + size + secret gates and
+  smoke-tests the image *before* pushing — nothing violating invariant #5 reaches GHCR.
+- **Releases are version-driven:** a merge that changes `version` in `pyproject.toml` also
+  cuts a GitHub Release and an immutable `:<version>` tag. Merges without a bump only move
+  `:latest`. So bump the version and roll `CHANGELOG.md`'s Unreleased section in the same
+  PR as the work being released.
+- `ci.yml` covers PRs and `develop` pushes; `release.yml` covers `main`. Don't add `main`
+  back to `ci.yml` — it would double-build the image.
+
 ## Conventions
 
 - Python 3.14, `uv` for everything (`uv sync --all-extras`, `uv run pytest`, `uv run ruff check .`).
