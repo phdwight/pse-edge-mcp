@@ -113,6 +113,14 @@ Scalability decisions made **now**, paid for **later**:
 2. **Postgres doubles as an archive** — when enabled, disclosures and daily EOD quotes are upserted as they pass through, so historical depth accumulates for free over time (Edge itself offers limited history). Schema managed with Alembic from day one.
 3. **Stateless server** — all state lives in the storage backend, so horizontal scaling is trivial once storage is external.
 4. **Transport is a runtime flag** — `pse-edge-mcp` (stdio, default) vs `pse-edge-mcp --http --port 8000`. Same tools, zero code changes.
+   **HTTP is stateless with plain JSON responses by default (decided).** The server declares no
+   `listChanged`, no `subscribe`, and uses no sampling, elicitation or progress, so MCP sessions
+   would buy nothing while costing sticky routing, per-session memory and an event store. Verified:
+   a single bare POST with no `initialize` and no `Mcp-Session-Id` returns the full tool list and
+   executes tool calls; under `--stateful` the same request is correctly rejected with 400. This is
+   what makes horizontal scaling ordinary, and it is the last piece of "any replica, any request"
+   after Phase 4 moved shared state into Postgres. `--stateful` / `--sse` restore session mode and
+   SSE framing for anyone who needs resumability or server-initiated messages.
 5. **`PseEdgeClient` is importable on its own** — usable as a plain Python library, and independently testable.
 6. **Single-flight request dedup** — concurrent identical requests (common when an LLM fans out tool calls) collapse into one upstream hit.
 
