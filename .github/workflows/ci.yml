@@ -1,8 +1,10 @@
 name: CI
 
 on:
+  # develop is the integration branch; main is covered by release.yml, which reruns
+  # these same gates before it publishes anything.
   push:
-    branches: [main]
+    branches: [develop]
   pull_request:
 
 jobs:
@@ -17,20 +19,53 @@ jobs:
       - run: uv run ruff check .
       - run: uv run pytest -q
 
+  # Both published architectures are gated here, on native runners (free for public
+  # repos), so arm64 breakage is caught at review time rather than at publish time —
+  # otherwise a green PR could merge and then leave main with no image at all.
+  # `name:` is pinned so the required-check contexts stay exactly "image (amd64)" and
+  # "image (arm64)"; without it GitHub would name them after every matrix value.
   image:
-    runs-on: ubuntu-latest
+    name: image (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.14"
+      # Each runner is native for its own arch, so a plain build needs no buildx or QEMU.
       - name: Build image
         run: docker build -t pse-edge-mcp:ci .
-      - name: Enforce image size budget (<200MB)
+      # Enforces necessity, not a megabyte number: installed distributions must equal
+      # the resolved runtime closure, with no toolchain, package manager, dev deps,
+      # caches, or stray source tree. Size is reported for information only.
+      - name: Check image contains only what the app needs
         run: |
-          SIZE=$(docker image inspect pse-edge-mcp:ci --format '{{.Size}}')
-          echo "Image size: $((SIZE / 1024 / 1024)) MB"
-          test "$SIZE" -lt $((200 * 1024 * 1024))
+          # pipefail matters: without it the pipeline returns tee's status and a failed
+          # check would pass silently.
+          set -eo pipefail
+          uv sync --all-extras --quiet
+          uv run python scripts/check_image.py pse-edge-mcp:ci | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Scan image for secrets & vulns
         uses: aquasecurity/trivy-action@master
         with:
           image-ref: pse-edge-mcp:ci
           scanners: secret
           exit-code: "1"
+      - name: Smoke-test the image
+        run: |
+          ARCH=$(docker image inspect pse-edge-mcp:ci --format '{{.Architecture}}')
+          test "$ARCH" = "${{ matrix.arch }}"
+          TOOLS=$(docker run --rm --entrypoint python pse-edge-mcp:ci -c '
+          import asyncio
+          from pse_edge_mcp.server import build_server
+          print(len(asyncio.run(build_server().list_tools())))')
+          echo "Tools registered on $ARCH: $TOOLS"
+          test "$TOOLS" -ge 6

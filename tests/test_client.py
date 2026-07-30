@@ -70,7 +70,3 @@ async def test_server_error_becomes_edge_unavailable():
     with pytest.raises(EdgeUnavailableError):
         await client.fetch_stock_data_page("599")
     await client.aclose()
-
-
-def test_chart_date_parsing():
-    assert PseEdgeClient.parse_chart_date("Jun 01, 2026 00:00:00") == date(2026, 6, 1)

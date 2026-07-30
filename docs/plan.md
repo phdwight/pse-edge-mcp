@@ -39,7 +39,8 @@ Names and shapes to be finalized during Phase 0, but roughly:
 - `get_price_history(symbol, period)` — OHLC series from Edge's chart endpoint
 - `get_company_profile(symbol)` — profile, sector, listing info
 - `get_financial_highlights(symbol)` — key figures Edge exposes as data
-- `search_disclosures(symbol?, from_date?, to_date?, template?, keyword?, page?)` — paginated list
+- `search_disclosures(symbol?, start_date?, end_date?, template?, page?)` — paginated list
+- `search_disclosure_fulltext(keyword, ...)` — search text inside attachments (added in Phase 2; see below)
 - `get_disclosure(edge_no)` — full detail + attachment URLs
 - `get_dividends_and_rights(symbol)` — dividend/rights notices
 - `get_indices()` — PSEi & sector index levels/changes
@@ -72,8 +73,8 @@ Design rules: every tool returns typed, validated JSON (Pydantic models → JSON
 
 **Image hygiene (required):** images must be thin, optimized, and secret-free —
 
-- *Thin:* multi-stage build — `uv` and build toolchain live only in the builder stage; the runtime stage copies just the resolved virtualenv and app code onto bare `python:3.14-slim`. No compilers, no uv, no git, no dev/test dependencies in the final image. Target well under ~200 MB; image size checked in CI so regressions fail the build.
-- *No bloat:* aggressive `.dockerignore` (`.git`, tests, fixtures, docs, caches, `compose*.yaml`, CI configs); no `pip` cache or `__pycache__` layers (`PYTHONDONTWRITEBYTECODE=1`, `--no-cache`); single-purpose layers ordered for cache reuse (deps before code).
+- *Only what it needs to run (decided; supersedes the earlier "<200 MB" target):* multi-stage build — `uv` and the build toolchain live only in the builder stage; the runtime stage copies just the resolved virtualenv onto bare `python:3.14-slim`. The project installs `--no-editable`, so no source tree or `.pth` indirection ships. No compilers, no uv, no pip, no dev/test dependencies, no bytecode caches. **The CI gate is necessity, not a byte count:** `scripts/check_image.py` asserts the installed distributions equal the runtime closure that `uv export` resolves from the lockfile, so a stray optional extra or a leaked dev dependency fails the build; size is reported for information. A fixed threshold was tried first and rejected — it passed while the image shipped a package manager and 44 MB of unused database drivers, and it would fail on a dependency the app genuinely needs. Corollary: a runtime dependency is added only when code imports it.
+- *No bloat:* aggressive `.dockerignore` (`.git`, tests, fixtures, docs, caches, `compose*.yaml`, CI configs); no `pip` cache or `__pycache__` layers (`UV_COMPILE_BYTECODE=0` in the builder, `PYTHONDONTWRITEBYTECODE=1` at runtime — bytecode was ~14 MB of the venv and CPython regenerates it in memory); single-purpose layers ordered for cache reuse (deps before code). Note that deleting base-image files (e.g. pip) in a later layer does *not* reclaim bytes — layers are additive, so that is attack-surface reduction only, and the base image itself is the floor on image size.
 - *No secrets:* nothing secret is ever baked into any layer — no `.env` in the build context (dockerignored), no ARG/ENV carrying credentials (build args persist in image history), no tokens in labels. All secrets (`DATABASE_URL`, OAuth signing keys, email API key) arrive at **runtime only** via Compose `env_file`/environment or Docker secrets. If a build step ever needs a private credential, use BuildKit `--mount=type=secret` (never copied into a layer). CI runs a secret-scan (e.g. trivy/gitleaks) over the built image and fails on findings.
 - Runtime runs as a non-root user with a read-only filesystem where practical.
 
@@ -151,7 +152,19 @@ Scalability decisions made **now**, paid for **later**:
 
 - **Phase 0 — Recon (no server code):** map every useful Edge endpoint in the browser; record real request/response samples into `docs/endpoints.md` + test fixtures. Exit criteria: documented endpoint list covering all v1 domains, incl. session/cookie quirks.
 - **Phase 1 — Skeleton + quotes:** repo scaffold, CI, **Dockerfile + `compose.yaml`** (app + `postgres:18` with healthcheck; `docker compose up` brings up the full dev stack, `docker compose --profile db down` etc. via Compose v2 profiles so stdio-only use needs no DB), `PseEdgeClient`, cache/ratelimit, FastMCP wiring; `search_companies`, `get_stock_quote`, `get_price_history`. Works in Claude Desktop via stdio.
-- **Phase 2 — Disclosures:** search + detail + attachment links, pagination.
+- **Phase 2 — Disclosures (delivered):** search + detail + attachment links, pagination.
+  Two deviations from the original design, both forced by what the fixture pass found
+  (docs/endpoints.md v3):
+  1. The market-wide search backend is `/announcements/search.ax`, not
+     `/keyword/search.ax`. The latter searches *attachment text* against an index that is
+     partial and stale (measured: 2023-2025 only, nothing from 2026), so it could not
+     serve "recent disclosures". It survives as a separate tool,
+     `search_disclosure_fulltext`, which reports its own coverage limits in-band so an
+     LLM client relays "Edge's index doesn't cover this period" instead of "no disclosures".
+  2. Pagination is exact, not blind. Every `search.ax` response carries `[Total n]` and
+     `[page / pages]`, so tools return `total`/`pages`/`has_more` and take a `page`
+     argument rather than looping until a short page — fewer upstream requests for the
+     same information, which the freeze policy's whole purpose recommends.
 - **Phase 3 — Company & market:** profile, financial highlights, dividends/rights, indices, market summary.
 - **Phase 4 — Polish & release:** Postgres storage backend + Alembic schema + archive upserts, README (install for Claude Desktop/Code, ToS note), error-message quality, PyPI publish, tag v0.1.0.
 - **Phase 5 — Accounts & OAuth 2.1:** Authlib authorization server (PKCE, dynamic client registration, resource metadata), signup with email verification + **passkey enrollment (py_webauthn)**, passkey login ceremony on the authorization page, multi-passkey management page, user/credential/token schema in Postgres, tiered quota middleware, admin CLI. Exit criteria: a fresh user can sign up with a passkey, connect from Claude.ai custom connectors via the standard OAuth flow, log in from a second device, and hit their rate limit cleanly.

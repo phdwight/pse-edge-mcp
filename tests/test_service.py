@@ -107,3 +107,36 @@ async def test_single_flight_collapses_concurrent_misses():
     results = await asyncio.gather(*(svc.get("k", fetch) for _ in range(10)))
     assert calls == 1
     assert all(r.value == {"v": 1} for r in results)
+
+
+async def test_immutable_entry_never_refetches_across_boundaries():
+    """Plan §5a: objects keyed by an immutable natural key (disclosure edge_no) are
+    fetched once and never again, no matter how many close boundaries pass."""
+    cal, svc = make(mnl(2026, 7, 27, 8, 0))
+    calls = 0
+
+    async def fetch():
+        nonlocal calls
+        calls += 1
+        return {"edge_no": "abc"}
+
+    first = await svc.get("disclosure:abc", fetch, immutable=True)
+    assert first.meta.data_policy == "immutable"
+    assert first.meta.valid_until is None  # no expiry to report
+
+    cal.set(mnl(2026, 8, 14, 16, 0))  # many boundaries later
+    again = await svc.get("disclosure:abc", fetch, immutable=True)
+    assert again.meta.from_cache is True and again.meta.stale is False
+    assert calls == 1
+
+
+async def test_immutable_miss_still_respects_the_open_market_freeze():
+    """Protecting PSE Edge outranks serving a cache miss: even a never-changing
+    object is not fetched during a session."""
+    _, svc = make(mnl(2026, 7, 27, 11, 0))
+
+    async def fetch():
+        raise AssertionError("must never fetch while market is open")
+
+    with pytest.raises(MarketOpenNoCacheError):
+        await svc.get("disclosure:abc", fetch, immutable=True)

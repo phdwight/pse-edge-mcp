@@ -38,15 +38,38 @@ docker compose up --build
 
 Serves streamable HTTP on `:8000`, with Postgres 18 as shared cache/archive.
 
-## Tools (Phase 1)
+## Tools
 
 | Tool | Description |
 |---|---|
 | `search_companies(query)` | Find PSE-listed companies by name or ticker |
 | `get_stock_quote(symbol)` | Latest EOD quote: price, change, 52-wk range, market cap, full field set |
 | `get_price_history(symbol, start_date?, end_date?)` | Daily OHLC series from Edge's chart endpoint |
+| `search_disclosures(symbol?, start_date?, end_date?, template?, page?)` | Disclosure metadata, market-wide or per company; 50/page with exact totals |
+| `search_disclosure_fulltext(keyword, ...)` | Search the text *inside* disclosure attachments, with snippets |
+| `get_disclosure(edge_no)` | One disclosure's details plus attachment and body-HTML links |
 
-Roadmap (see `docs/plan.md`): disclosures search + documents, financial reports, dividends, indices & market summary, OAuth 2.1 accounts with passkeys, remote deployment.
+Disclosure tools return metadata and links only — this server never downloads or parses
+attachments, so your MCP client can fetch the returned URLs itself if it needs the files.
+Note that Edge's own full-text index is partial (roughly 2023–2025 at last check), so
+`search_disclosure_fulltext` is not a substitute for `search_disclosures`; it reports this
+limit in its results.
+
+Roadmap (see `docs/plan.md`): financial reports, dividends, indices & market summary, Postgres archive, OAuth 2.1 accounts with passkeys, remote deployment.
+
+## Container image
+
+Every merge to `main` publishes an image:
+
+```bash
+docker pull ghcr.io/phdwight/pse-edge-mcp:latest      # or :<version>, :sha-<sha>
+# multi-arch: linux/amd64 and linux/arm64
+docker run --rm -p 8000:8000 ghcr.io/phdwight/pse-edge-mcp:latest   # streamable HTTP
+docker run --rm -i --entrypoint pse-edge-mcp ghcr.io/phdwight/pse-edge-mcp:latest  # stdio
+```
+
+Both architectures are gated before publishing: <200 MB, secret-scanned, and
+smoke-tested on native runners.
 
 ## Development
 
@@ -57,6 +80,10 @@ uv run ruff check .
 ```
 
 Tests run entirely against recorded fixtures — CI never touches PSE Edge.
+
+Work lands on `develop` and reaches `main` by pull request; `main` is protected and
+requires both CI checks. Bumping `version` in `pyproject.toml` makes the next merge cut
+a GitHub Release with a matching immutable image tag.
 
 ## License
 

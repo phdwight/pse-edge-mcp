@@ -10,7 +10,7 @@ Protocol rules (verified by live capture, 2026-07-30):
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date
 from typing import Any
 
 import httpx
@@ -78,7 +78,7 @@ class PseEdgeClient:
     async def _get(self, url: str, **params: str) -> httpx.Response:
         return await self._request("GET", url, params=params or None)
 
-    async def _post_json(self, url: str, body: dict) -> Any:
+    async def _post_json(self, url: str, body: dict[str, Any]) -> Any:
         resp = await self._request(
             "POST", url, json=body, headers={"Content-Type": "application/json"}
         )
@@ -98,7 +98,7 @@ class PseEdgeClient:
 
     # ---- endpoints ---------------------------------------------------------
 
-    async def search_companies(self, query: str) -> list[dict]:
+    async def search_companies(self, query: str) -> list[dict[str, Any]]:
         """GET /autoComplete/searchCompanyNameSymbol.ax — clean JSON."""
         resp = await self._get("/autoComplete/searchCompanyNameSymbol.ax", term=query)
         try:
@@ -116,7 +116,7 @@ class PseEdgeClient:
 
     async def fetch_price_history(
         self, company_id: str, security_id: str, start: date, end: date
-    ) -> dict:
+    ) -> dict[str, Any]:
         """POST /common/DisclosureCht.ax (JSON dialect).
 
         Response: {"chartData": [{OPEN, HIGH, LOW, CLOSE, VALUE, CHART_DATE}], "tableData": [...]}
@@ -132,7 +132,94 @@ class PseEdgeClient:
             raise EndpointChangedError("DisclosureCht.ax: missing chartData key")
         return data
 
-    @staticmethod
-    def parse_chart_date(raw: str) -> date:
-        """CHART_DATE arrives as e.g. 'Jun 01, 2026 00:00:00'."""
-        return datetime.strptime(raw, "%b %d, %Y %H:%M:%S").date()
+    # ---- disclosures (Phase 2) ---------------------------------------------
+
+    async def search_announcements(
+        self,
+        *,
+        from_date: date,
+        to_date: date,
+        company_id: str = "",
+        template: str = "",
+        keyword: str = "",
+        page: int = 1,
+    ) -> str:
+        """POST /announcements/search.ax — market-wide, date-ranged disclosure list.
+
+        The primary disclosure search: 50 rows/page, chronological (DESC), covers
+        current data. `companyId` narrows it to one company. Verified 2026-07-30.
+        """
+        return await self._post_form(
+            "/announcements/search.ax",
+            {
+                "pageNo": str(page),
+                "keyword": keyword,
+                "tmplNm": template,
+                "companyId": company_id,
+                "fromDate": from_date.strftime("%m-%d-%Y"),
+                "toDate": to_date.strftime("%m-%d-%Y"),
+                "sortType": "",
+                "dateSortType": "DESC",
+                "cmpySortType": "",
+            },
+        )
+
+    async def search_company_disclosures(
+        self, company_id: str, *, template: str = "", page: int = 1
+    ) -> str:
+        """POST /companyDisclosures/search.ax — one company's full disclosure history.
+
+        `keyword` on the wire is the numeric company id (a symbol yields 0 rows).
+        No date filter: use this for complete history, announcements for date ranges.
+        """
+        return await self._post_form(
+            "/companyDisclosures/search.ax",
+            {
+                "pageNo": str(page),
+                "keyword": company_id,
+                "tmplNm": template,
+                "sortType": "",
+                "dateSortType": "DESC",
+                "cmpySortType": "",
+            },
+        )
+
+    async def search_disclosure_fulltext(
+        self,
+        keyword: str,
+        *,
+        from_date: date | None = None,
+        to_date: date | None = None,
+        company_id: str = "",
+        subject_title: str = "",
+        sector: str = "",
+        subsector: str = "",
+        page: int = 1,
+    ) -> str:
+        """POST /keyword/search.ax — full-text search over disclosure *attachment text*.
+
+        Relevance-ordered, 10 hits/page, returns snippets. Note (verified 2026-07-30):
+        Edge's full-text index is partial — it covered only 2023-2025 at capture time
+        and held nothing from 2026, so this is not a substitute for
+        search_announcements when recency matters. Dates go over as MM-dd-yyyy;
+        startDate/startDt are silently ignored here (only fromDate/toDate filter).
+        """
+        return await self._post_form(
+            "/keyword/search.ax",
+            {
+                "pageNo": str(page),
+                "keyword": keyword,
+                "fromDate": from_date.strftime("%m-%d-%Y") if from_date else "",
+                "toDate": to_date.strftime("%m-%d-%Y") if to_date else "",
+                "companyId": company_id,
+                "cmpyNm": "",
+                "subjectTitle": subject_title,
+                "sector": sector,
+                "subsector": subsector,
+            },
+        )
+
+    async def fetch_disclosure_viewer(self, edge_no: str) -> str:
+        """GET /openDiscViewer.do — disclosure detail page (metadata + attachment ids)."""
+        resp = await self._get("/openDiscViewer.do", edge_no=edge_no)
+        return resp.text
