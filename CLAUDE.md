@@ -21,8 +21,15 @@ Unofficial — Edge has no public API; we speak to the portal's own internal end
    fragments for `search.ax` endpoints. Wire dates are `MM-dd-yyyy`.
 4. **Loud on drift.** If Edge's response shape changes, raise `EndpointChangedError` —
    never silently return partial data.
-5. **Docker images stay thin and secret-free.** Multi-stage, non-root, no build tools
-   in runtime, no credentials in any layer/ARG/ENV. CI enforces <200 MB + secret scan.
+5. **The runtime image contains only what the app needs to run** — and no secrets.
+   Multi-stage, non-root, no build tools or package manager in runtime, no dev deps, no
+   bytecode caches, no source tree (the project installs `--no-editable`), no credentials
+   in any layer/ARG/ENV. **The gate is necessity, not a size number:**
+   `scripts/check_image.py` asserts installed distributions equal the resolved runtime
+   closure from `uv export` (so any stray extra or leaked dev dep fails), and reports size
+   as information only. Don't reintroduce a megabyte threshold — it passes while shipping
+   junk and fails on a genuinely needed large dependency. Add a runtime dependency only
+   when code imports it (this is why the `postgres` extra waits for Phase 4).
 
 ## Branching & release (decided)
 

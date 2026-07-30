@@ -37,14 +37,22 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.14"
       # Each runner is native for its own arch, so a plain build needs no buildx or QEMU.
       - name: Build image
         run: docker build -t pse-edge-mcp:ci .
-      - name: Enforce image size budget (<200MB)
+      # Enforces necessity, not a megabyte number: installed distributions must equal
+      # the resolved runtime closure, with no toolchain, package manager, dev deps,
+      # caches, or stray source tree. Size is reported for information only.
+      - name: Check image contains only what the app needs
         run: |
-          SIZE=$(docker image inspect pse-edge-mcp:ci --format '{{.Size}}')
-          echo "Image size (${{ matrix.arch }}): $((SIZE / 1024 / 1024)) MB"
-          test "$SIZE" -lt $((200 * 1024 * 1024))
+          # pipefail matters: without it the pipeline returns tee's status and a failed
+          # check would pass silently.
+          set -eo pipefail
+          uv sync --all-extras --quiet
+          uv run python scripts/check_image.py pse-edge-mcp:ci | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Scan image for secrets & vulns
         uses: aquasecurity/trivy-action@master
         with:
