@@ -150,8 +150,10 @@ required one does not. Image size is reported for information and never gated.
 Two topologies, chosen by how the host is reached. Both pull the published image rather than
 building, so production runs the artifact CI gated.
 
-**A VPS that owns ports 80 and 443** — Caddy terminates TLS and renews certificates
-automatically:
+**A host reachable on ports 80 and 443** — Caddy terminates TLS and renews certificates
+automatically. It publishes on 8280/8243 to stay clear of a NAS's own web UI, so the router
+must forward 80 → 8280 and 443 → 8243; certificate authorities always validate on 80/443, so
+that forwarding is required, not optional:
 
 ```bash
 cp .env.example .env    # PSE_DOMAIN, PSE_ACME_EMAIL, POSTGRES_PASSWORD, ZEPTOMAIL_API_KEY, PSE_IMAGE_TAG
@@ -162,7 +164,7 @@ docker compose -f compose.yaml -f compose.prod.yaml up -d
 nothing from Cloudflare:
 
 ```bash
-docker compose -f compose.nas.yaml up -d                                  # http://<nas-ip>:8000
+docker compose -f compose.nas.yaml up -d                                  # http://<nas-ip>:8200
 docker compose -f compose.nas.yaml -f compose.tunnel.yaml up -d           # + public hostname
 ```
 

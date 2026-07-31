@@ -27,8 +27,19 @@ services:
     image: caddy:2-alpine
     restart: unless-stopped
     ports:
-      - "80:80"
-      - "443:443"
+      # Published high to stay clear of whatever else already runs on the host — a NAS
+      # usually has its own web UI on 80 and 443. Only the *published* side moves; Caddy
+      # still listens on 80/443 inside the container, so the Caddyfile is unchanged.
+      #
+      # THIS REQUIRES YOUR ROUTER TO FORWARD 80 -> 8280 AND 443 -> 8243. Certificate
+      # authorities always connect on port 80 (HTTP-01) or 443 (TLS-ALPN-01); those numbers
+      # are fixed in the protocol and no Caddy setting changes them. If the internet cannot
+      # reach this host on 80/443 by some path, Caddy never obtains a certificate and the
+      # site never serves. Where that forwarding is impossible — CGNAT, a locked-down
+      # router, an ISP that blocks 80 — use compose.nas.yaml + compose.tunnel.yaml instead,
+      # which needs no inbound ports at all.
+      - "${PSE_HTTP_PORT:-8280}:80"
+      - "${PSE_HTTPS_PORT:-8243}:443"
     environment:
       PSE_DOMAIN: ${PSE_DOMAIN:?set PSE_DOMAIN in .env}
       PSE_ACME_EMAIL: ${PSE_ACME_EMAIL:?set PSE_ACME_EMAIL in .env}

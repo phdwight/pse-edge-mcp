@@ -22,6 +22,24 @@ docker compose -f compose.yaml -f compose.prod.yaml up -d
 Neither `app` nor `db` publishes a port: everything arrives through Caddy. A stray firewall
 rule therefore cannot expose the app unencrypted or the database at all.
 
+## Ports, and what ACME requires of them
+
+Caddy publishes on **8280** and **8243** rather than 80 and 443, to stay clear of whatever
+else already runs on the host — on a NAS, 80 and 443 usually belong to the device's own web
+UI. Only the published side moves; Caddy still listens on 80/443 *inside* the container, so
+the Caddyfile is untouched. Override with `PSE_HTTP_PORT` / `PSE_HTTPS_PORT`.
+
+**Your router must forward 80 → 8280 and 443 → 8243.** This is not a preference. A
+certificate authority validates by connecting to your domain on port 80 (HTTP-01) or 443
+(TLS-ALPN-01); those numbers are fixed in the ACME protocol, and no Caddy setting moves them.
+If the internet cannot reach this host on 80 and 443 by some path, Caddy never obtains a
+certificate, and the site never serves at all — the failure is total, not degraded.
+
+So this file suits a host you control the edge of. Where you cannot forward those ports —
+CGNAT, a locked-down router, an ISP that blocks 80, or a NAS whose ports are already
+spoken for — use `compose.nas.yaml` + `compose.tunnel.yaml` instead. That path needs no
+inbound ports whatsoever, and Cloudflare handles the certificate.
+
 ## Required configuration
 
 ```bash
@@ -150,13 +168,13 @@ docker compose -f compose.nas.yaml up -d
 
 That is the whole stage. No Cloudflare account, domain or token is involved yet — those
 variables live in the stage 2 file, so nothing asks for them until you opt in. The server
-is reachable at `http://<nas-ip>:8000`, and nothing is exposed to the internet.
+is reachable at `http://<nas-ip>:8200`, and nothing is exposed to the internet.
 
 Check it:
 
 ```bash
-curl http://<nas-ip>:8000/health           # {"status": "ok", "version": "0.6.0", ...}
-curl -X POST http://<nas-ip>:8000/mcp      # 401 — auth is on
+curl http://<nas-ip>:8200/health           # {"status": "ok", "version": "0.6.0", ...}
+curl -X POST http://<nas-ip>:8200/mcp      # 401 — auth is on
 ```
 
 **Auth is on even on the LAN**, because a NAS is a shared machine and turning auth on
@@ -170,7 +188,7 @@ docker compose -f compose.nas.yaml exec app pse-edge-admin issue-token you@examp
 ```
 
 ```bash
-curl -X POST http://<nas-ip>:8000/mcp \
+curl -X POST http://<nas-ip>:8200/mcp \
   -H "Authorization: Bearer pse_..." \
   -H 'Content-Type: application/json' \
   -H 'Accept: application/json, text/event-stream' \
@@ -217,7 +235,7 @@ forget. It also swaps `PSE_PUBLIC_URL` to the https hostname. Confirm both:
 
 ```bash
 curl -sf https://mcp.example.com/health && echo "public: up"
-curl -s -m 4 http://<nas-ip>:8000/health || echo "LAN port: closed (correct)"
+curl -s -m 4 http://<nas-ip>:8200/health || echo "LAN port: closed (correct)"
 ```
 
 Then **do one real passkey signup immediately.** It is the only check that proves
