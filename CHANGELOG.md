@@ -4,29 +4,27 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/) · Versioning: [SemVer](https://semver.org/).
 
 
+
 ## [Unreleased]
+
+## [0.5.0] - 2026-07-30
 
 ### Added
 - **Phase 5 stage 2 — OAuth 2.1 and passkeys.** Self-service signup with no passwords anywhere: email verification link → WebAuthn passkey enrollment → dynamic client registration (RFC 7591) → authorize with mandatory S256 PKCE → consent → token. Discovery via RFC 9728 protected-resource metadata and RFC 8414 authorization-server metadata, and 401s now carry `WWW-Authenticate: Bearer resource_metadata="…"` so a client can find the authorization server instead of hitting a dead end. Refresh tokens rotate; replaying a rotated one is treated as theft and revokes the whole family (RFC 9700 §4.14). New modules: `oauth.py`, `passkeys.py`, `auth_app.py`, `email.py`; migration `0003_oauth`.
 - ZeptoMail transactional email (console sender when no key is configured). Unlike archive writes, a send failure is raised rather than swallowed — a user who never receives their link experiences "signup is broken".
 - 46 new tests (201 total), including a full journey through the real ASGI stack against real Postgres: signup → passkey enrollment → DCR → authorize → passkey login → consent → PKCE exchange → authenticated `/mcp` call → refresh. `soft-webauthn` provides real WebAuthn signatures, so the ceremonies are genuinely verified without a browser. Attack cases are covered explicitly: open-redirector refusal, prefix-matching redirect URIs, PKCE downgrade to `plain`, code replay, consent replay, refresh reuse, tampered assertions, challenge replay, refresh-as-bearer, and account enumeration via the signup response.
+- **Phase 5 stage 1 — bearer auth and quotas, opt-in** (`PSE_AUTH_REQUIRED=1`, needs `DATABASE_URL`; stdio never authenticates). Opaque `pse_`-prefixed tokens stored as SHA-256 only; validation is one indexed lookup fronted by a cache whose **TTL is the revocation-latency budget and nothing else** (default 60 s, `PSE_TOKEN_CACHE_TTL`); refusals are never cached, so a just-issued token works immediately. Per-user quotas (60/min, 2,000/day defaults, per-user overrides) counted in fixed in-process windows; over-limit answers 429 with `Retry-After` and a `RATE_LIMITED` body. New `pse-edge-admin` CLI (create-user, issue-token, revoke-token, disable-user, set-quota, list-users), migration `0002_auth`, and 34 new tests including a live end-to-end pass: 401 without a token, 200 with one, 429 past quota, and revocation landing within the documented budget.
+- Connection-pool sizing is configurable (`PSE_DB_POOL_SIZE`, `PSE_DB_MAX_OVERFLOW`) — auth turns every request into a potential DB lookup, so the pool stops being a fixed default.
 
 ### Changed
 - **Authlib dropped from the design** (plan §6, at the revisit point the plan itself scheduled). Verified empirically: Authlib 1.7 ships OAuth *server* integrations for Flask and Django only — `starlette_client` is the client side — so adopting it meant bending a Flask-shaped server onto Starlette for a surface small enough to enumerate. `oauth.py` implements it directly, with each rule pinned by a test.
 - `auth_store` now requires `kind='access'`, so refresh tokens sharing the table can never be presented as bearer tokens.
 - The image and both image gates install the new `auth` extra, since code imports `webauthn`.
-
-### Added
-- **Phase 5 stage 1 — bearer auth and quotas, opt-in** (`PSE_AUTH_REQUIRED=1`, needs `DATABASE_URL`; stdio never authenticates). Opaque `pse_`-prefixed tokens stored as SHA-256 only; validation is one indexed lookup fronted by a cache whose **TTL is the revocation-latency budget and nothing else** (default 60 s, `PSE_TOKEN_CACHE_TTL`); refusals are never cached, so a just-issued token works immediately. Per-user quotas (60/min, 2,000/day defaults, per-user overrides) counted in fixed in-process windows; over-limit answers 429 with `Retry-After` and a `RATE_LIMITED` body. New `pse-edge-admin` CLI (create-user, issue-token, revoke-token, disable-user, set-quota, list-users), migration `0002_auth`, and 34 new tests including a live end-to-end pass: 401 without a token, 200 with one, 429 past quota, and revocation landing within the documented budget.
-- Connection-pool sizing is configurable (`PSE_DB_POOL_SIZE`, `PSE_DB_MAX_OVERFLOW`) — auth turns every request into a potential DB lookup, so the pool stops being a fixed default.
-
-### Changed
 - `docs/plan.md` §6 rewritten: the opaque-over-JWT rationale no longer rests on "quotas need a DB hit per request anyway" (quotas now count in-process — a per-request counter UPDATE is the same hot-row defect class as the archive-on-cache-hit bug). Opaque tokens stay, for instant revocation bounded by the cache TTL. Transactional email decided: **ZeptoMail** (key via env at runtime only).
 - `build_storage()` now also returns the engine, so auth shares the storage pool instead of opening a second one.
 
 ### Fixed
 - `get_price_history` no longer passes through PSE Edge's own duplicate rows: identical repeated trade dates are collapsed (observed live: Jul 21 2026 twice, so a range reported 22 bars for 21 trading days and day-counting consumers double-counted). A date repeating with *different* values raises `ENDPOINT_CHANGED` — that is drift we don't understand, and invariant #4 says be loud rather than guess.
-
 ## [0.4.0] - 2026-07-30
 
 ### Added
