@@ -1,42 +1,32 @@
-# Standalone deployment for a NAS behind a Cloudflare Tunnel.
+# Deployment for a NAS (UGREEN UGOS, Synology, QNAP) or any single Docker host.
 #
-#   docker compose -f compose.nas.yaml up -d
+#   Stage 1 — LAN only, what this file does on its own:
+#       docker compose -f compose.nas.yaml up -d
+#     Reachable at http://<nas-ip>:8000. Nothing is exposed to the internet.
 #
-# Self-contained on purpose: NAS Docker UIs (UGREEN UGOS, Synology Container Manager,
-# QNAP Container Station) import a single compose file far more happily than a base file
-# plus an overlay. It also *pulls* the published image rather than building — a NAS is a
-# poor build host, and the published image is already gated and multi-arch.
+#   Stage 2 — add a public hostname through a Cloudflare Tunnel:
+#       docker compose -f compose.nas.yaml -f compose.tunnel.yaml up -d --remove-orphans
+#     That overlay starts cloudflared *and* unpublishes the port below, so going public
+#     closes the LAN door in the same action rather than leaving it to be remembered.
 #
-# Nothing here publishes a port. cloudflared dials out to Cloudflare, so there is no port
-# forwarding, no dynamic-DNS, nothing for CGNAT to break, and no contest with the NAS's own
-# web UI over 80/443. Cloudflare terminates TLS at its edge, which is why no Caddy or ACME
-# appears in this file.
+# Self-contained on purpose: NAS Docker UIs import a single compose file far more happily
+# than a base plus an overlay. It *pulls* the published image rather than building — a NAS
+# is a poor build host, and the published image is already gated and multi-arch.
 #
 # Required in .env next to this file:
-#   PSE_DOMAIN                mcp.example.com — the public hostname on your Cloudflare zone
-#   CLOUDFLARE_TUNNEL_TOKEN   from the Zero Trust dashboard when you create the tunnel
-#   POSTGRES_PASSWORD         long and random
-#   ZEPTOMAIL_API_KEY         for verification emails
+#   POSTGRES_PASSWORD   long and random
+# Strongly recommended:
+#   PSE_IMAGE_TAG       pin a version (e.g. 0.6.0). :latest is a moving target, and a tag
+#                       that lags this file reads as a broken deployment rather than a
+#                       version mismatch.
 #
-# In the Cloudflare Zero Trust dashboard, the tunnel's public hostname must route to:
-#   Service:  HTTP   →   app:8000
-# (http, not https: the hop from cloudflared to the app is inside the compose network.)
+# Passkey signup does not work over plain http — browsers restrict WebAuthn to secure
+# contexts — so on the LAN you mint a token with the admin CLI instead:
+#   docker compose -f compose.nas.yaml exec app pse-edge-admin create-user you@example.com
+#   docker compose -f compose.nas.yaml exec app pse-edge-admin issue-token you@example.com
+# Signup, OAuth and passkeys all become real in stage 2, under the https hostname.
 
 services:
-  # Outbound-only connection to Cloudflare's edge. No inbound firewall rule exists.
-  cloudflared:
-    image: cloudflare/cloudflared:latest
-    restart: unless-stopped
-    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN:?set CLOUDFLARE_TUNNEL_TOKEN in .env}
-    depends_on:
-      app:
-        condition: service_healthy
-    logging: &logging
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
-
   db:
     image: postgres:18
     restart: unless-stopped
@@ -46,6 +36,8 @@ services:
       POSTGRES_DB: pse_edge
     volumes:
       - pgdata:/var/lib/postgresql
+    # Not published. Only app, backup and purge reach Postgres, over the compose network;
+    # exposing 5432 to a LAN is the most common way these get compromised.
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U pse -d pse_edge"]
       interval: 10s
@@ -55,7 +47,11 @@ services:
       resources:
         limits:
           memory: ${DB_MEMORY_LIMIT:-1g}
-    logging: *logging
+    logging: &logging
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   # Schema is applied by an explicit one-shot job, never by the server on boot.
   migrate:
@@ -72,17 +68,21 @@ services:
   app:
     image: ghcr.io/phdwight/pse-edge-mcp:${PSE_IMAGE_TAG:-latest}
     restart: unless-stopped
+    # LAN access for stage 1. compose.tunnel.yaml resets this to nothing, so a public
+    # deployment cannot also be sitting open on the LAN.
+    ports:
+      - "${PSE_LAN_PORT:-8000}:8000"
     environment:
       DATABASE_URL: postgresql+asyncpg://pse:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/pse_edge
-      # Auth on: the whole point of a public hostname is that strangers can reach it.
+      # On even on the LAN: a NAS is a shared machine, and turning auth on afterwards would
+      # orphan any token minted while it was off.
       PSE_AUTH_REQUIRED: "1"
-      # MUST be the Cloudflare hostname. WebAuthn binds every passkey to the origin it was
-      # enrolled under, so a wrong value here breaks passkeys in a way that looks like a
-      # browser bug — and enrolled credentials cannot be migrated, only re-enrolled.
-      PSE_PUBLIC_URL: https://${PSE_DOMAIN:?set PSE_DOMAIN in .env}
+      # Stage 1 has no public hostname yet. compose.tunnel.yaml overrides this with the
+      # real https URL, which is the value WebAuthn binds every passkey to.
+      PSE_PUBLIC_URL: ${PSE_PUBLIC_URL:-http://localhost:${PSE_LAN_PORT:-8000}}
       PSE_LOG_JSON: "1"
       ZEPTOMAIL_API_KEY: ${ZEPTOMAIL_API_KEY:-}
-      PSE_EMAIL_FROM: ${PSE_EMAIL_FROM:-no-reply@${PSE_DOMAIN}}
+      PSE_EMAIL_FROM: ${PSE_EMAIL_FROM:-no-reply@localhost}
       PSE_DB_POOL_SIZE: ${PSE_DB_POOL_SIZE:-10}
       PSE_DB_MAX_OVERFLOW: ${PSE_DB_MAX_OVERFLOW:-5}
       PSE_QUOTA_PER_MIN: ${PSE_QUOTA_PER_MIN:-60}

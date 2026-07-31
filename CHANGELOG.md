@@ -5,6 +5,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/) · Versioning: [SemVer](
 
 ## [Unreleased]
 
+### Changed
+- **Production pulls the published image instead of building from source.** `compose.prod.yaml` inherited `build: .` from the dev base, so a deployment rebuilt from whatever the host's source tree and Docker cache happened to contain rather than running the artifact CI actually gated — size-checked, secret-scanned, smoke-tested, multi-arch. `app`, `migrate` and `purge` now all pull the same `PSE_IMAGE_TAG`; `purge` had additionally been pinned to a hardcoded `:latest`, so it could run a different build than the app it purges for.
+- **The NAS deployment is now two stages**, because a public hostname is not something you have on day one. `compose.nas.yaml` alone is a complete LAN deployment on `http://<nas-ip>:8000` that needs no Cloudflare account, domain or token — those variables live in the new `compose.tunnel.yaml`, and Compose interpolates required variables before it filters services, so keeping them in a separate file is what makes stage 1 possible at all rather than merely tidy. Adding the overlay starts `cloudflared` *and* unpublishes the LAN port, so going public closes the local door in the same action instead of leaving it to be remembered.
+
 ## [0.6.0] - 2026-07-31
 
 ### Added

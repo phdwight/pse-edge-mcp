@@ -147,26 +147,37 @@ required one does not. Image size is reported for information and never gated.
 
 ## Production
 
+Two topologies, chosen by how the host is reached. Both pull the published image rather than
+building, so production runs the artifact CI gated.
+
+**A VPS that owns ports 80 and 443** — Caddy terminates TLS and renews certificates
+automatically:
+
 ```bash
-cp .env.example .env    # set PSE_DOMAIN, PSE_ACME_EMAIL, POSTGRES_PASSWORD, ZEPTOMAIL_API_KEY
+cp .env.example .env    # PSE_DOMAIN, PSE_ACME_EMAIL, POSTGRES_PASSWORD, ZEPTOMAIL_API_KEY, PSE_IMAGE_TAG
 docker compose -f compose.yaml -f compose.prod.yaml up -d
 ```
 
-TLS with automatic certificate renewal, auth on by default, daily backups, and a daily
-retention purge. `app` and `db` publish no ports — everything arrives through the proxy.
-Health probes are at `/health` (liveness) and `/health/ready` (readiness). The app is also
-importable for other servers: `uvicorn pse_edge_mcp.asgi:app --workers 4`.
-
-On a **NAS behind a Cloudflare Tunnel** — no open ports, no port forwarding — use the
-standalone `compose.nas.yaml` instead:
+**A NAS or any host behind a home router**, in two stages. Stage 1 is LAN-only and needs
+nothing from Cloudflare:
 
 ```bash
-docker compose -f compose.nas.yaml up -d
+docker compose -f compose.nas.yaml up -d                                  # http://<nas-ip>:8000
+docker compose -f compose.nas.yaml -f compose.tunnel.yaml up -d           # + public hostname
 ```
 
-See **[docs/deploy.md](docs/deploy.md)** for both guides, including the one setting most
-worth getting right: `PSE_PUBLIC_URL` must be the real external https URL, because WebAuthn
-binds every passkey to the origin it was enrolled under.
+The tunnel overlay starts `cloudflared` — which dials *out*, so there is no port forwarding
+and nothing for CGNAT to break — and unpublishes the LAN port, so going public closes the
+local door in the same action.
+
+Both give auth on by default, daily backups, a daily retention purge, and no published
+database port. Health probes are `/health` (liveness) and `/health/ready` (readiness). The
+app is importable for other servers: `uvicorn pse_edge_mcp.asgi:app --workers 4`.
+
+See **[docs/deploy.md](docs/deploy.md)** for both guides, including the two settings most
+worth getting right: pin `PSE_IMAGE_TAG` rather than tracking `:latest`, and make
+`PSE_PUBLIC_URL` the real external https URL, because WebAuthn binds every passkey to the
+origin it was enrolled under.
 
 ## Development
 
