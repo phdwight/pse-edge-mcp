@@ -6,8 +6,8 @@
 #
 #   Stage 2 — add a public hostname through a Cloudflare Tunnel:
 #       docker compose -f compose.nas.yaml -f compose.tunnel.yaml up -d --remove-orphans
-#     That overlay starts cloudflared *and* unpublishes the port below, so going public
-#     closes the LAN door in the same action rather than leaving it to be remembered.
+#     Set PSE_LAN_BIND=127.0.0.1 in .env at the same time — that is what stops the port
+#     below being reachable from the LAN once the hostname is public.
 #
 # Self-contained on purpose: NAS Docker UIs import a single compose file far more happily
 # than a base plus an overlay. It *pulls* the published image rather than building — a NAS
@@ -16,9 +16,13 @@
 # Required in .env next to this file:
 #   POSTGRES_PASSWORD   long and random
 # Strongly recommended:
-#   PSE_IMAGE_TAG       pin a version (e.g. 0.7.1). :latest is a moving target, and a tag
+#   PSE_IMAGE_TAG       pin a version (e.g. 0.7.2). :latest is a moving target, and a tag
 #                       that lags this file reads as a broken deployment rather than a
 #                       version mismatch.
+#   PSE_LAN_PORT        if 8200 is already taken. A clash leaves the app container created
+#                       but never started, with NO logs at all — the process never ran, so
+#                       an empty log is the symptom. `docker ps --format '{{.Ports}}'`
+#                       shows what already holds it.
 #
 # Passkey signup does not work over plain http — browsers restrict WebAuthn to secure
 # contexts — so on the LAN you mint a token with the admin CLI instead:
@@ -53,7 +57,12 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  # Schema is applied by an explicit one-shot job, never by the server on boot.
+  # Schema is applied by an explicit one-shot job, never by the server on boot: replicas must
+  # not race to mutate their own schema (plan §5).
+  #
+  # This container RUNS ONCE AND EXITS 0. That is success, not failure. NAS Docker UIs show
+  # it as "Not in use" / "Exited" and often colour the whole project red because of it —
+  # check its log says "Running upgrade" and nothing after, and ignore the badge.
   migrate:
     image: ghcr.io/phdwight/pse-edge-mcp:${PSE_IMAGE_TAG:-latest}
     entrypoint: ["alembic", "upgrade", "head"]

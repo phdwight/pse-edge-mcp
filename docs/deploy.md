@@ -155,10 +155,35 @@ hostname afterwards. Stage 1 is a single file; stage 2 adds one alongside it.
 file much more happily — and **pulls** the published image instead of building, since a NAS
 is a poor build host.
 
+**Use `compose.nas.yaml`, not `compose.prod.yaml`.** The Caddy file is for a host that owns
+ports 80 and 443; on a NAS it fails twice over. It bind-mounts `Caddyfile` from beside
+itself, so importing the compose file alone leaves the `caddy` container *created but never
+started* with an opaque OCI "not a directory" error — and even with the file present, ACME
+cannot issue a certificate unless your router forwards 80 and 443. `compose.nas.yaml` mounts
+no repository files at all, so a single-file import is complete.
+
+## "Error" in the NAS UI, with `migrate` stopped
+
+`migrate` **runs once and exits 0**. That is success. It applies `alembic upgrade head` and
+finishes — the schema must not be applied by the server on boot, because replicas would race
+to mutate it (plan §5). NAS Docker UIs list any stopped container as "Not in use" and colour
+the whole project red on that basis, so a healthy deployment looks broken.
+
+Read the containers rather than the badge. This is a correct stack:
+
+| Container | Expected |
+|---|---|
+| `db`, `app`, `backup`, `purge` | Running (`app` healthy) |
+| `migrate` | **Exited (0)** — its log ends with `Running upgrade …` |
+
+If `app` is running and answering `/health`, the deployment is fine whatever the project
+badge says. A genuine failure looks different: `migrate` exited **non-zero**, or `app`
+restarting in a loop.
+
 ## Stage 1 — LAN only
 
 ```bash
-PSE_IMAGE_TAG=0.7.1            # pin a version; see the warning below
+PSE_IMAGE_TAG=0.7.2            # pin a version; see the warning below
 POSTGRES_PASSWORD=<long random value>
 ```
 
@@ -173,7 +198,7 @@ is reachable at `http://<nas-ip>:8200`, and nothing is exposed to the internet.
 Check it:
 
 ```bash
-curl http://<nas-ip>:8200/health           # {"status": "ok", "version": "0.7.1", ...}
+curl http://<nas-ip>:8200/health           # {"status": "ok", "version": "0.7.2", ...}
 curl -X POST http://<nas-ip>:8200/mcp      # 401 — auth is on
 ```
 

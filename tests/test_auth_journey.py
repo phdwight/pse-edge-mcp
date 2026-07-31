@@ -30,6 +30,7 @@ from pse_edge_mcp.auth_app import AuthApp
 from pse_edge_mcp.auth_middleware import AuthMiddleware
 from pse_edge_mcp.auth_store import PostgresAuthStore
 from pse_edge_mcp.config import Settings
+from pse_edge_mcp.email import EmailSendError
 from pse_edge_mcp.market_calendar import MarketCalendar
 from pse_edge_mcp.oauth import OAuthService
 from pse_edge_mcp.passkeys import PasskeyService
@@ -578,3 +579,28 @@ async def test_consent_without_a_csrf_token_is_refused(stack):
         csrf = authorize.text.split("name=csrf_token value='")[1].split("'")[0]
         granted = await http.post("/consent", data={"flow_id": flow_id, "csrf_token": csrf})
         assert granted.status_code == 302
+
+
+@pytest.mark.postgres
+async def test_a_failing_mail_provider_is_503_not_a_stack_trace(stack):
+    """Seen in production: ZeptoMail answered 500, the exception escaped the handler, and
+    the user typing their address got a bare "Internal Server Error".
+
+    A provider having a bad day is an operational problem, not this user's bug to read a
+    traceback about — and 500 invites them to conclude the address was the problem and try
+    a different one, which cannot help.
+    """
+    surface, email, app = stack
+
+    class BrokenEmail:
+        async def send(self, **kwargs: Any) -> None:
+            raise EmailSendError("ZeptoMail rejected the send (500) from='x@y': <empty body>")
+
+    surface._email = BrokenEmail()  # type: ignore[assignment]
+    async with serving(stack) as (http, _):
+        response = await http.post("/signup", data={"email": "mailer-down@example.com"})
+
+    assert response.status_code == 503, "retryable outage, not a bug and not a client error"
+    assert "try again" in response.text.lower()
+    assert "traceback" not in response.text.lower()
+    assert "zeptomail" not in response.text.lower(), "provider names are for the log, not users"

@@ -20,6 +20,7 @@ readable file is a page an operator can audit.
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
 from urllib.parse import parse_qs
@@ -43,6 +44,8 @@ from .passkeys import (
 )
 
 Handler = Callable[[dict[str, Any], bytes], Awaitable[tuple[int, dict[str, str], bytes]]]
+
+logger = logging.getLogger(__name__)
 
 _PAGE_STYLE = """
 <style>
@@ -309,15 +312,29 @@ class AuthApp:
         except PasskeyError as exc:
             return _html(f"<h1>Create an account</h1><div class='msg err'>{exc}</div>", 400)
         link = f"{self._public}/verify?token={token}"
-        await self._email.send(
-            to=email.strip().lower(),
-            subject="Verify your PSE Edge MCP account",
-            html=(
-                f'<p>Confirm this address to finish signing up:</p><p><a href="{link}">{link}</a>'
-                "</p><p>The link expires in 30 minutes. If you did not request it, ignore "
-                "this email.</p>"
-            ),
-        )
+        try:
+            await self._email.send(
+                to=email.strip().lower(),
+                subject="Verify your PSE Edge MCP account",
+                html=(
+                    f'<p>Confirm this address to finish signing up:</p>'
+                    f'<p><a href="{link}">{link}</a>'
+                    "</p><p>The link expires in 30 minutes. If you did not request it, ignore "
+                    "this email.</p>"
+                ),
+            )
+        except Exception:
+            # A mail provider having a bad day is not this user's bug to read a stack trace
+            # about. 503 with a retry suggestion: the signup token is already stored, so
+            # trying again in a minute genuinely can work. The detail goes to the log, where
+            # the operator can act on it — it may name the misconfigured sender address.
+            logger.exception("signup email failed; the operator needs to see this")
+            return _html(
+                "<h1>Check your email</h1><div class='msg err'>We could not send the "
+                "verification email just now. This is our problem, not yours — please try "
+                "again in a few minutes.</div>",
+                503,
+            )
         # Always the same response, whether or not the address is already registered:
         # otherwise this page enumerates accounts.
         return _html(

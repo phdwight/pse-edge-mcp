@@ -22,6 +22,14 @@ logger = logging.getLogger(__name__)
 ZEPTOMAIL_URL = "https://api.zeptomail.com/v1.1/email"
 
 
+class EmailSendError(RuntimeError):
+    """The provider refused or could not be reached.
+
+    Its own type so the signup handler can tell "the mail provider is unhappy" from a
+    genuine bug, and answer with something a person can act on instead of a 500.
+    """
+
+
 class EmailSender(Protocol):
     async def send(self, *, to: str, subject: str, html: str) -> None: ...
 
@@ -57,8 +65,15 @@ class ZeptoMailSender:
         response = await self._http.post(ZEPTOMAIL_URL, json=payload, headers=self._headers)
         if response.status_code >= 400:
             # Loud: an unsendable verification link means signup is silently broken.
-            raise RuntimeError(
-                f"ZeptoMail rejected the send ({response.status_code}): {response.text[:200]}"
+            #
+            # The sender address is named because it is by far the most common cause, and
+            # ZeptoMail often answers an unverified sender with a bare 500 and an empty
+            # body — which says nothing at all unless the log says what was attempted.
+            # ZeptoMail verifies exact domains, so `pse.example.com` is not covered by a
+            # verified `example.com`.
+            raise EmailSendError(
+                f"ZeptoMail rejected the send ({response.status_code}) "
+                f"from={self._from!r}: {response.text[:200] or '<empty body>'}"
             )
 
 

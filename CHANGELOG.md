@@ -5,6 +5,19 @@ Format: [Keep a Changelog](https://keepachangelog.com/) · Versioning: [SemVer](
 
 ## [Unreleased]
 
+## [0.7.2] - 2026-07-31
+
+### Fixed
+- `PSE_EMAIL_FROM` moved into `.env.example`'s Email section. It had been documented only under "NAS stage 2", so a reader scanning for it where it belongs did not find it — and it is not NAS-specific: both compose files derive a default from `PSE_DOMAIN` and both get it wrong when the hostname is a subdomain. It now carries a curl that tests a sender against ZeptoMail directly, since the failure gives a bare 500 with an empty body and cannot be diagnosed from the app's logs.
+- Corrected a stale claim in `compose.nas.yaml`'s header, which still said the tunnel overlay unpublishes the LAN port — untrue since `!reset` was removed in 0.7.1, and contradicted by the file's own body twenty lines down. Documented the two traps hit while deploying: a taken `PSE_LAN_PORT` leaves the app container created with **no logs at all** (the process never ran, so an empty log *is* the symptom), and `PSE_EMAIL_FROM` must be on a domain ZeptoMail has verified.
+- **A failing mail provider no longer answers signup with a 500.** Seen in production: ZeptoMail returned 500 with an empty body, the exception escaped the handler, and a user typing their address got a bare "Internal Server Error" — which invites them to conclude the address was at fault and try a different one, which cannot help. Signup now answers **503** with "this is our problem, try again in a few minutes", and the detail goes to the log where an operator can act on it. The signup token is already stored by then, so retrying genuinely works.
+- **The send failure now names the sender address**, and says `<empty body>` rather than nothing when the provider returns one. An unverified sender is by far the most common cause and ZeptoMail often reports it as a bare 500, so the old message identified neither the problem nor the value that caused it. Note ZeptoMail verifies **exact** domains: a verified `example.com` does not cover `sub.example.com`.
+- **`compose.prod.yaml` now says that `Caddyfile` must sit beside it.** It is bind-mounted, and Docker cannot mount a file that does not exist, so importing the compose file on its own leaves `caddy` *created but never started* with an opaque OCI "not a directory" error while every other service comes up — which in a NAS UI reads as the project being broken for no visible reason. `compose.nas.yaml` mounts no repository files, so a single-file import of that one is complete.
+- **Documented that `migrate` exiting is success, not failure.** It runs `alembic upgrade head` once and exits 0, because the schema must not be applied by the server on boot (replicas would race to mutate it). NAS Docker UIs list any stopped container as "Not in use" and colour the whole project red on that basis, so a healthy stack looks broken; the deploy guide now gives the expected per-container states and says what a genuine failure looks like instead.
+
+### Added
+- **README: the end-to-end flow for connecting to a hosted server.** A deployment with auth on is an ordinary OAuth 2.1 protected resource, so a modern MCP client needs only the URL — but nothing said so, and the auth section still claimed the self-service flow had not shipped. It now walks the sequence a client actually performs (401 → resource metadata → AS metadata → dynamic registration → PKCE authorize → signup/passkey → consent → code exchange → bearer), names the only two steps a human performs, and gives the operator-issued-token path for clients that do not speak OAuth yet — which is also the only route on a LAN deployment, since passkeys need a secure context.
+
 ## [0.7.1] - 2026-07-31
 
 ### Fixed

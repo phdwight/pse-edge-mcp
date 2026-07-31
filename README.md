@@ -29,6 +29,82 @@ Claude Desktop config:
 }
 ```
 
+## Connecting to a hosted server
+
+A deployment with auth on is a normal OAuth 2.1 protected resource, so a modern MCP client
+needs only the URL — it discovers everything else and drives the whole flow itself.
+
+```json
+{
+  "mcpServers": {
+    "pse-edge": { "url": "https://your-host.example.com/mcp" }
+  }
+}
+```
+
+### What happens on first connect
+
+Nothing here is manual except the two browser steps in bold.
+
+1. The client `POST`s to `/mcp` with no token and gets **401** carrying
+   `WWW-Authenticate: Bearer resource_metadata="…/.well-known/oauth-protected-resource"`.
+   That header is the entire bootstrap: it tells the client where to look next.
+2. It fetches that document, learns which authorization server guards this resource, then
+   reads `/.well-known/oauth-authorization-server` for the endpoints.
+3. It registers itself at `/oauth/register` (RFC 7591) — no client secret, no operator
+   involvement, no pre-shared credentials. It gets back a `client_id`.
+4. It opens `/oauth/authorize` in a browser with a PKCE challenge (S256 required).
+5. **The user signs up or signs in.** New users land on `/signup`, give an email, and
+   receive a link; following it enrolls **a passkey** at `/enroll`. Returning users hit
+   `/login` and use the passkey they already have. No password exists anywhere in the system.
+6. **The user approves the client** on a consent screen naming it.
+7. The browser returns to the client with a single-use code; the client exchanges it at
+   `/oauth/token` with its PKCE verifier and receives an access token (30 min) and a refresh
+   token (30 days).
+8. The client calls `/mcp` with `Authorization: Bearer …` and refreshes silently from then
+   on. The user is not asked again.
+
+```
+client ──POST /mcp──────────────▶ 401 + WWW-Authenticate
+       ──GET  /.well-known/… ───▶ metadata
+       ──POST /oauth/register ──▶ client_id
+       ──GET  /oauth/authorize ─▶ browser: signup/login → passkey → consent
+       ◀─────────────────────────  ?code=…
+       ──POST /oauth/token ─────▶ access (30m) + refresh (30d)
+       ──POST /mcp + Bearer ────▶ tools
+```
+
+Refresh tokens rotate on every use, and replaying a rotated one revokes that whole session
+family (RFC 9700 §4.14) — a stolen refresh token gets one use before the theft is detected
+and the session dies.
+
+### If your client does not do OAuth yet
+
+The operator issues a token directly, and the user pastes it into a header. Same server, no
+browser:
+
+```bash
+pse-edge-admin create-user you@example.com
+pse-edge-admin issue-token you@example.com --note laptop   # plaintext shown once
+```
+
+```bash
+curl -X POST https://your-host.example.com/mcp \
+  -H "Authorization: Bearer pse_..." \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json, text/event-stream' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
+```
+
+This is also the only route on a LAN-only deployment: passkeys need a secure context, so
+plain http cannot enroll one.
+
+### What a user can see and remove
+
+`/account` shows everything held about them — email, passkeys, active tokens, hourly usage
+counts. `POST /account/delete` erases it immediately and completely, with no approval step.
+`/privacy` states what is collected and for how long. Usage counts are deleted after 90 days.
+
 ## Run with Docker Compose (HTTP + Postgres)
 
 ```bash
@@ -55,27 +131,14 @@ clients to complete the `initialize` handshake and forces sticky routing behind 
 ### Bearer auth and quotas (opt-in)
 
 Set `PSE_AUTH_REQUIRED=1` (needs `DATABASE_URL`) and every HTTP request must carry
-`Authorization: Bearer <token>`. Until the self-service OAuth flow ships, accounts are
-provisioned by the operator:
+`Authorization: Bearer <token>`. Users arrive either way described in
+[Connecting to a hosted server](#connecting-to-a-hosted-server) — self-service through
+OAuth 2.1 and passkeys, or an operator-issued token. PKCE is mandatory (S256 only) and no
+password exists anywhere in the system.
 
-```bash
-pse-edge-admin create-user you@example.com
-pse-edge-admin issue-token you@example.com --note laptop   # plaintext shown once
-```
-
-Accounts come with a **privacy surface**: `/privacy` states what is collected (your email
-and hourly usage counts — nothing else identifying), `/account` shows a signed-in user
-everything held about them, and `POST /account/delete` erases it immediately and completely,
-with no approval step. Usage counts are deleted automatically after 90 days. Operators get
-`pse-edge-admin delete-user` and `purge-usage` (cron the latter daily), and `delete-user`
-uses the same erasure code path as the user's own button.
-
-Two ways in. **Self-service (OAuth 2.1 + passkeys):** an MCP client points at this server,
-discovers it via `/.well-known/oauth-protected-resource`, registers itself (RFC 7591) and
-sends the user through `/signup` — email link, then a passkey. No passwords exist anywhere.
-PKCE is mandatory (S256 only), refresh tokens rotate, and replaying a rotated one revokes the
-whole session family. **Operator-issued:** `pse-edge-admin` mints a token directly, which is
-what the CLI examples above do.
+Operators get `pse-edge-admin delete-user` and `purge-usage` (cron the latter daily), and
+`delete-user` uses the same erasure code path as the user's own delete button, so the two
+cannot drift apart.
 
 Tokens are opaque and stored only as SHA-256 hashes. Revocation
 (`pse-edge-admin revoke-token …` / `disable-user …`) takes effect within the validation
