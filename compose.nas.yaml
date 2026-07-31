@@ -16,7 +16,7 @@
 # Required in .env next to this file:
 #   POSTGRES_PASSWORD   long and random
 # Strongly recommended:
-#   PSE_IMAGE_TAG       pin a version (e.g. 0.7.0). :latest is a moving target, and a tag
+#   PSE_IMAGE_TAG       pin a version (e.g. 0.7.1). :latest is a moving target, and a tag
 #                       that lags this file reads as a broken deployment rather than a
 #                       version mismatch.
 #

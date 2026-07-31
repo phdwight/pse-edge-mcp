@@ -5,6 +5,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/) · Versioning: [SemVer](
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-07-31
+
 ### Fixed
 - **No compose file uses `!reset` any more.** It is a Docker-Compose-only YAML tag, and a conforming parser rejects an unknown tag outright — so NAS Docker UIs, PaaS importers and editor linters flagged `compose.prod.yaml` and `compose.tunnel.yaml` as errors while `docker compose` itself was perfectly happy. The file was only broken where it gets deployed, which is the worst place to find out.
   - `compose.prod.yaml` is now **standalone** rather than an overlay on the development file. It no longer inherits a `build:` directive and a published port only to undo them, and it can be imported by a UI that takes one file. Run it with `-f compose.prod.yaml` alone.
