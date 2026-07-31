@@ -5,6 +5,14 @@ Format: [Keep a Changelog](https://keepachangelog.com/) · Versioning: [SemVer](
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-07-31
+
+### Fixed
+- **No compose file uses `!reset` any more.** It is a Docker-Compose-only YAML tag, and a conforming parser rejects an unknown tag outright — so NAS Docker UIs, PaaS importers and editor linters flagged `compose.prod.yaml` and `compose.tunnel.yaml` as errors while `docker compose` itself was perfectly happy. The file was only broken where it gets deployed, which is the worst place to find out.
+  - `compose.prod.yaml` is now **standalone** rather than an overlay on the development file. It no longer inherits a `build:` directive and a published port only to undo them, and it can be imported by a UI that takes one file. Run it with `-f compose.prod.yaml` alone.
+  - The tunnel overlay can no longer close the stage 1 LAN port for you: **Compose merges `ports` additively**, so a second file can add a mapping but never remove one, and `!reset` was the only mechanism. Set `PSE_LAN_BIND=127.0.0.1` in `.env` instead, which moves the port to the host's own loopback — verified from a second machine, LAN access refused while loopback still answers.
+- A test now fails on any Compose-only YAML tag in any `compose*.yaml`, since `docker compose config` accepts them and nothing else in CI would have noticed.
+
 ## [0.7.0] - 2026-07-31
 
 ### Changed

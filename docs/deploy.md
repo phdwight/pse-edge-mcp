@@ -5,10 +5,10 @@ what to set, why the pieces are arranged as they are, and what to check afterwar
 
 ```bash
 cp .env.example .env      # then fill in the required values below
-docker compose -f compose.yaml -f compose.prod.yaml up -d
+docker compose -f compose.prod.yaml up -d
 ```
 
-## What the overlay adds
+## What this deploys
 
 | Service | Role |
 |---|---|
@@ -49,7 +49,7 @@ POSTGRES_PASSWORD=<long random value>
 ZEPTOMAIL_API_KEY=<key>               # verification emails; runtime only, never committed
 ```
 
-**`PSE_PUBLIC_URL` must be the externally reachable https URL.** The overlay derives it from
+**`PSE_PUBLIC_URL` must be the externally reachable https URL.** This file derives it from
 `PSE_DOMAIN`, so setting that correctly is enough. It drives three things at once: the
 WebAuthn `rp_id`, the links in verification emails, and the OAuth issuer in the discovery
 documents. Getting it wrong breaks passkeys in a way that looks like a browser bug, because
@@ -70,7 +70,7 @@ failing should remove a replica from rotation; liveness failing should kill it. 
 
 ## Workers and what is shared
 
-`--workers 2` in the overlay. Each worker is a separate process that re-imports the app, so
+`--workers 2` by default (`PSE_WORKERS`). Each worker is a separate process that re-imports the app, so
 **every in-memory structure is per worker**: quota windows, the parse memo, the token
 validation cache, and the usage buffer.
 
@@ -104,7 +104,7 @@ accumulated EOD archive. Everything else can be re-fetched from PSE Edge.
 ## First-run checklist
 
 ```bash
-docker compose -f compose.yaml -f compose.prod.yaml ps          # all services up, app healthy
+docker compose -f compose.prod.yaml ps          # all services up, app healthy
 curl -fsS https://$PSE_DOMAIN/health                            # 200 via TLS
 curl -fsS https://$PSE_DOMAIN/.well-known/oauth-protected-resource
 curl -fsS -o /dev/null -w '%{http_code}\n' -X POST https://$PSE_DOMAIN/mcp   # expect 401
@@ -149,7 +149,7 @@ lengthens the window in which a revoked token still works.
 # NAS deployment, in two stages
 
 Bring the stack up on the NAS first and confirm it works on your LAN; add the public
-hostname afterwards. Each stage is one compose file, and stage 2 is additive.
+hostname afterwards. Stage 1 is a single file; stage 2 adds one alongside it.
 
 `compose.nas.yaml` is standalone rather than an overlay — NAS Docker UIs import a single
 file much more happily — and **pulls** the published image instead of building, since a NAS
@@ -158,7 +158,7 @@ is a poor build host.
 ## Stage 1 — LAN only
 
 ```bash
-PSE_IMAGE_TAG=0.7.0            # pin a version; see the warning below
+PSE_IMAGE_TAG=0.7.1            # pin a version; see the warning below
 POSTGRES_PASSWORD=<long random value>
 ```
 
@@ -173,7 +173,7 @@ is reachable at `http://<nas-ip>:8200`, and nothing is exposed to the internet.
 Check it:
 
 ```bash
-curl http://<nas-ip>:8200/health           # {"status": "ok", "version": "0.7.0", ...}
+curl http://<nas-ip>:8200/health           # {"status": "ok", "version": "0.7.1", ...}
 curl -X POST http://<nas-ip>:8200/mcp      # 401 — auth is on
 ```
 
@@ -221,6 +221,7 @@ and 443.
    PSE_DOMAIN=mcp.example.com
    CLOUDFLARE_TUNNEL_TOKEN=<the token from step 1>
    ZEPTOMAIL_API_KEY=<key>          # verification email, now that strangers can sign up
+   PSE_LAN_BIND=127.0.0.1           # closes the stage 1 LAN port — see below
    ```
 
 4. Bring it up with both files:
@@ -229,9 +230,14 @@ and 443.
    docker compose -f compose.nas.yaml -f compose.tunnel.yaml up -d --remove-orphans
    ```
 
-The overlay starts `cloudflared` **and** unpublishes the LAN port, so going public and
-closing the local door are one action rather than two, the second of which is easy to
-forget. It also swaps `PSE_PUBLIC_URL` to the https hostname. Confirm both:
+The overlay starts `cloudflared` and swaps `PSE_PUBLIC_URL` to the https hostname.
+
+**`PSE_LAN_BIND=127.0.0.1` is what closes the stage 1 LAN port**, and it is a separate line
+in `.env` rather than something the overlay does for you. Compose merges `ports` additively
+— a second file can add a mapping but never remove one — so an overlay genuinely cannot take
+the port away. Setting the bind address moves it to the NAS's own loopback instead: still
+there for debugging from the NAS shell, no longer reachable from the local network. Confirm
+it rather than assuming, from a *different* machine:
 
 ```bash
 curl -sf https://mcp.example.com/health && echo "public: up"
