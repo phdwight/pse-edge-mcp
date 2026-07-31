@@ -218,3 +218,24 @@ oauth_flows = Table(
     Column("expires_at", DateTime(timezone=True), nullable=False),  # flow TTL
     Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
 )
+
+# --- Phase 5 privacy: usage audit log (plan §6a) ------------------------------
+#
+# Aggregated per (user, day, hour), NOT one row per request. Two reasons: at 1k req/s a
+# per-request row is ~86M rows/day of pure churn, and the compliance question a log has to
+# answer — "what does this service hold about me, and what did this account do" — is
+# answered just as well by hourly counts. Minimal data collection is itself a §6a
+# requirement, so recording less is the goal, not a compromise.
+
+usage_events = Table(
+    "usage_events",
+    metadata,
+    Column("user_id", String, ForeignKey("users.id"), primary_key=True),
+    # Date + hour rather than a timestamp: it is the aggregation key, and it makes the
+    # retention purge a simple indexed range delete.
+    Column("day", Date, primary_key=True),
+    Column("hour", Integer, primary_key=True),
+    Column("requests", Integer, nullable=False, server_default="0"),
+    Column("rejected", Integer, nullable=False, server_default="0"),
+    Column("updated_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+)

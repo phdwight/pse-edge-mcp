@@ -99,6 +99,7 @@ def stack(pg_engine):
         passkeys=PasskeyService(pg_engine, public_url=PUBLIC_URL),
         email=email,
         public_url=PUBLIC_URL,
+        engine=pg_engine,
     )
     return surface, email, app
 
@@ -262,7 +263,9 @@ async def test_signup_enroll_authorize_and_call_mcp_with_the_issued_token(stack)
         assert "Claude" in consent_page.text
 
         # 7. Consent issues the code on the registered redirect, with state intact.
-        consent = await http.post("/consent", data={"flow_id": flow_id})
+        # The CSRF token comes from the rendered page, exactly as a browser would submit it.
+        csrf = consent_page.text.split("name=csrf_token value='")[1].split("'")[0]
+        consent = await http.post("/consent", data={"flow_id": flow_id, "csrf_token": csrf})
         assert consent.status_code == 302
         location = urlparse(consent.headers["location"])
         assert f"{location.scheme}://{location.netloc}{location.path}" == REDIRECT
@@ -336,7 +339,8 @@ async def test_refresh_tokens_cannot_be_used_as_bearer_tokens(stack):
         # directly rather than bouncing through login.
         assert authorize.status_code == 200, authorize.text
         flow_id = flow_id_from_consent(authorize.text)
-        consent = await http.post("/consent", data={"flow_id": flow_id})
+        csrf = authorize.text.split("name=csrf_token value='")[1].split("'")[0]
+        consent = await http.post("/consent", data={"flow_id": flow_id, "csrf_token": csrf})
         code = parse_qs(urlparse(consent.headers["location"]).query)["code"][0]
         tokens = (
             await http.post(
@@ -468,3 +472,109 @@ async def test_well_known_and_oauth_routes_are_reachable_without_a_token(stack):
         assert (await http.get("/login")).status_code == 200
         # ...while the MCP endpoint itself stays guarded.
         assert (await http.post("/mcp", json={})).status_code == 401
+
+
+# --- privacy surface (plan §6a) ----------------------------------------------
+
+
+async def test_privacy_page_is_public_and_states_the_commitments(stack):
+    """A policy nobody can read before signing up is not a policy — so it needs no auth,
+    and it has to actually say the things §6a requires."""
+    async with serving(stack) as (http, _):
+        response = await http.get("/privacy")
+
+    assert response.status_code == 200
+    body = response.text.lower()
+    assert "90 days" in body, "retention window must be stated"
+    assert "delete your account" in body, "self-deletion right must be stated"
+    assert "breach" in body, "breach-notification contact must be stated"
+    assert "zeptomail" in body, "third-party processor must be disclosed"
+
+
+async def test_disposable_email_domains_are_refused_at_signup(stack):
+    """A cheap abuse brake (plan §6). Also honest: the address is the recovery path."""
+    async with serving(stack) as (http, email):
+        blocked = await http.post("/signup", data={"email": "burner@mailinator.com"})
+        allowed = await http.post("/signup", data={"email": "real@example.com"})
+
+    assert blocked.status_code == 400
+    assert "not accepted" in blocked.text
+    assert allowed.status_code == 200
+    assert [m["to"] for m in email.sent] == ["real@example.com"], "no email for the blocked one"
+
+
+async def test_account_page_shows_the_subject_their_own_data(stack):
+    async with serving(stack) as (http, email):
+        await enroll_passkey(http, email, "mydata@example.com")
+        page = await http.get("/account")
+
+    assert page.status_code == 200
+    assert "mydata@example.com" in page.text
+    assert "Passkeys:</strong> 1" in page.text.replace("\n", "")
+
+
+async def test_account_page_requires_a_session(stack):
+    async with serving(stack) as (http, _):
+        response = await http.get("/account")
+    assert response.status_code == 302
+    assert response.headers["location"].endswith("/login")
+
+
+async def test_self_deletion_erases_the_account_through_the_endpoint(stack):
+    """The §6a right, end to end: no request, no waiting period, no email exchange."""
+    async with serving(stack) as (http, email):
+        await enroll_passkey(http, email, "goodbye@example.com")
+        page = await http.get("/account")
+        csrf = page.text.split("name=csrf_token value='")[1].split("'")[0]
+
+        deleted = await http.post("/account/delete", data={"csrf_token": csrf})
+        assert deleted.status_code == 200
+        assert "erased" in deleted.text.lower()
+
+        # The session cookie is cleared, so the account page sends them to login rather
+        # than to a confusing "session expired".
+        after = await http.get("/account")
+        assert after.status_code == 302
+
+        # Signing up again with the same address must be possible — erasure was complete.
+        again = await http.post("/signup", data={"email": "goodbye@example.com"})
+        assert again.status_code == 200
+
+
+async def test_deletion_without_a_csrf_token_is_refused(stack):
+    """SameSite=Lax already blocks the cross-site POST; this is the second lock."""
+    async with serving(stack) as (http, email):
+        await enroll_passkey(http, email, "csrf@example.com")
+        refused = await http.post("/account/delete", data={"csrf_token": "wrong"})
+        assert refused.status_code == 403
+        # ...and the account still exists.
+        assert (await http.get("/account")).status_code == 200
+
+
+async def test_consent_without_a_csrf_token_is_refused(stack):
+    """An authorization granted by a forged POST would hand an attacker a real token."""
+    async with serving(stack) as (http, email):
+        await enroll_passkey(http, email, "consent-csrf@example.com")
+        client_id = (await http.post("/oauth/register", json={"redirect_uris": [REDIRECT]})).json()[
+            "client_id"
+        ]
+        _, challenge = pkce_pair()
+        authorize = await http.get(
+            "/oauth/authorize",
+            params={
+                "client_id": client_id,
+                "redirect_uri": REDIRECT,
+                "response_type": "code",
+                "code_challenge": challenge,
+                "code_challenge_method": "S256",
+            },
+        )
+        flow_id = flow_id_from_consent(authorize.text)
+
+        forged = await http.post("/consent", data={"flow_id": flow_id, "csrf_token": "nope"})
+        assert forged.status_code == 403
+
+        # The genuine token, taken from the page the user actually saw, still works.
+        csrf = authorize.text.split("name=csrf_token value='")[1].split("'")[0]
+        granted = await http.post("/consent", data={"flow_id": flow_id, "csrf_token": csrf})
+        assert granted.status_code == 302

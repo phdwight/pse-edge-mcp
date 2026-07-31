@@ -31,6 +31,7 @@ except ImportError:  # pragma: no cover - exercised only on installs without the
     )
     sys.exit(1)
 
+from .accounts import erase, purge_usage
 from .auth import generate_token, hash_token
 from .db import auth_tokens, create_engine, normalise_url, users
 
@@ -220,6 +221,17 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--per-day", type=int, default=None)
 
     sub.add_parser("list-users", help="list accounts with active-token counts")
+
+    p = sub.add_parser("delete-user", help="ERASE an account and all its data (irreversible)")
+    p.add_argument("email")
+    p.add_argument(
+        "--yes", action="store_true", help="confirm; without it the command refuses to run"
+    )
+
+    p = sub.add_parser(
+        "purge-usage", help="delete usage rows past the retention window (cron this daily)"
+    )
+    p.add_argument("--retention-days", type=int, default=90)
     return parser
 
 
@@ -259,6 +271,25 @@ async def _dispatch(engine: AsyncEngine, args: argparse.Namespace) -> None:
             else "keep",
         )
         print(f"quota updated for {args.email}")
+    elif args.command == "delete-user":
+        # The same erasure path the user's own account page uses — one implementation, so
+        # the operator route cannot drift from the promise made on the privacy page.
+        async with engine.connect() as conn:
+            target = (
+                await conn.execute(select(users.c.id).where(users.c.email == args.email.lower()))
+            ).first()
+        if target is None:
+            raise AdminError(f"no user with email {args.email}")
+        if not args.yes:
+            raise AdminError("refusing to erase without --yes (this cannot be undone)")
+        erased = await erase(engine, target.id)
+        print(f"erased {args.email}: " + ", ".join(f"{k}={v}" for k, v in erased.items()))
+    elif args.command == "purge-usage":
+        from datetime import date as _date
+
+        cutoff = _date.today() - timedelta(days=args.retention_days)
+        purged = await purge_usage(engine, cutoff)
+        print(f"purged {purged} usage row(s) older than {cutoff}")
     elif args.command == "list-users":
         for row in await list_users(engine):
             state = "disabled" if row["disabled_at"] else "active"

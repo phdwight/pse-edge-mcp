@@ -22,6 +22,7 @@ import json
 from typing import Any
 
 from .auth import QuotaTracker, TokenService
+from .usage import NullUsageRecorder, UsageRecorder
 
 _EXEMPT_PREFIXES = ("/.well-known/",)
 
@@ -34,10 +35,14 @@ class AuthMiddleware:
         quotas: QuotaTracker,
         *,
         resource_metadata_url: str | None = None,
+        usage: UsageRecorder | NullUsageRecorder | None = None,
     ) -> None:
         self._app = app
         self._tokens = tokens
         self._quotas = quotas
+        # Buffered in memory and flushed on an interval — recording must not put a write
+        # on the request path (plan §6a; same rule as quotas).
+        self._usage = usage or NullUsageRecorder()
         # RFC 9728 §5.1: advertising the metadata URL on a 401 is how a client discovers
         # *where* to authenticate. Without it a refusal is a dead end and the whole
         # "paste the URL and authorize" flow cannot start.
@@ -74,6 +79,7 @@ class AuthMiddleware:
             return
 
         decision = self._quotas.check(context)
+        self._usage.record(context.user_id, rejected=not decision.allowed)
         if not decision.allowed:
             await _refuse(
                 send,

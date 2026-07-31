@@ -63,6 +63,13 @@ pse-edge-admin create-user you@example.com
 pse-edge-admin issue-token you@example.com --note laptop   # plaintext shown once
 ```
 
+Accounts come with a **privacy surface**: `/privacy` states what is collected (your email
+and hourly usage counts — nothing else identifying), `/account` shows a signed-in user
+everything held about them, and `POST /account/delete` erases it immediately and completely,
+with no approval step. Usage counts are deleted automatically after 90 days. Operators get
+`pse-edge-admin delete-user` and `purge-usage` (cron the latter daily), and `delete-user`
+uses the same erasure code path as the user's own button.
+
 Two ways in. **Self-service (OAuth 2.1 + passkeys):** an MCP client points at this server,
 discovers it via `/.well-known/oauth-protected-resource`, registers itself (RFC 7591) and
 sends the user through `/signup` — email link, then a passkey. No passwords exist anywhere.
@@ -118,7 +125,7 @@ Edge's own units labels are inconsistent between its annual and quarterly sectio
 period reports its `currency_units` for you to check. Index changes are signed here even
 though Edge prints them unsigned (it shows direction only as a colour and an arrow).
 
-Roadmap (see `docs/plan.md`): usage audit log, account self-deletion, production deployment (TLS, backups).
+All six delivery phases are complete; see `docs/plan.md` for what each decided.
 
 ## Container image
 
@@ -137,6 +144,29 @@ closure and nothing else — no build toolchain, no package manager, no dev depe
 bytecode caches, no source tree — plus a secret scan and a smoke test that the server
 starts and registers its tools. A stray dependency fails the build; a large but genuinely
 required one does not. Image size is reported for information and never gated.
+
+## Production
+
+```bash
+cp .env.example .env    # set PSE_DOMAIN, PSE_ACME_EMAIL, POSTGRES_PASSWORD, ZEPTOMAIL_API_KEY
+docker compose -f compose.yaml -f compose.prod.yaml up -d
+```
+
+TLS with automatic certificate renewal, auth on by default, daily backups, and a daily
+retention purge. `app` and `db` publish no ports — everything arrives through the proxy.
+Health probes are at `/health` (liveness) and `/health/ready` (readiness). The app is also
+importable for other servers: `uvicorn pse_edge_mcp.asgi:app --workers 4`.
+
+On a **NAS behind a Cloudflare Tunnel** — no open ports, no port forwarding — use the
+standalone `compose.nas.yaml` instead:
+
+```bash
+docker compose -f compose.nas.yaml up -d
+```
+
+See **[docs/deploy.md](docs/deploy.md)** for both guides, including the one setting most
+worth getting right: `PSE_PUBLIC_URL` must be the real external https URL, because WebAuthn
+binds every passkey to the origin it was enrolled under.
 
 ## Development
 

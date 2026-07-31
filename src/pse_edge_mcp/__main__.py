@@ -14,11 +14,17 @@ piece of "any replica, any request".
 `--stateful` and `--sse` restore session mode for anyone who needs resumability or
 server-initiated messages. They are independent: statelessness is the scaling property,
 plain JSON is what keeps ordinary proxies and autoscalers happy.
+
+The HTTP stack itself is composed in `asgi.py`, so this and a production
+`uvicorn pse_edge_mcp.asgi:app --workers N` run exactly the same arrangement rather than
+two that drift apart.
 """
 
 from __future__ import annotations
 
 import argparse
+import dataclasses
+import os
 
 from .config import Settings
 from .server import build_server
@@ -43,104 +49,64 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="stream responses as server-sent events instead of plain JSON",
     )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=1,
+        help="worker processes (HTTP only). Above 1 the app is re-imported per worker, so "
+        "in-memory state — quota windows, parse memo, token cache — is per worker, and a "
+        "user's effective quota ceiling becomes up to N x nominal.",
+    )
     return parser
+
+
+def with_transport_flags(settings: Settings, *, stateful: bool, sse: bool) -> Settings:
+    """Apply the CLI transport switches on top of environment-derived settings.
+
+    A flag can only turn a mode *on*: the environment is the deployment's baseline, and a
+    missing flag should not silently undo `PSE_STATEFUL=1` set in a compose file.
+    """
+    return dataclasses.replace(
+        settings,
+        stateful_sessions=settings.stateful_sessions or stateful,
+        sse_responses=settings.sse_responses or sse,
+    )
 
 
 def main() -> None:
     args = build_parser().parse_args()
-    settings = Settings.from_env()
 
-    if args.http and settings.auth_required:
-        _serve_http_with_auth(args, settings)
+    if not args.http:
+        # stdio: no transport options, no auth, no HTTP stack at all.
+        build_server().run()
         return
-
-    mcp = build_server()
-    if args.http:
-        mcp.run(
-            transport="streamable-http",
-            host=args.host,
-            port=args.port,
-            stateless_http=not args.stateful,
-            json_response=not args.sse,
-        )
-    else:
-        mcp.run()
-
-
-def _serve_http_with_auth(args: argparse.Namespace, settings: Settings) -> None:
-    """HTTP with bearer auth + quotas enforced ahead of the MCP app (PSE_AUTH_REQUIRED=1).
-
-    Everything Postgres-flavoured is imported lazily here: this branch requires the
-    `postgres` extra, and installs without it must never pay an ImportError for a mode
-    they did not enable.
-    """
-    if not settings.database_url:
-        raise SystemExit(
-            "PSE_AUTH_REQUIRED=1 needs DATABASE_URL — accounts live in Postgres. "
-            "Unset PSE_AUTH_REQUIRED to serve without auth."
-        )
-
-    import asyncio
 
     import uvicorn
 
-    from .auth import QuotaTracker, TokenService
-    from .auth_app import AuthApp
-    from .auth_middleware import AuthMiddleware
-    from .auth_store import PostgresAuthStore, check_auth_schema
-    from .email import build_email_sender
-    from .oauth import OAuthService
-    from .passkeys import PasskeyService
-    from .server import build_storage
+    from .asgi import create_app
+    from .logging_config import configure_logging
 
-    storage, archive, engine = build_storage(settings)
-    if engine is None:  # unreachable given the database_url check; keeps mypy honest
-        raise SystemExit("DATABASE_URL did not produce a database engine")
+    settings = with_transport_flags(Settings.from_env(), stateful=args.stateful, sse=args.sse)
+    configure_logging(json_output=settings.log_json, level=settings.log_level)
 
-    async def _preflight() -> None:
-        await check_auth_schema(engine)
-        # Connections opened during the check are bound to this throwaway event loop;
-        # dispose so uvicorn's loop starts the pool from scratch.
-        await engine.dispose()
+    if args.workers > 1:
+        # The multi-worker supervisor forks and re-imports, so it needs an import string —
+        # an object built here could not be handed to the children. That path reads the
+        # environment, so transport flags must be exported rather than passed as argv.
+        if args.stateful:
+            os.environ["PSE_STATEFUL"] = "1"
+        if args.sse:
+            os.environ["PSE_SSE"] = "1"
+        uvicorn.run(
+            "pse_edge_mcp.asgi:app",
+            host=args.host,
+            port=args.port,
+            workers=args.workers,
+            log_config=None,  # our JSON/plain formatter owns the output
+        )
+        return
 
-    asyncio.run(_preflight())
-
-    mcp = build_server(settings, storage=storage, archive=archive)
-    app = mcp.streamable_http_app(
-        json_response=not args.sse,
-        stateless_http=not args.stateful,
-        host=args.host,
-    )
-    tokens = TokenService(
-        PostgresAuthStore(engine),
-        cache_ttl_sec=settings.token_cache_ttl_sec,
-        default_quota_per_minute=settings.quota_per_minute,
-        default_quota_per_day=settings.quota_per_day,
-    )
-
-    # Layering matters here. The bearer middleware wraps only the MCP app, and the OAuth
-    # surface wraps *that* — so /oauth/* and the signup pages are reachable without a
-    # token (you cannot present one before you have one), while everything else still
-    # requires it. `/.well-known/*` is additionally exempt inside the middleware so
-    # discovery works even if the ordering is ever changed.
-    guarded = AuthMiddleware(
-        app,
-        tokens,
-        QuotaTracker(),
-        resource_metadata_url=f"{settings.public_url}/.well-known/oauth-protected-resource",
-    )
-    surface = AuthApp(
-        guarded,
-        oauth=OAuthService(
-            engine,
-            access_ttl_min=settings.access_token_ttl_min,
-            refresh_ttl_days=settings.refresh_token_ttl_days,
-        ),
-        passkeys=PasskeyService(engine, public_url=settings.public_url),
-        email=build_email_sender(settings.zeptomail_api_key, settings.email_from),
-        public_url=settings.public_url,
-    )
-    uvicorn.run(surface, host=args.host, port=args.port)
+    uvicorn.run(create_app(settings), host=args.host, port=args.port, log_config=None)
 
 
 if __name__ == "__main__":

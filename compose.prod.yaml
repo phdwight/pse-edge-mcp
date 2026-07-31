@@ -1,0 +1,149 @@
+# Production overlay (plan §7 Phase 6). Use with the base file:
+#
+#   docker compose -f compose.yaml -f compose.prod.yaml up -d
+#
+# What this adds over the dev stack: TLS at the edge, auth on by default, restart policies,
+# resource limits, log rotation, daily database backups, and a daily usage-retention purge.
+#
+# Required in .env — the deployment will not be correct without them:
+#   PSE_DOMAIN         the public hostname (Caddy obtains a certificate for it)
+#   PSE_ACME_EMAIL     contact address for the certificate authority
+#   POSTGRES_PASSWORD  something long and random
+#   ZEPTOMAIL_API_KEY  for verification emails
+#
+# PSE_PUBLIC_URL is derived from PSE_DOMAIN below. Getting it wrong breaks passkeys in a way
+# that looks like a browser bug, because WebAuthn binds credentials to the origin.
+
+services:
+  # TLS terminates here. Caddy obtains and renews certificates automatically, which is the
+  # whole reason it is preferred over nginx+certbot for a single-service deployment.
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      PSE_DOMAIN: ${PSE_DOMAIN:?set PSE_DOMAIN in .env}
+      PSE_ACME_EMAIL: ${PSE_ACME_EMAIL:?set PSE_ACME_EMAIL in .env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data      # certificates live here — losing this means re-issuing
+      - caddy_config:/config
+    depends_on:
+      app:
+        condition: service_healthy
+    logging: &logging
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  app:
+    # No published ports: the app is reachable only through Caddy, so a stray firewall rule
+    # cannot expose it unencrypted.
+    ports: !reset []
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+asyncpg://pse:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@db:5432/pse_edge
+      # Auth is ON in production. Anonymous access to a public deployment is not a default
+      # anyone should have to opt out of.
+      PSE_AUTH_REQUIRED: "1"
+      PSE_PUBLIC_URL: https://${PSE_DOMAIN:?set PSE_DOMAIN in .env}
+      PSE_LOG_JSON: "1"
+      ZEPTOMAIL_API_KEY: ${ZEPTOMAIL_API_KEY:-}
+      PSE_EMAIL_FROM: ${PSE_EMAIL_FROM:-no-reply@${PSE_DOMAIN}}
+      # Auth turns every request into a potential lookup, so the pool is sized above the
+      # SQLAlchemy default rather than left to become the queue point.
+      PSE_DB_POOL_SIZE: "20"
+      PSE_DB_MAX_OVERFLOW: "10"
+    # Workers share nothing in memory: quota windows, parse memo and token cache are all
+    # per worker, so a user's effective ceiling is up to N x nominal. Two is a deliberate
+    # compromise between using the cores and keeping limits meaningful.
+    command: ["--http", "--port", "8000", "--workers", "2"]
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 1g
+        reservations:
+          memory: 256m
+    logging: *logging
+
+  migrate:
+    # Runs to completion before app starts; unchanged from the base file except for logging.
+    logging: *logging
+
+  db:
+    restart: unless-stopped
+    # Not published: only the app and backup services reach Postgres, over the compose
+    # network. Exposing 5432 to the host is the most common way these get compromised.
+    ports: !reset []
+    deploy:
+      resources:
+        limits:
+          memory: 2g
+    logging: *logging
+
+  # Daily pg_dump with rotation (plan §6a). The named volume plus these dumps cover the two
+  # unrecoverable assets: user accounts and the accumulated archive.
+  backup:
+    image: postgres:18
+    restart: unless-stopped
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-14}
+    volumes:
+      - ./backups:/backups
+    depends_on:
+      db:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        while true; do
+          # 18:00 UTC is 02:00 Asia/Manila — after the market closes and well away from
+          # the boundary refetch, so a dump never competes with the day's one upstream hit.
+          now=$$(date -u +%H%M)
+          if [ "$$now" = "1800" ]; then
+            stamp=$$(date -u +%Y%m%dT%H%M%SZ)
+            echo "backup: starting $$stamp"
+            if pg_dump -h db -U pse -d pse_edge --format=custom \
+                 --file="/backups/pse_edge-$$stamp.dump"; then
+              echo "backup: wrote pse_edge-$$stamp.dump"
+              # Rotate only *successful* dumps, and only after this one landed — pruning
+              # first would trade a good backup for a failed one.
+              find /backups -name 'pse_edge-*.dump' -type f \
+                   -mtime +$${BACKUP_RETENTION_DAYS} -delete
+            else
+              echo "backup: FAILED for $$stamp" >&2
+            fi
+            sleep 3600
+          fi
+          sleep 30
+        done
+    logging: *logging
+
+  # Retention purge (plan §6a): usage counts older than the window are deleted daily. The
+  # running server also purges opportunistically once a day, so this is the belt-and-braces
+  # for a deployment that restarts often enough to never reach its own purge.
+  purge:
+    image: ghcr.io/phdwight/pse-edge-mcp:latest
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+asyncpg://pse:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@db:5432/pse_edge
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        while true; do
+          sleep 86400
+          pse-edge-admin purge-usage --retention-days ${PSE_USAGE_RETENTION_DAYS:-90} || true
+        done
+    logging: *logging
+
+volumes:
+  caddy_data:
+  caddy_config:

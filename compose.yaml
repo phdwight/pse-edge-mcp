@@ -34,6 +34,14 @@ services:
     read_only: true
     tmpfs:
       - /tmp
+    healthcheck:
+      # Liveness only — deliberately not /health/ready, so a database blip takes the
+      # container out of rotation rather than restarting it into a loop.
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health').read()"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
 
   db:
     image: postgres:18

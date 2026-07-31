@@ -1,0 +1,34 @@
+# TLS-terminating reverse proxy for the production overlay.
+#
+# Caddy obtains and renews a certificate for {$PSE_DOMAIN} automatically over ACME; there
+# is no certbot cron to forget. Certificates persist in the caddy_data volume.
+
+{
+	email {$PSE_ACME_EMAIL}
+}
+
+{$PSE_DOMAIN} {
+	encode zstd gzip
+
+	# Security headers. HSTS is the consequential one: once sent, browsers refuse plain
+	# http to this host for a year, so only enable it when you intend to keep TLS.
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+
+	# The health endpoints are for the orchestrator, not the internet.
+	@health path /health /health/ready
+	respond @health 404
+
+	reverse_proxy app:8000 {
+		# Long enough for an upstream PSE Edge fetch on a cold cache, short enough that a
+		# wedged request does not hold a connection forever.
+		transport http {
+			response_header_timeout 60s
+		}
+	}
+}

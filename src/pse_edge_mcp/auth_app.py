@@ -24,6 +24,9 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 from urllib.parse import parse_qs
 
+from sqlalchemy.ext.asyncio import AsyncEngine
+
+from .accounts import AccountSummary, erase, summarise
 from .email import EmailSender
 from .oauth import (
     FatalAuthorizeError,
@@ -31,7 +34,13 @@ from .oauth import (
     OAuthService,
     RedirectAuthorizeError,
 )
-from .passkeys import SESSION_COOKIE, PasskeyError, PasskeyService, WebSession
+from .passkeys import (
+    SESSION_COOKIE,
+    PasskeyError,
+    PasskeyService,
+    WebSession,
+    constant_time_equals,
+)
 
 Handler = Callable[[dict[str, Any], bytes], Awaitable[tuple[int, dict[str, str], bytes]]]
 
@@ -127,7 +136,9 @@ class AuthApp:
         passkeys: PasskeyService,
         email: EmailSender,
         public_url: str,
+        engine: AsyncEngine,
     ) -> None:
+        self._engine = engine
         self._app = app
         self._oauth = oauth
         self._passkeys = passkeys
@@ -170,6 +181,9 @@ class AuthApp:
             ("/login/options", "POST"): self._login_options,
             ("/login/finish", "POST"): self._login_finish,
             ("/consent", "POST"): self._consent,
+            ("/privacy", "GET"): self._privacy,
+            ("/account", "GET"): self._account,
+            ("/account/delete", "POST"): self._account_delete,
         }
         return table.get((path, method))
 
@@ -227,7 +241,11 @@ class AuthApp:
                 return _html("<h1>That authorization request expired</h1>", 400)
             session = await self._passkeys.load_session(_cookies(scope).get(SESSION_COOKIE))
             if session and session.kind == "authenticated" and session.user_id:
-                return _html(_consent_page(flow.client_name, flow.flow_id, session.email or ""))
+                return _html(
+                    _consent_page(
+                        flow.client_name, flow.flow_id, session.email or "", session.csrf_token
+                    )
+                )
             return _redirect(f"{self._public}/login?flow={flow.flow_id}")
         try:
             flow = await self._oauth.begin_authorize(params)
@@ -240,7 +258,11 @@ class AuthApp:
 
         session = await self._passkeys.load_session(_cookies(scope).get(SESSION_COOKIE))
         if session and session.kind == "authenticated" and session.user_id:
-            return _html(_consent_page(flow.client_name, flow.flow_id, session.email or ""))
+            return _html(
+                _consent_page(
+                    flow.client_name, flow.flow_id, session.email or "", session.csrf_token
+                )
+            )
         return _redirect(f"{self._public}/login?flow={flow.flow_id}")
 
     async def _token(self, scope: dict[str, Any], body: bytes) -> tuple[int, dict[str, str], bytes]:
@@ -256,6 +278,8 @@ class AuthApp:
         session = await self._passkeys.load_session(_cookies(scope).get(SESSION_COOKIE))
         if not session or session.kind != "authenticated" or not session.user_id:
             return _html("<h1>Session expired</h1><p>Start the authorization again.</p>", 403)
+        if not constant_time_equals(form.get("csrf_token", ""), session.csrf_token):
+            return _html("<h1>Invalid request</h1><p>Start the authorization again.</p>", 403)
         redirect_url = await self._oauth.issue_code(form.get("flow_id", ""), session.user_id)
         return _redirect(redirect_url)
 
@@ -270,6 +294,9 @@ class AuthApp:
             "<form method=post action='/signup'>"
             "<label>Email<input name=email type=email required autofocus></label>"
             "<button type=submit>Send verification link</button></form>"
+            "<p style='font-size:.9em'>We store your email address and aggregated usage "
+            "counts only — see the <a href='/privacy'>privacy page</a>. You can delete "
+            "your account yourself at any time.</p>"
         )
 
     async def _signup_submit(
@@ -351,6 +378,51 @@ class AuthApp:
         next_url = f"{self._public}/oauth/authorize?flow={flow_id}" if flow_id else self._public
         return _json_response({"ok": True, "next": next_url, "flow_id": flow_id})
 
+    # --- privacy & account (plan §6a) ----------------------------------------
+
+    async def _privacy(
+        self, scope: dict[str, Any], body: bytes
+    ) -> tuple[int, dict[str, str], bytes]:
+        # Deliberately unauthenticated: a privacy policy nobody can read before signing up
+        # is not a privacy policy.
+        return _html(PRIVACY_POLICY)
+
+    async def _account(
+        self, scope: dict[str, Any], body: bytes
+    ) -> tuple[int, dict[str, str], bytes]:
+        session = await self._passkeys.load_session(_cookies(scope).get(SESSION_COOKIE))
+        if not session or session.kind != "authenticated" or not session.user_id:
+            return _redirect(f"{self._public}/login")
+        summary = await summarise(self._engine, session.user_id)
+        return _html(_account_page(summary, session.csrf_token))
+
+    async def _account_delete(
+        self, scope: dict[str, Any], body: bytes
+    ) -> tuple[int, dict[str, str], bytes]:
+        """Self-service erasure (plan §6a): immediate, complete, and needs no approval."""
+        session = await self._passkeys.load_session(_cookies(scope).get(SESSION_COOKIE))
+        if not session or session.kind != "authenticated" or not session.user_id:
+            return _redirect(f"{self._public}/login")
+        form = {k: v[0] for k, v in parse_qs(body.decode("utf-8")).items()}
+        if not constant_time_equals(form.get("csrf_token", ""), session.csrf_token):
+            return _html(
+                "<h1>Invalid request</h1><p>Please try again from your account page.</p>", 403
+            )
+
+        removed = await erase(self._engine, session.user_id)
+        # Clear the cookie: the session row is gone, so leaving it set would only produce
+        # confusing "session expired" pages.
+        cleared = f"{SESSION_COOKIE}=; Path=/; HttpOnly; Max-Age=0; SameSite=Lax"
+        return (
+            200,
+            {"content-type": "text/html; charset=utf-8", "set-cookie": cleared},
+            _html(
+                "<h1>Account deleted</h1><div class=msg>Your account, passkeys, tokens and "
+                f"usage history have been erased ({sum(removed.values())} records). "
+                "Nothing identifying you remains.</div>"
+            )[2],
+        )
+
     async def _require_session(self, scope: dict[str, Any]) -> WebSession:
         session = await self._passkeys.load_session(_cookies(scope).get(SESSION_COOKIE))
         if session is None:
@@ -358,7 +430,7 @@ class AuthApp:
         return session
 
 
-def _consent_page(client_name: str, flow_id: str, email: str) -> str:
+def _consent_page(client_name: str, flow_id: str, email: str, csrf_token: str) -> str:
     return (
         f"<h1>Authorize {client_name}</h1>"
         f"<p>Signed in as <code>{email}</code>.</p>"
@@ -366,6 +438,7 @@ def _consent_page(client_name: str, flow_id: str, email: str) -> str:
         "It will be able to call this server's tools using your account's quota.</p>"
         f"<form method=post action='/consent'>"
         f"<input type=hidden name=flow_id value='{flow_id}'>"
+        f"<input type=hidden name=csrf_token value='{csrf_token}'>"
         "<button type=submit>Allow</button></form>"
     )
 
@@ -457,3 +530,80 @@ async def _send(send: Any, status: int, headers: dict[str, str], body: bytes) ->
         }
     )
     await send({"type": "http.response.body", "body": body})
+
+
+PRIVACY_POLICY = """
+<h1>Privacy</h1>
+<p>This server is an unofficial interface to public PSE Edge market data. This page
+describes what it holds about <em>you</em>, which is deliberately very little.</p>
+
+<h2>What is collected</h2>
+<ul>
+  <li><strong>Your email address.</strong> It is the account identifier and the only way to
+      recover access if you lose your passkeys. Nothing else identifying is collected — no
+      name, no phone number, no payment details.</li>
+  <li><strong>Passkey public keys.</strong> Public keys and usage counters only. A passkey's
+      private key never leaves your device, and this server could not obtain it.</li>
+  <li><strong>Usage counts.</strong> How many requests your account made, aggregated per
+      hour — not which tools you called, not which companies you looked up, and not the
+      content of any request.</li>
+</ul>
+<p>There are no passwords, because the service never uses them. Access tokens are stored
+only as irreversible hashes.</p>
+
+<h2>How long it is kept</h2>
+<p>Usage counts are deleted automatically after <strong>90 days</strong>. Everything else is
+kept until you delete your account.</p>
+
+<h2>Your rights</h2>
+<p>Sign in and visit <a href="/account">your account page</a> to see everything held about
+you and to <strong>delete your account immediately</strong> — no request, no waiting period,
+no email exchange. Deletion removes your account, your passkeys, your tokens and your usage
+history in a single operation and cannot be undone.</p>
+<p>Market data (prices and disclosures) that passed through your requests is retained. It is
+public information published by the PSE and is not about you.</p>
+
+<h2>Who to contact</h2>
+<p>For privacy questions or to report a suspected data breach, contact the operator at the
+address published on the repository: <a
+href="https://github.com/phdwight/pse-edge-mcp">github.com/phdwight/pse-edge-mcp</a>.
+Under the PH Data Privacy Act, breaches meeting the notification threshold are reported to
+the National Privacy Commission and to affected users.</p>
+
+<h2>Third parties</h2>
+<p>Verification emails are delivered by ZeptoMail (Zoho), which receives your address for
+that purpose. PSE Edge itself receives no information about you: this server requests public
+market pages on its own behalf, never yours.</p>
+"""
+
+
+def _account_page(summary: AccountSummary, csrf_token: str) -> str:
+    """The subject-access view plus the deletion control, on one page."""
+    rows = "".join(
+        f"<tr><td>{day['day']}</td><td>{day['requests']}</td><td>{day['rejected']}</td></tr>"
+        for day in summary.usage_days[:30]
+    )
+    usage_table = (
+        f"<table><tr><th>Day</th><th>Requests</th><th>Refused</th></tr>{rows}</table>"
+        if rows
+        else "<p>No usage recorded yet.</p>"
+    )
+    return f"""
+<h1>Your account</h1>
+<div class=msg>
+  <p><strong>Email:</strong> <code>{summary.email}</code></p>
+  <p><strong>Member since:</strong> {summary.created_at:%Y-%m-%d}</p>
+  <p><strong>Passkeys:</strong> {summary.passkeys} &nbsp;
+     <strong>Active tokens:</strong> {summary.active_tokens}</p>
+</div>
+<h2>Usage (kept 90 days)</h2>
+{usage_table}
+<h2>Delete your account</h2>
+<p>This removes your account, passkeys, tokens and usage history immediately and
+permanently. It cannot be undone. See the <a href="/privacy">privacy page</a>.</p>
+<form method=post action='/account/delete'
+      onsubmit="return confirm('Permanently delete your account? This cannot be undone.')">
+  <input type=hidden name=csrf_token value='{csrf_token}'>
+  <button type=submit style="background:#c01c28">Delete my account</button>
+</form>
+"""
