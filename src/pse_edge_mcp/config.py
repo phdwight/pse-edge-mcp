@@ -31,9 +31,23 @@ class Settings:
 
     # Optional Postgres storage. Unset -> in-memory cache (stdio-friendly default).
     database_url: str | None = None
+    db_pool_size: int = 5
+    db_max_overflow: int = 10
+
+    # Auth (Phase 5 stage 1). Opt-in until the self-service OAuth flow ships; requires
+    # DATABASE_URL, since accounts live in Postgres. stdio mode never authenticates.
+    auth_required: bool = False
+    # The token-validation cache TTL is the revocation-latency budget and nothing else:
+    # a revoked token keeps working for at most this long (plan §6, revised 2026-07-30).
+    token_cache_ttl_sec: float = 60.0
+    quota_per_minute: int = 60
+    quota_per_day: int = 2000
 
     @classmethod
     def from_env(cls) -> Settings:
+        def _bool(name: str) -> bool:
+            return os.environ.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
+
         def _time(name: str, default: time) -> time:
             raw = os.environ.get(name)
             if not raw:
@@ -52,4 +66,12 @@ class Settings:
             request_timeout_sec=float(os.environ.get("PSE_TIMEOUT_SEC", cls.request_timeout_sec)),
             retry_attempts=int(os.environ.get("PSE_RETRY_ATTEMPTS", cls.retry_attempts)),
             database_url=os.environ.get("DATABASE_URL"),
+            db_pool_size=int(os.environ.get("PSE_DB_POOL_SIZE", cls.db_pool_size)),
+            db_max_overflow=int(os.environ.get("PSE_DB_MAX_OVERFLOW", cls.db_max_overflow)),
+            auth_required=_bool("PSE_AUTH_REQUIRED"),
+            token_cache_ttl_sec=float(
+                os.environ.get("PSE_TOKEN_CACHE_TTL", cls.token_cache_ttl_sec)
+            ),
+            quota_per_minute=int(os.environ.get("PSE_QUOTA_PER_MIN", cls.quota_per_minute)),
+            quota_per_day=int(os.environ.get("PSE_QUOTA_PER_DAY", cls.quota_per_day)),
         )

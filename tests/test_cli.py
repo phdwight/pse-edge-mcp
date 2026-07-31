@@ -31,6 +31,8 @@ def fake(monkeypatch) -> FakeServer:
 
 
 def run_cli(monkeypatch, fake: FakeServer, argv: list[str]) -> dict[str, Any]:
+    # A developer's shell may carry auth env vars; these tests pin the *default* path.
+    monkeypatch.delenv("PSE_AUTH_REQUIRED", raising=False)
     monkeypatch.setattr("sys.argv", ["pse-edge-mcp", *argv])
     cli.main()
     assert len(fake.calls) == 1
@@ -91,3 +93,23 @@ def test_help_explains_why_the_defaults_are_what_they_are():
     text = cli.build_parser().format_help()
     assert "sticky" in text
     assert "stateless" in text
+
+
+def test_auth_required_without_a_database_exits_with_an_actionable_message(monkeypatch, fake):
+    """PSE_AUTH_REQUIRED=1 needs Postgres (accounts live there). The failure has to name
+    both the missing variable and the way out, before anything starts listening."""
+    monkeypatch.setenv("PSE_AUTH_REQUIRED", "1")
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.setattr("sys.argv", ["pse-edge-mcp", "--http"])
+
+    with pytest.raises(SystemExit, match="DATABASE_URL"):
+        cli.main()
+    assert fake.calls == [], "nothing must start serving on a misconfigured auth setup"
+
+
+def test_auth_flag_does_not_affect_stdio(monkeypatch, fake):
+    """stdio stays auth-free by principle (plan §6) — even with the env var set."""
+    monkeypatch.setenv("PSE_AUTH_REQUIRED", "1")
+    monkeypatch.setattr("sys.argv", ["pse-edge-mcp"])
+    cli.main()
+    assert fake.calls[0] == ((), {})

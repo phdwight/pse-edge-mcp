@@ -6,6 +6,17 @@ Format: [Keep a Changelog](https://keepachangelog.com/) · Versioning: [SemVer](
 
 ## [Unreleased]
 
+### Added
+- **Phase 5 stage 1 — bearer auth and quotas, opt-in** (`PSE_AUTH_REQUIRED=1`, needs `DATABASE_URL`; stdio never authenticates). Opaque `pse_`-prefixed tokens stored as SHA-256 only; validation is one indexed lookup fronted by a cache whose **TTL is the revocation-latency budget and nothing else** (default 60 s, `PSE_TOKEN_CACHE_TTL`); refusals are never cached, so a just-issued token works immediately. Per-user quotas (60/min, 2,000/day defaults, per-user overrides) counted in fixed in-process windows; over-limit answers 429 with `Retry-After` and a `RATE_LIMITED` body. New `pse-edge-admin` CLI (create-user, issue-token, revoke-token, disable-user, set-quota, list-users), migration `0002_auth`, and 34 new tests including a live end-to-end pass: 401 without a token, 200 with one, 429 past quota, and revocation landing within the documented budget.
+- Connection-pool sizing is configurable (`PSE_DB_POOL_SIZE`, `PSE_DB_MAX_OVERFLOW`) — auth turns every request into a potential DB lookup, so the pool stops being a fixed default.
+
+### Changed
+- `docs/plan.md` §6 rewritten: the opaque-over-JWT rationale no longer rests on "quotas need a DB hit per request anyway" (quotas now count in-process — a per-request counter UPDATE is the same hot-row defect class as the archive-on-cache-hit bug). Opaque tokens stay, for instant revocation bounded by the cache TTL. Transactional email decided: **ZeptoMail** (key via env at runtime only).
+- `build_storage()` now also returns the engine, so auth shares the storage pool instead of opening a second one.
+
+### Fixed
+- `get_price_history` no longer passes through PSE Edge's own duplicate rows: identical repeated trade dates are collapsed (observed live: Jul 21 2026 twice, so a range reported 22 bars for 21 trading days and day-counting consumers double-counted). A date repeating with *different* values raises `ENDPOINT_CHANGED` — that is drift we don't understand, and invariant #4 says be loud rather than guess.
+
 ## [0.4.0] - 2026-07-30
 
 ### Added

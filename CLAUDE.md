@@ -131,7 +131,15 @@ Unofficial — Edge has no public API; we speak to the portal's own internal end
   at runtime — compose has a one-shot `migrate` service and `check_schema()` fails loudly
   at startup if migrations were skipped. **A failed archive write never fails a read**
   (caught broadly: a dead database raises OSError, not just SQLAlchemyError).
-- **Phase 5 (next):** OAuth 2.1
+- **Phase 5 (staged; stage 1 done):** bearer auth + quotas + admin CLI, opt-in via
+  `PSE_AUTH_REQUIRED=1` (needs `DATABASE_URL`; stdio never authenticates). Key rules:
+  tokens are opaque, `pse_`-prefixed, stored as SHA-256 only; the validation-cache TTL
+  **is the revocation-latency budget and nothing else** (default 60 s); refusals are never
+  cached; quotas count **in-process** (per-request counter UPDATEs are hot-row contention
+  — plan §6 records why the old "DB hit per request anyway" JWT argument is retired);
+  `auth.py` must stay SQLAlchemy-free (lean-install path), Postgres bits live in
+  `auth_store.py` and import lazily. Provisioning: `pse-edge-admin`.
+- **Phase 5 stage 2 (next):** OAuth 2.1
 - **Phase 6:** production deploy (compose.prod.yaml overlay, TLS, backups).
 
 ## Holiday table

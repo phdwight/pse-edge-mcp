@@ -52,6 +52,25 @@ Use `--stateful` if you need MCP sessions (resumability or server-initiated mess
 `--sse` for event-stream framing; they are independent flags. Note `--stateful` requires
 clients to complete the `initialize` handshake and forces sticky routing behind a balancer.
 
+### Bearer auth and quotas (opt-in)
+
+Set `PSE_AUTH_REQUIRED=1` (needs `DATABASE_URL`) and every HTTP request must carry
+`Authorization: Bearer <token>`. Until the self-service OAuth flow ships, accounts are
+provisioned by the operator:
+
+```bash
+pse-edge-admin create-user you@example.com
+pse-edge-admin issue-token you@example.com --note laptop   # plaintext shown once
+```
+
+Tokens are opaque and stored only as SHA-256 hashes. Revocation
+(`pse-edge-admin revoke-token …` / `disable-user …`) takes effect within the validation
+cache's TTL — 60 s by default (`PSE_TOKEN_CACHE_TTL`), which is precisely the
+revocation-latency budget. Per-user quotas (default 60/min, 2,000/day, overridable per
+user) are counted in-process and answer HTTP 429 with `Retry-After`; with N replicas the
+effective ceiling is up to N× nominal, which is fine for abuse prevention. stdio mode
+never authenticates — it runs on your own machine.
+
 **Postgres is optional.** Without `DATABASE_URL` the server uses an in-memory cache and keeps
 no archive — the zero-config path for local stdio use, and it needs neither the `postgres`
 extra nor a database. With `DATABASE_URL` set you get two things: replicas **share one cache**,

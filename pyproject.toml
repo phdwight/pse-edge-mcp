@@ -40,6 +40,7 @@ dev = [
 
 [project.scripts]
 pse-edge-mcp = "pse_edge_mcp.__main__:main"
+pse-edge-admin = "pse_edge_mcp.admin:main"
 
 [project.urls]
 Homepage = "https://github.com/phdwight/pse-edge-mcp"

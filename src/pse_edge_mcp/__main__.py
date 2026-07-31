@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 
+from .config import Settings
 from .server import build_server
 
 
@@ -47,6 +48,11 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> None:
     args = build_parser().parse_args()
+    settings = Settings.from_env()
+
+    if args.http and settings.auth_required:
+        _serve_http_with_auth(args, settings)
+        return
 
     mcp = build_server()
     if args.http:
@@ -59,6 +65,55 @@ def main() -> None:
         )
     else:
         mcp.run()
+
+
+def _serve_http_with_auth(args: argparse.Namespace, settings: Settings) -> None:
+    """HTTP with bearer auth + quotas enforced ahead of the MCP app (PSE_AUTH_REQUIRED=1).
+
+    Everything Postgres-flavoured is imported lazily here: this branch requires the
+    `postgres` extra, and installs without it must never pay an ImportError for a mode
+    they did not enable.
+    """
+    if not settings.database_url:
+        raise SystemExit(
+            "PSE_AUTH_REQUIRED=1 needs DATABASE_URL — accounts live in Postgres. "
+            "Unset PSE_AUTH_REQUIRED to serve without auth."
+        )
+
+    import asyncio
+
+    import uvicorn
+
+    from .auth import QuotaTracker, TokenService
+    from .auth_middleware import AuthMiddleware
+    from .auth_store import PostgresAuthStore, check_auth_schema
+    from .server import build_storage
+
+    storage, archive, engine = build_storage(settings)
+    if engine is None:  # unreachable given the database_url check; keeps mypy honest
+        raise SystemExit("DATABASE_URL did not produce a database engine")
+
+    async def _preflight() -> None:
+        await check_auth_schema(engine)
+        # Connections opened during the check are bound to this throwaway event loop;
+        # dispose so uvicorn's loop starts the pool from scratch.
+        await engine.dispose()
+
+    asyncio.run(_preflight())
+
+    mcp = build_server(settings, storage=storage, archive=archive)
+    app = mcp.streamable_http_app(
+        json_response=not args.sse,
+        stateless_http=not args.stateful,
+        host=args.host,
+    )
+    tokens = TokenService(
+        PostgresAuthStore(engine),
+        cache_ttl_sec=settings.token_cache_ttl_sec,
+        default_quota_per_minute=settings.quota_per_minute,
+        default_quota_per_day=settings.quota_per_day,
+    )
+    uvicorn.run(AuthMiddleware(app, tokens, QuotaTracker()), host=args.host, port=args.port)
 
 
 if __name__ == "__main__":
