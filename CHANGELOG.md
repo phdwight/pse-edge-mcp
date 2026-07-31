@@ -5,6 +5,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/) · Versioning: [SemVer](
 
 ## [Unreleased]
 
+### Added
+- **README: the end-to-end flow for connecting to a hosted server.** A deployment with auth on is an ordinary OAuth 2.1 protected resource, so a modern MCP client needs only the URL — but nothing said so, and the auth section still claimed the self-service flow had not shipped. It now walks the sequence a client actually performs (401 → resource metadata → AS metadata → dynamic registration → PKCE authorize → signup/passkey → consent → code exchange → bearer), names the only two steps a human performs, and gives the operator-issued-token path for clients that do not speak OAuth yet — which is also the only route on a LAN deployment, since passkeys need a secure context.
+
 ### Fixed
 - **`compose.prod.yaml` now says that `Caddyfile` must sit beside it.** It is bind-mounted, and Docker cannot mount a file that does not exist, so importing the compose file on its own leaves `caddy` *created but never started* with an opaque OCI "not a directory" error while every other service comes up — which in a NAS UI reads as the project being broken for no visible reason. `compose.nas.yaml` mounts no repository files, so a single-file import of that one is complete.
 - **Documented that `migrate` exiting is success, not failure.** It runs `alembic upgrade head` once and exits 0, because the schema must not be applied by the server on boot (replicas would race to mutate it). NAS Docker UIs list any stopped container as "Not in use" and colour the whole project red on that basis, so a healthy stack looks broken; the deploy guide now gives the expected per-container states and says what a genuine failure looks like instead.
