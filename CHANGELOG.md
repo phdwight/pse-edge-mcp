@@ -6,6 +6,16 @@ Format: [Keep a Changelog](https://keepachangelog.com/) · Versioning: [SemVer](
 ## [Unreleased]
 
 ### Added
+- **Phase 6 — production deployment.** `compose.prod.yaml` + `Caddyfile` + `docs/deploy.md`: TLS with automatic ACME renewal, auth on by default, restart policies, resource limits, log rotation, daily `pg_dump` with rotation, and a daily usage-retention purge. Neither `app` nor `db` publishes a port — everything arrives through the proxy, so a stray firewall rule cannot expose the app unencrypted or the database at all.
+- **`pse_edge_mcp.asgi:app`** — an importable ASGI application, so `uvicorn … --workers N` and gunicorn can run this. uvicorn's multi-worker supervisor forks and re-imports, so it needs an import string; an object built inside `main()` cannot be shared with the children. It also means the CLI and production compose the *same* stack instead of two that drift. Resolved lazily (PEP 562) so importing the module opens no connections.
+- **Health endpoints**: `/health` (liveness, dependency-free) and `/health/ready` (readiness, checks the database, 503 when unreachable). Both are unauthenticated — a probe cannot hold a token — and Caddy hides them from the internet. Keeping them separate matters: a liveness probe that touches Postgres restarts every replica during a blip, turning a recoverable outage into a restart storm.
+- **Structured JSON logging** (`PSE_LOG_JSON=1`), stdlib-only, with secret redaction as a backstop and uvicorn's own handlers routed through the same formatter.
+- `--workers` on the CLI, and 20 new tests (240 total) covering the probes, the formatter, and the factory.
+
+### Changed
+- `configure_logging` replaces only handlers it installed. Clearing every root handler would have been idempotent by stomping on whatever else was listening — pytest's capture, or a host application that embedded this server.
+
+### Added
 - **Privacy compliance (plan §6a), the obligations that arrive with a real user's email address.** A public `/privacy` page stating what is collected, how long it is kept and who to contact about a breach; an `/account` subject-access view; and self-service `POST /account/delete` that erases immediately — no request, no waiting period, no email exchange.
 - **Per-user usage log with 90-day retention**, aggregated per user-hour rather than per request. That holds markedly less about a person (itself the §6a minimal-collection requirement), keeps writes off the request path, and makes retention an indexed range delete. Counts buffer in memory and flush on an interval; a clean shutdown flushes what is pending, and a failing sink is logged rather than raised into the request.
 - `pse-edge-admin delete-user` (refuses without `--yes`) and `purge-usage` for a daily cron. `delete-user` reuses the user's own erasure path, so the operator route cannot drift from the promise made on the privacy page.

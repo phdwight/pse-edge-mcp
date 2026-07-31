@@ -57,6 +57,13 @@ class Settings:
     # states 90, so changing it here means changing what users were told.
     usage_retention_days: int = 90
 
+    # Transport shape and logging, so the importable ASGI app is configurable without CLI
+    # flags (a worker subprocess re-imports the module; it does not re-parse argv).
+    stateful_sessions: bool = False
+    sse_responses: bool = False
+    log_json: bool = False
+    log_level: str = "INFO"
+
     @classmethod
     def from_env(cls) -> Settings:
         def _bool(name: str) -> bool:
@@ -100,4 +107,8 @@ class Settings:
             usage_retention_days=int(
                 os.environ.get("PSE_USAGE_RETENTION_DAYS", cls.usage_retention_days)
             ),
+            stateful_sessions=_bool("PSE_STATEFUL"),
+            sse_responses=_bool("PSE_SSE"),
+            log_json=_bool("PSE_LOG_JSON"),
+            log_level=os.environ.get("PSE_LOG_LEVEL", cls.log_level),
         )

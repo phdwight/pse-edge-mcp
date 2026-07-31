@@ -125,7 +125,7 @@ Edge's own units labels are inconsistent between its annual and quarterly sectio
 period reports its `currency_units` for you to check. Index changes are signed here even
 though Edge prints them unsigned (it shows direction only as a colour and an arrow).
 
-Roadmap (see `docs/plan.md`): production deployment — TLS, backups, auth on by default.
+All six delivery phases are complete; see `docs/plan.md` for what each decided.
 
 ## Container image
 
@@ -144,6 +144,22 @@ closure and nothing else — no build toolchain, no package manager, no dev depe
 bytecode caches, no source tree — plus a secret scan and a smoke test that the server
 starts and registers its tools. A stray dependency fails the build; a large but genuinely
 required one does not. Image size is reported for information and never gated.
+
+## Production
+
+```bash
+cp .env.example .env    # set PSE_DOMAIN, PSE_ACME_EMAIL, POSTGRES_PASSWORD, ZEPTOMAIL_API_KEY
+docker compose -f compose.yaml -f compose.prod.yaml up -d
+```
+
+TLS with automatic certificate renewal, auth on by default, daily backups, and a daily
+retention purge. `app` and `db` publish no ports — everything arrives through the proxy.
+Health probes are at `/health` (liveness) and `/health/ready` (readiness). The app is also
+importable for other servers: `uvicorn pse_edge_mcp.asgi:app --workers 4`.
+
+See **[docs/deploy.md](docs/deploy.md)** for the full guide, including the one setting most
+worth getting right: `PSE_PUBLIC_URL` must be the real external https URL, because WebAuthn
+binds every passkey to the origin it was enrolled under.
 
 ## Development
 

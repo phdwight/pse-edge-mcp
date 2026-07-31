@@ -158,7 +158,15 @@ Unofficial — Edge has no public API; we speak to the portal's own internal end
   data; the admin `delete-user` reuses the user's own erasure path so the two cannot drift.
   `usage.py` must stay SQLAlchemy-free; the sink lives in `usage_postgres.py`.
 - **Phase 5 remaining:** flip auth to default-on at deploy.
-- **Phase 6:** production deploy (compose.prod.yaml overlay, TLS, backups).
+- **Phase 6 (done):** `compose.prod.yaml` + `Caddyfile` + `docs/deploy.md`. Rules:
+  the HTTP stack is composed **once** in `asgi.py` — `__main__` and production must not
+  build it separately; `asgi.app` resolves lazily (PEP 562) so importing the module has no
+  side effects; `/health` is liveness (never touches the DB — a DB-dependent liveness probe
+  restarts every replica during a blip) and `/health/ready` is readiness; `configure_logging`
+  removes only handlers it installed. **`PSE_PUBLIC_URL` must be the real external https URL**
+  — it drives the WebAuthn rp_id, email links and OAuth issuer, and a wrong value breaks
+  passkeys in a way that looks like a browser bug. Workers are processes: all in-memory
+  state is per worker, so quotas loosen by a factor of N.
 
 ## Holiday table
 
