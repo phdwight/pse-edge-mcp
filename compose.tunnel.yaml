@@ -7,14 +7,11 @@
 # Cloudflare terminates TLS at its edge, which is why no certificate, Caddy or ACME appears
 # anywhere in this deployment.
 #
-# This overlay is also what *closes* the LAN port opened by compose.nas.yaml, so going
-# public and closing the local door are the same action rather than two, the second of
-# which is easy to forget.
-#
 # Required in .env, and only once you use this file:
 #   PSE_DOMAIN                mcp.example.com — the public hostname on your Cloudflare zone
 #   CLOUDFLARE_TUNNEL_TOKEN   from the Zero Trust dashboard when you create the tunnel
 #   ZEPTOMAIL_API_KEY         for verification emails, now that strangers can sign up
+#   PSE_LAN_BIND=127.0.0.1    closes the stage 1 LAN port — see below
 #
 # In the Cloudflare Zero Trust dashboard, the tunnel's public hostname must route to:
 #   Service:  HTTP   →   app:8000
@@ -40,9 +37,12 @@ services:
         max-file: "3"
 
   app:
-    # The LAN port from compose.nas.yaml goes away: everything now arrives through the
-    # tunnel, so a public deployment is not simultaneously open on the local network.
-    ports: !reset []
+    # NOTE: this file cannot close the stage 1 LAN port for you. Compose merges `ports`
+    # additively — an overlay can add a mapping but never remove one — so set
+    # PSE_LAN_BIND=127.0.0.1 in .env and the port binds to the NAS's own loopback instead
+    # of the local network. Everything then arrives through the tunnel, and the stage 2
+    # check in docs/deploy.md (curl the LAN address from another machine, expect a refusal)
+    # is what confirms it.
     environment:
       # MUST be the Cloudflare hostname. WebAuthn binds every passkey to the origin it was
       # enrolled under, so a wrong value here breaks passkeys in a way that looks like a

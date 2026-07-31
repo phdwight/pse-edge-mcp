@@ -68,14 +68,16 @@ services:
   app:
     image: ghcr.io/phdwight/pse-edge-mcp:${PSE_IMAGE_TAG:-latest}
     restart: unless-stopped
-    # LAN access for stage 1. compose.tunnel.yaml resets this to nothing, so a public
-    # deployment cannot also be sitting open on the LAN.
+    # LAN access for stage 1. 8200 rather than 8000: on a NAS with a few things already
+    # running, 8000 is one of the most contested numbers there is. Only the published side
+    # matters — the app always listens on 8000 inside the container, which is what the
+    # tunnel routes to.
     #
-    # 8200, not 8000: on a NAS with a few things already running, 8000 is one of the most
-    # contested numbers there is. Only the published side matters — the app always listens
-    # on 8000 inside the container, which is what the tunnel routes to.
+    # In stage 2, set PSE_LAN_BIND=127.0.0.1 so this binds to the NAS's own loopback and
+    # stops being reachable from the LAN. (An overlay cannot simply remove a port: Compose
+    # merges `ports` additively, so a second file can only ever add more.)
     ports:
-      - "${PSE_LAN_PORT:-8200}:8000"
+      - "${PSE_LAN_BIND:-0.0.0.0}:${PSE_LAN_PORT:-8200}:8000"
     environment:
       DATABASE_URL: postgresql+asyncpg://pse:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/pse_edge
       # On, even on the LAN: a NAS is a shared machine, and turning auth on afterwards

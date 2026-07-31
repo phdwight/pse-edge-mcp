@@ -5,7 +5,7 @@ what to set, why the pieces are arranged as they are, and what to check afterwar
 
 ```bash
 cp .env.example .env      # then fill in the required values below
-docker compose -f compose.yaml -f compose.prod.yaml up -d
+docker compose -f compose.prod.yaml up -d
 ```
 
 ## What the overlay adds
@@ -104,7 +104,7 @@ accumulated EOD archive. Everything else can be re-fetched from PSE Edge.
 ## First-run checklist
 
 ```bash
-docker compose -f compose.yaml -f compose.prod.yaml ps          # all services up, app healthy
+docker compose -f compose.prod.yaml ps          # all services up, app healthy
 curl -fsS https://$PSE_DOMAIN/health                            # 200 via TLS
 curl -fsS https://$PSE_DOMAIN/.well-known/oauth-protected-resource
 curl -fsS -o /dev/null -w '%{http_code}\n' -X POST https://$PSE_DOMAIN/mcp   # expect 401
@@ -221,6 +221,7 @@ and 443.
    PSE_DOMAIN=mcp.example.com
    CLOUDFLARE_TUNNEL_TOKEN=<the token from step 1>
    ZEPTOMAIL_API_KEY=<key>          # verification email, now that strangers can sign up
+   PSE_LAN_BIND=127.0.0.1           # closes the stage 1 LAN port — see below
    ```
 
 4. Bring it up with both files:
@@ -229,9 +230,14 @@ and 443.
    docker compose -f compose.nas.yaml -f compose.tunnel.yaml up -d --remove-orphans
    ```
 
-The overlay starts `cloudflared` **and** unpublishes the LAN port, so going public and
-closing the local door are one action rather than two, the second of which is easy to
-forget. It also swaps `PSE_PUBLIC_URL` to the https hostname. Confirm both:
+The overlay starts `cloudflared` and swaps `PSE_PUBLIC_URL` to the https hostname.
+
+**`PSE_LAN_BIND=127.0.0.1` is what closes the stage 1 LAN port**, and it is a separate line
+in `.env` rather than something the overlay does for you. Compose merges `ports` additively
+— a second file can add a mapping but never remove one — so an overlay genuinely cannot take
+the port away. Setting the bind address moves it to the NAS's own loopback instead: still
+there for debugging from the NAS shell, no longer reachable from the local network. Confirm
+it rather than assuming, from a *different* machine:
 
 ```bash
 curl -sf https://mcp.example.com/health && echo "public: up"

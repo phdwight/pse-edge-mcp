@@ -157,7 +157,7 @@ that forwarding is required, not optional:
 
 ```bash
 cp .env.example .env    # PSE_DOMAIN, PSE_ACME_EMAIL, POSTGRES_PASSWORD, ZEPTOMAIL_API_KEY, PSE_IMAGE_TAG
-docker compose -f compose.yaml -f compose.prod.yaml up -d
+docker compose -f compose.prod.yaml up -d
 ```
 
 **A NAS or any host behind a home router**, in two stages. Stage 1 is LAN-only and needs
@@ -168,9 +168,10 @@ docker compose -f compose.nas.yaml up -d                                  # http
 docker compose -f compose.nas.yaml -f compose.tunnel.yaml up -d           # + public hostname
 ```
 
-The tunnel overlay starts `cloudflared` — which dials *out*, so there is no port forwarding
-and nothing for CGNAT to break — and unpublishes the LAN port, so going public closes the
-local door in the same action.
+The tunnel overlay starts `cloudflared`, which dials *out* — so there is no port forwarding
+and nothing for CGNAT to break. Set `PSE_LAN_BIND=127.0.0.1` alongside it to move the stage 1
+LAN port onto loopback; Compose merges `ports` additively, so an overlay can add a mapping
+but never remove one.
 
 Both give auth on by default, daily backups, a daily retention purge, and no published
 database port. Health probes are `/health` (liveness) and `/health/ready` (readiness). The

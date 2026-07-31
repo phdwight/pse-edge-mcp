@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import json
 import logging
+import re
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -18,6 +20,8 @@ import pytest
 from pse_edge_mcp.config import Settings
 from pse_edge_mcp.health import HealthApp
 from pse_edge_mcp.logging_config import JsonFormatter, configure_logging, redact
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
 class Inner:
@@ -98,6 +102,26 @@ async def test_readiness_is_ok_against_a_live_database(pg_engine):
         response = await http.get("/health/ready")
     assert response.status_code == 200
     assert response.json()["database"] == "ok"
+
+
+# --- compose files -----------------------------------------------------------
+
+# `!reset`, `!override` and friends are Docker-Compose-only YAML tags. A conforming YAML
+# parser rejects an unknown tag outright — which is what NAS Docker UIs, PaaS importers and
+# editor linters do, and they were reported failing on exactly this. Compose itself is happy,
+# so nothing here catches it: the file is only broken where it is deployed.
+_CUSTOM_YAML_TAG = re.compile(r"(?:^|[\s:\-])(![a-zA-Z_][\w]*)")
+
+
+@pytest.mark.parametrize("path", sorted(REPO_ROOT.glob("compose*.yaml")), ids=lambda p: p.name)
+def test_compose_files_use_no_compose_only_yaml_tags(path):
+    found = {m.group(1) for m in _CUSTOM_YAML_TAG.finditer(path.read_text())}
+    assert not found, (
+        f"{path.name} uses Compose-only YAML tag(s) {sorted(found)}. Portable parsers reject "
+        f"unknown tags, so the file breaks in NAS/PaaS importers while `docker compose` "
+        f"accepts it. Restructure so nothing needs undoing — note that `ports` merges "
+        f"additively, so an overlay can add a mapping but never remove one."
+    )
 
 
 # --- structured logging ------------------------------------------------------

@@ -1,13 +1,18 @@
-# Production overlay (plan §7 Phase 6). Use with the base file:
+# Production deployment for a host reachable from the internet on ports 80 and 443
+# (plan §7 Phase 6). Caddy terminates TLS and renews certificates automatically.
 #
-#   docker compose -f compose.yaml -f compose.prod.yaml up -d
+#   docker compose -f compose.prod.yaml up -d
 #
-# What this adds over the dev stack: TLS at the edge, auth on by default, restart policies,
-# resource limits, log rotation, daily database backups, and a daily usage-retention purge.
+# Standalone, not an overlay on compose.yaml: production should not inherit a development
+# file's build directives and published ports only to undo them, and a self-contained file
+# is what NAS and PaaS UIs can import. It *pulls* the published image — production should
+# run the artifact CI actually gated (size-checked against the resolved runtime closure,
+# secret-scanned, smoke-tested, multi-arch), not a rebuild from whatever the deploy host's
+# source tree and Docker cache happened to contain.
 #
-# It pulls the published image rather than building: production should run the artifact CI
-# gated — size-checked, secret-scanned, smoke-tested, multi-arch — not a rebuild from
-# whatever the deploy host's source tree happened to contain.
+# For a host you cannot reach on 80/443 — CGNAT, a locked-down router, an ISP that blocks
+# 80, or a NAS whose ports are already taken — use compose.nas.yaml + compose.tunnel.yaml
+# instead. That path needs no inbound ports at all.
 #
 # Required in .env — the deployment will not be correct without them:
 #   PSE_DOMAIN         the public hostname (Caddy obtains a certificate for it)
@@ -35,9 +40,7 @@ services:
       # authorities always connect on port 80 (HTTP-01) or 443 (TLS-ALPN-01); those numbers
       # are fixed in the protocol and no Caddy setting changes them. If the internet cannot
       # reach this host on 80/443 by some path, Caddy never obtains a certificate and the
-      # site never serves. Where that forwarding is impossible — CGNAT, a locked-down
-      # router, an ISP that blocks 80 — use compose.nas.yaml + compose.tunnel.yaml instead,
-      # which needs no inbound ports at all.
+      # site never serves at all.
       - "${PSE_HTTP_PORT:-8280}:80"
       - "${PSE_HTTPS_PORT:-8243}:443"
     environment:
@@ -56,19 +59,50 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  app:
-    # Pull the published image; do not build here. The base file builds from source for
-    # development, but production must run the artifact CI actually gated — size-checked,
-    # secret-scanned, smoke-tested and multi-arch — not a rebuild from whatever the deploy
-    # host's source tree and Docker cache happened to contain.
-    build: !reset null
-    image: ghcr.io/phdwight/pse-edge-mcp:${PSE_IMAGE_TAG:-latest}
-    # No published ports: the app is reachable only through Caddy, so a stray firewall rule
-    # cannot expose it unencrypted.
-    ports: !reset []
+  db:
+    image: postgres:18
     restart: unless-stopped
     environment:
-      DATABASE_URL: postgresql+asyncpg://pse:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@db:5432/pse_edge
+      POSTGRES_USER: pse
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: pse_edge
+    volumes:
+      - pgdata:/var/lib/postgresql
+    # Not published: only app and backup reach Postgres, over the compose network. Exposing
+    # 5432 to the host is the most common way these get compromised.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pse -d pse_edge"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    deploy:
+      resources:
+        limits:
+          memory: ${DB_MEMORY_LIMIT:-2g}
+    logging: *logging
+
+  # Schema is applied by an explicit one-shot job, never by the server on boot: replicas
+  # must not race to mutate their own schema (plan §5). Same image *and same tag* as app —
+  # applying a schema with a different build than the one that reads it is the version skew
+  # that actually corrupts.
+  migrate:
+    image: ghcr.io/phdwight/pse-edge-mcp:${PSE_IMAGE_TAG:-latest}
+    entrypoint: ["alembic", "upgrade", "head"]
+    environment:
+      DATABASE_URL: postgresql+asyncpg://pse:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/pse_edge
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+    logging: *logging
+
+  app:
+    image: ghcr.io/phdwight/pse-edge-mcp:${PSE_IMAGE_TAG:-latest}
+    restart: unless-stopped
+    # No published ports: the app is reachable only through Caddy, so a stray firewall rule
+    # cannot expose it unencrypted.
+    environment:
+      DATABASE_URL: postgresql+asyncpg://pse:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/pse_edge
       # Auth is ON in production. Anonymous access to a public deployment is not a default
       # anyone should have to opt out of.
       PSE_AUTH_REQUIRED: "1"
@@ -78,37 +112,37 @@ services:
       PSE_EMAIL_FROM: ${PSE_EMAIL_FROM:-no-reply@${PSE_DOMAIN}}
       # Auth turns every request into a potential lookup, so the pool is sized above the
       # SQLAlchemy default rather than left to become the queue point.
-      PSE_DB_POOL_SIZE: "20"
-      PSE_DB_MAX_OVERFLOW: "10"
+      PSE_DB_POOL_SIZE: ${PSE_DB_POOL_SIZE:-20}
+      PSE_DB_MAX_OVERFLOW: ${PSE_DB_MAX_OVERFLOW:-10}
+      PSE_QUOTA_PER_MIN: ${PSE_QUOTA_PER_MIN:-60}
+      PSE_QUOTA_PER_DAY: ${PSE_QUOTA_PER_DAY:-2000}
     # Workers share nothing in memory: quota windows, parse memo and token cache are all
     # per worker, so a user's effective ceiling is up to N x nominal. Two is a deliberate
     # compromise between using the cores and keeping limits meaningful.
-    command: ["--http", "--port", "8000", "--workers", "2"]
+    command: ["--http", "--port", "8000", "--workers", "${PSE_WORKERS:-2}"]
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    read_only: true
+    tmpfs:
+      - /tmp
+    healthcheck:
+      # Liveness only — a readiness probe here would restart the container during a
+      # database blip instead of merely taking it out of rotation.
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health').read()"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
     deploy:
       resources:
         limits:
-          cpus: "2.0"
-          memory: 1g
+          cpus: "${APP_CPU_LIMIT:-2.0}"
+          memory: ${APP_MEMORY_LIMIT:-1g}
         reservations:
           memory: 256m
-    logging: *logging
-
-  migrate:
-    # Same image as app, for the same reason — and it must be the *same tag*, or the schema
-    # gets applied by a different build than the one that reads it.
-    build: !reset null
-    image: ghcr.io/phdwight/pse-edge-mcp:${PSE_IMAGE_TAG:-latest}
-    logging: *logging
-
-  db:
-    restart: unless-stopped
-    # Not published: only the app and backup services reach Postgres, over the compose
-    # network. Exposing 5432 to the host is the most common way these get compromised.
-    ports: !reset []
-    deploy:
-      resources:
-        limits:
-          memory: 2g
     logging: *logging
 
   # Daily pg_dump with rotation (plan §6a). The named volume plus these dumps cover the two
@@ -117,7 +151,7 @@ services:
     image: postgres:18
     restart: unless-stopped
     environment:
-      PGPASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
       BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-14}
     volumes:
       - ./backups:/backups
@@ -130,8 +164,7 @@ services:
         while true; do
           # 18:00 UTC is 02:00 Asia/Manila — after the market closes and well away from
           # the boundary refetch, so a dump never competes with the day's one upstream hit.
-          now=$$(date -u +%H%M)
-          if [ "$$now" = "1800" ]; then
+          if [ "$$(date -u +%H%M)" = "1800" ]; then
             stamp=$$(date -u +%Y%m%dT%H%M%SZ)
             echo "backup: starting $$stamp"
             if pg_dump -h db -U pse -d pse_edge --format=custom \
@@ -157,7 +190,7 @@ services:
     image: ghcr.io/phdwight/pse-edge-mcp:${PSE_IMAGE_TAG:-latest}
     restart: unless-stopped
     environment:
-      DATABASE_URL: postgresql+asyncpg://pse:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@db:5432/pse_edge
+      DATABASE_URL: postgresql+asyncpg://pse:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/pse_edge
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -171,5 +204,6 @@ services:
     logging: *logging
 
 volumes:
+  pgdata:
   caddy_data:
   caddy_config:
