@@ -6,6 +6,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/) · Versioning: [SemVer](
 ## [Unreleased]
 
 ### Fixed
+- **`serverInfo.version` was an empty string.** `MCPServer(...)` was constructed without a `version`, so every `initialize` response told the connecting client the server had no version. It now reports the installed distribution version, read from `importlib.metadata` so it cannot drift from `pyproject.toml`.
 - **Signing in without an OAuth flow no longer lands on a bearer-token error.** A person who went to `/login` directly — rather than being sent there by an MCP client — was redirected to the bare public URL on success. `/` was not a route, so it fell through to the MCP endpoint and answered a freshly authenticated user with `{"error": "UNAUTHORIZED", "message": "Missing bearer token."}`, asking them for something they had no way to obtain. They now land on `/account`.
 - **`/` is a page.** It shows the MCP endpoint URL to paste into a client, notes that the client will bring you back to authorize so signing up first is unnecessary, and links signup, sign-in and privacy. An authenticated visitor is redirected to `/account`. Returning an API error at the front door of a public service was wrong regardless of how anyone arrived there.
 - `/favicon.ico` answers 204 instead of falling through to a 401. Every browser asks for it, and the refusals were noise in logs being read to debug something real.

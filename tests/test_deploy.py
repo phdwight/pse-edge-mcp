@@ -243,3 +243,16 @@ def test_https_without_auth_warns_loudly(caplog):
         create_app(Settings(public_url="https://mcp.example.com", throttle_rate_per_sec=1000))
 
     assert any("anonymous and unlimited" in record.message for record in caplog.records)
+
+
+def test_server_advertises_its_version_in_serverinfo():
+    """It shipped as an empty string: `version` was never passed, and the SDK defaults it.
+    Every initialize response carries serverInfo, so this is the first thing a connecting
+    client is told about the server."""
+    from pse_edge_mcp.server import build_server
+
+    server = build_server(Settings(throttle_rate_per_sec=1000))
+    version = getattr(server, "version", None)
+
+    assert version, "serverInfo.version must not be empty"
+    assert version[0].isdigit(), f"expected a release version, got {version!r}"
