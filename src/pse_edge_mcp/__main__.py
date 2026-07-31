@@ -19,6 +19,7 @@ plain JSON is what keeps ordinary proxies and autoscalers happy.
 from __future__ import annotations
 
 import argparse
+from typing import Any
 
 from .config import Settings
 from .server import build_server
@@ -92,6 +93,8 @@ def _serve_http_with_auth(args: argparse.Namespace, settings: Settings) -> None:
     from .oauth import OAuthService
     from .passkeys import PasskeyService
     from .server import build_storage
+    from .usage import UsageRecorder
+    from .usage_postgres import PostgresUsageSink
 
     storage, archive, engine = build_storage(settings)
     if engine is None:  # unreachable given the database_url check; keeps mypy honest
@@ -123,11 +126,13 @@ def _serve_http_with_auth(args: argparse.Namespace, settings: Settings) -> None:
     # token (you cannot present one before you have one), while everything else still
     # requires it. `/.well-known/*` is additionally exempt inside the middleware so
     # discovery works even if the ordering is ever changed.
+    usage = UsageRecorder(PostgresUsageSink(engine), retention_days=settings.usage_retention_days)
     guarded = AuthMiddleware(
         app,
         tokens,
         QuotaTracker(),
         resource_metadata_url=f"{settings.public_url}/.well-known/oauth-protected-resource",
+        usage=usage,
     )
     surface = AuthApp(
         guarded,
@@ -139,8 +144,34 @@ def _serve_http_with_auth(args: argparse.Namespace, settings: Settings) -> None:
         passkeys=PasskeyService(engine, public_url=settings.public_url),
         email=build_email_sender(settings.zeptomail_api_key, settings.email_from),
         public_url=settings.public_url,
+        engine=engine,
     )
-    uvicorn.run(surface, host=args.host, port=args.port)
+
+    # The flush loop is tied to the server's lifetime: started once an event loop
+    # exists, and stopped with a final flush so a clean shutdown loses no counts.
+    async def application(scope: Any, receive: Any, send: Any) -> None:
+        if scope["type"] == "lifespan":
+            # Run our own startup/shutdown alongside the wrapped app's, which owns the
+            # MCP session manager's task group.
+            inner = app.router.lifespan_context(app)
+
+            async def relay() -> None:
+                message = await receive()
+                if message["type"] == "lifespan.startup":
+                    await inner.__aenter__()
+                    usage.start()
+                    await send({"type": "lifespan.startup.complete"})
+                    message = await receive()
+                if message["type"] == "lifespan.shutdown":
+                    await usage.stop()
+                    await inner.__aexit__(None, None, None)
+                    await send({"type": "lifespan.shutdown.complete"})
+
+            await relay()
+            return
+        await surface(scope, receive, send)
+
+    uvicorn.run(application, host=args.host, port=args.port)
 
 
 if __name__ == "__main__":

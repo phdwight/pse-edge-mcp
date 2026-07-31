@@ -63,6 +63,13 @@ pse-edge-admin create-user you@example.com
 pse-edge-admin issue-token you@example.com --note laptop   # plaintext shown once
 ```
 
+Accounts come with a **privacy surface**: `/privacy` states what is collected (your email
+and hourly usage counts — nothing else identifying), `/account` shows a signed-in user
+everything held about them, and `POST /account/delete` erases it immediately and completely,
+with no approval step. Usage counts are deleted automatically after 90 days. Operators get
+`pse-edge-admin delete-user` and `purge-usage` (cron the latter daily), and `delete-user`
+uses the same erasure code path as the user's own button.
+
 Two ways in. **Self-service (OAuth 2.1 + passkeys):** an MCP client points at this server,
 discovers it via `/.well-known/oauth-protected-resource`, registers itself (RFC 7591) and
 sends the user through `/signup` — email link, then a passkey. No passwords exist anywhere.
@@ -118,7 +125,7 @@ Edge's own units labels are inconsistent between its annual and quarterly sectio
 period reports its `currency_units` for you to check. Index changes are signed here even
 though Edge prints them unsigned (it shows direction only as a colour and an arrow).
 
-Roadmap (see `docs/plan.md`): usage audit log, account self-deletion, production deployment (TLS, backups).
+Roadmap (see `docs/plan.md`): production deployment — TLS, backups, auth on by default.
 
 ## Container image
 

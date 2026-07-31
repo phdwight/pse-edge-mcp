@@ -149,8 +149,15 @@ Unofficial — Edge has no public API; we speak to the portal's own internal end
   Layering is `AuthApp(AuthMiddleware(mcp_app))` so `/oauth/*` and signup are reachable
   without a token. Journey test: `tests/test_auth_journey.py` (soft-webauthn, real
   signatures, real Postgres).
-- **Phase 5 remaining:** default auth on at deploy, usage audit log + retention,
-  disposable-email blocklist, CSRF token on /consent, account self-deletion (plan §6a).
+- **Phase 5 privacy (done):** `/privacy` page, `/account` subject-access view, self-service
+  `POST /account/delete`, usage log with 90-day retention, disposable-email blocklist, CSRF
+  on both state-changing forms. Rules: the usage log **aggregates per user-hour, never per
+  request** (minimal collection *and* no hot-path write); erasure is a **hard delete in one
+  transaction**, and `tests/test_privacy.py::test_erasure_leaves_nothing_behind` walks
+  `metadata.tables` — a new user-keyed table fails that test rather than silently retaining
+  data; the admin `delete-user` reuses the user's own erasure path so the two cannot drift.
+  `usage.py` must stay SQLAlchemy-free; the sink lives in `usage_postgres.py`.
+- **Phase 5 remaining:** flip auth to default-on at deploy.
 - **Phase 6:** production deploy (compose.prod.yaml overlay, TLS, backups).
 
 ## Holiday table

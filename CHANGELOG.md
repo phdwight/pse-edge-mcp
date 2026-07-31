@@ -5,6 +5,16 @@ Format: [Keep a Changelog](https://keepachangelog.com/) · Versioning: [SemVer](
 
 ## [Unreleased]
 
+### Added
+- **Privacy compliance (plan §6a), the obligations that arrive with a real user's email address.** A public `/privacy` page stating what is collected, how long it is kept and who to contact about a breach; an `/account` subject-access view; and self-service `POST /account/delete` that erases immediately — no request, no waiting period, no email exchange.
+- **Per-user usage log with 90-day retention**, aggregated per user-hour rather than per request. That holds markedly less about a person (itself the §6a minimal-collection requirement), keeps writes off the request path, and makes retention an indexed range delete. Counts buffer in memory and flush on an interval; a clean shutdown flushes what is pending, and a failing sink is logged rather than raised into the request.
+- `pse-edge-admin delete-user` (refuses without `--yes`) and `purge-usage` for a daily cron. `delete-user` reuses the user's own erasure path, so the operator route cannot drift from the promise made on the privacy page.
+- Disposable-email domains refused at signup (plan §6's abuse brake), and CSRF tokens on `/consent` and `/account/delete` — SameSite=Lax already blocks the cross-site POST, so this is defence in depth.
+- 20 new tests (220 total). `test_erasure_leaves_nothing_behind` walks `metadata.tables` rather than a hand-written list, so a table added later that references a user fails the test instead of silently retaining personal data after a deletion.
+
+### Changed
+- Erasure is a hard delete in one transaction, never a `disabled_at` flag: a soft delete leaves the email address on file, which is the opposite of erasure and would make the privacy page's promise false. Public market data (`eod_bars`, `disclosures`) survives, because it was never about the user.
+
 ## [0.5.0] - 2026-07-30
 
 ### Added

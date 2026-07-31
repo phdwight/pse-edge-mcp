@@ -24,6 +24,7 @@ Security notes worth stating:
 from __future__ import annotations
 
 import base64
+import hmac
 import json
 import secrets
 import uuid
@@ -51,6 +52,28 @@ from webauthn.helpers.exceptions import (
 from .auth import hash_token
 from .db import email_verifications, users, web_sessions, webauthn_credentials
 
+# A cheap abuse brake (plan §6), not a security control: it raises the cost of bulk
+# throwaway signups. Kept small and readable on purpose — a vendored 100k-domain list
+# would imply a completeness this cannot have, and would rot silently.
+DISPOSABLE_EMAIL_DOMAINS = frozenset(
+    {
+        "10minutemail.com",
+        "guerrillamail.com",
+        "mailinator.com",
+        "tempmail.com",
+        "temp-mail.org",
+        "throwawaymail.com",
+        "yopmail.com",
+        "trashmail.com",
+        "getnada.com",
+        "sharklasers.com",
+        "dispostable.com",
+        "maildrop.cc",
+        "fakeinbox.com",
+        "mintemail.com",
+    }
+)
+
 SESSION_TTL_MINUTES = 20
 VERIFICATION_TTL_MINUTES = 30
 SESSION_COOKIE = "pse_session"
@@ -66,6 +89,21 @@ class WebSession:
     kind: str
     email: str | None
     user_id: str | None
+
+    @property
+    def csrf_token(self) -> str:
+        """A per-session token for state-changing forms.
+
+        Derived from the session id rather than stored, so it needs no column and cannot
+        drift out of sync: knowing it requires already holding the cookie. SameSite=Lax
+        already blocks the cross-site POST, so this is defence in depth against a
+        same-site injection or a future SameSite relaxation.
+        """
+        return hash_token("csrf:" + self.sid)[:32]
+
+
+def constant_time_equals(left: str, right: str) -> bool:
+    return hmac.compare_digest(left, right)
 
 
 def _b64e(raw: bytes) -> str:
@@ -142,6 +180,11 @@ class PasskeyService:
         email = email.strip().lower()
         if "@" not in email or email.startswith("@") or email.endswith("@"):
             raise PasskeyError("that does not look like an email address")
+        if email.rsplit("@", 1)[1] in DISPOSABLE_EMAIL_DOMAINS:
+            raise PasskeyError(
+                "that email provider is not accepted — please use a durable address, "
+                "since it is also how you would recover access"
+            )
         token = secrets.token_urlsafe(32)
         async with self._engine.begin() as conn:
             await conn.execute(
