@@ -5,6 +5,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/) · Versioning: [SemVer](
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-07-31
+
 ### Changed
 - **Published ports moved out of the contested range** for hosts that already run other things. Caddy publishes 8280/8243 instead of 80/443, and the NAS LAN port defaults to 8200 rather than 8000 — one of the most contested numbers on a NAS. Only the published side moves in both cases: Caddy still listens on 80/443 inside its container and the app on 8000 inside its own, so the Caddyfile and the tunnel's `app:8000` route are unchanged. Overridable via `PSE_HTTP_PORT`, `PSE_HTTPS_PORT` and `PSE_LAN_PORT`. **The Caddy path now requires the router to forward 80 → 8280 and 443 → 8243**, because ACME validates on 80 (HTTP-01) or 443 (TLS-ALPN-01) and no setting changes those numbers; where that forwarding is impossible, the tunnel path needs no inbound ports at all.
 - **Production pulls the published image instead of building from source.** `compose.prod.yaml` inherited `build: .` from the dev base, so a deployment rebuilt from whatever the host's source tree and Docker cache happened to contain rather than running the artifact CI actually gated — size-checked, secret-scanned, smoke-tested, multi-arch. `app`, `migrate` and `purge` now all pull the same `PSE_IMAGE_TAG`; `purge` had additionally been pinned to a hardcoded `:latest`, so it could run a different build than the app it purges for.

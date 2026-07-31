@@ -158,7 +158,7 @@ is a poor build host.
 ## Stage 1 — LAN only
 
 ```bash
-PSE_IMAGE_TAG=0.6.0            # pin a version; see the warning below
+PSE_IMAGE_TAG=0.7.0            # pin a version; see the warning below
 POSTGRES_PASSWORD=<long random value>
 ```
 
@@ -173,7 +173,7 @@ is reachable at `http://<nas-ip>:8200`, and nothing is exposed to the internet.
 Check it:
 
 ```bash
-curl http://<nas-ip>:8200/health           # {"status": "ok", "version": "0.6.0", ...}
+curl http://<nas-ip>:8200/health           # {"status": "ok", "version": "0.7.0", ...}
 curl -X POST http://<nas-ip>:8200/mcp      # 401 — auth is on
 ```
 

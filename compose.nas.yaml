@@ -16,7 +16,7 @@
 # Required in .env next to this file:
 #   POSTGRES_PASSWORD   long and random
 # Strongly recommended:
-#   PSE_IMAGE_TAG       pin a version (e.g. 0.6.0). :latest is a moving target, and a tag
+#   PSE_IMAGE_TAG       pin a version (e.g. 0.7.0). :latest is a moving target, and a tag
 #                       that lags this file reads as a broken deployment rather than a
 #                       version mismatch.
 #
@@ -78,8 +78,8 @@ services:
       - "${PSE_LAN_PORT:-8200}:8000"
     environment:
       DATABASE_URL: postgresql+asyncpg://pse:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/pse_edge
-      # On even on the LAN: a NAS is a shared machine, and turning auth on afterwards would
-      # orphan any token minted while it was off.
+      # On, even on the LAN: a NAS is a shared machine, and turning auth on afterwards
+      # would orphan any token minted while it was off.
       PSE_AUTH_REQUIRED: "1"
       # Stage 1 has no public hostname yet. compose.tunnel.yaml overrides this with the
       # real https URL, which is the value WebAuthn binds every passkey to.
