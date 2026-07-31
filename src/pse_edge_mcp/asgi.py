@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import logging
 from typing import Any
+from urllib.parse import urlparse
 
 from .config import Settings
 from .health import HealthApp
@@ -36,6 +37,42 @@ from .market_calendar import MarketCalendar
 from .server import build_server, build_storage
 
 logger = logging.getLogger(__name__)
+
+
+def transport_security_for(public_url: str) -> Any:
+    """Allow the host this server is actually reached at.
+
+    The SDK guards against DNS rebinding by checking the `Host` header, and its default
+    allowlist is localhost and 127.0.0.1 only. Behind any reverse proxy — Caddy, a
+    Cloudflare Tunnel — the header carries the *public* hostname, so the default rejects
+    every real request with `421 Invalid Host header` once OAuth has already succeeded.
+    That failure is unusually hard to read: authorization completes, the client stores a
+    valid token, and only the first `POST /mcp` fails.
+
+    Derived from `PSE_PUBLIC_URL` rather than a separate variable, because that value is
+    already the deployment's external identity — it drives the WebAuthn rp_id, the OAuth
+    issuer and email links. A second knob for the same fact is a second thing to get wrong.
+
+    The guard is kept, not disabled: it costs one header comparison, and turning it off
+    because auth exists confuses two different attacks. Auth stops a stranger calling the
+    API; this stops a browser on the victim's own network being used to reach a server
+    that trusts its network position.
+    """
+    from mcp.server.transport_security import TransportSecuritySettings
+
+    parsed = urlparse(public_url)
+    host = parsed.hostname or "localhost"
+    # Both forms: a proxy may or may not include the port in Host, and the SDK compares
+    # the header verbatim.
+    hosts = {host, f"{host}:{parsed.port}" if parsed.port else host}
+    if parsed.scheme == "https":
+        hosts.add(f"{host}:443")
+    # localhost stays allowed so container healthchecks and a local curl keep working.
+    hosts |= {"localhost", "127.0.0.1", "localhost:8000", "127.0.0.1:8000"}
+    return TransportSecuritySettings(
+        allowed_hosts=sorted(hosts),
+        allowed_origins=sorted({public_url.rstrip("/"), f"{parsed.scheme}://{host}"}),
+    )
 
 
 def create_app(settings: Settings | None = None) -> Any:
@@ -56,6 +93,7 @@ def create_app(settings: Settings | None = None) -> Any:
     inner = mcp.streamable_http_app(
         json_response=not settings.sse_responses,
         stateless_http=not settings.stateful_sessions,
+        transport_security=transport_security_for(settings.public_url),
     )
 
     app: Any = inner

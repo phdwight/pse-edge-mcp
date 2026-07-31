@@ -16,6 +16,7 @@ Tools (Phase 3): get_company_profile, get_financial_highlights, get_dividends_an
 
 from __future__ import annotations
 
+import importlib.metadata
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 
@@ -164,7 +165,14 @@ def build_server(
     company_info = CompanyInfoRepository(client, companies, cache, memo)
     market = MarketRepository(client, cache, memo)
 
-    mcp = MCPServer("pse-edge", instructions=INSTRUCTIONS)
+    # `version` is not optional in spirit: it goes into serverInfo on every initialize, and
+    # leaving it unset advertised an empty string to every client. Read from the installed
+    # distribution so it cannot drift from pyproject.toml.
+    try:
+        _version = importlib.metadata.version("pse-edge-mcp")
+    except importlib.metadata.PackageNotFoundError:  # running from a source tree
+        _version = "0.0.0+unknown"
+    mcp = MCPServer("pse-edge", version=_version, instructions=INSTRUCTIONS)
 
     @mcp.tool()
     async def search_companies(query: str) -> dict[str, Any]:

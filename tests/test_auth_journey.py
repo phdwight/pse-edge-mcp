@@ -604,3 +604,31 @@ async def test_a_failing_mail_provider_is_503_not_a_stack_trace(stack):
     assert "try again" in response.text.lower()
     assert "traceback" not in response.text.lower()
     assert "zeptomail" not in response.text.lower(), "provider names are for the log, not users"
+
+
+@pytest.mark.postgres
+async def test_the_front_door_is_a_page_not_a_bearer_token_error(stack):
+    """Reported from production: signing in without an OAuth flow landed on `/`, which was
+    not a route, so it fell through to the MCP app and told a freshly authenticated user
+    "Missing bearer token" — asking them for something they have no way to obtain."""
+    async with serving(stack) as (http, _):
+        root = await http.get("/")
+        favicon = await http.get("/favicon.ico")
+
+    assert root.status_code == 200
+    assert "bearer" not in root.text.lower()
+    for link in ("/signup", "/login", "/privacy"):
+        assert link in root.text, f"a visitor needs a way to reach {link}"
+    assert favicon.status_code == 204, "browsers always ask; 401s here are log noise"
+
+
+@pytest.mark.postgres
+async def test_signing_in_without_a_flow_lands_on_the_account_page(stack):
+    """The direct-browser path: no MCP client involved, so there is no authorize step to
+    resume and the user should end up somewhere built for a person."""
+    async with serving(stack) as (http, email):
+        await enroll_passkey(http, email, "front-door@example.com")
+        root = await http.get("/")
+
+    assert root.status_code == 302, "an authenticated visitor at / goes to their account"
+    assert root.headers["location"].endswith("/account")

@@ -169,6 +169,8 @@ class AuthApp:
 
     def _route(self, path: str, method: str) -> Handler | None:
         table: dict[tuple[str, str], Handler] = {
+            ("/", "GET"): self._index,
+            ("/favicon.ico", "GET"): self._favicon,
             ("/.well-known/oauth-protected-resource", "GET"): self._protected_resource_metadata,
             ("/.well-known/oauth-authorization-server", "GET"): self._as_metadata,
             ("/oauth/register", "POST"): self._register,
@@ -189,6 +191,39 @@ class AuthApp:
             ("/account/delete", "POST"): self._account_delete,
         }
         return table.get((path, method))
+
+    # --- front door ----------------------------------------------------------
+
+    async def _index(
+        self, scope: dict[str, Any], body: bytes
+    ) -> tuple[int, dict[str, str], bytes]:
+        """A page for people at `/`.
+
+        Everything not in this table falls through to the MCP endpoint, which answers a
+        browser with `{"error": "UNAUTHORIZED"}`. That is the right answer for a client
+        calling an API without a token and the wrong one for a person typing the hostname,
+        who is told they are missing something they have no way to obtain.
+        """
+        session = await self._passkeys.load_session(_cookies(scope).get(SESSION_COOKIE))
+        if session and session.kind == "authenticated" and session.user_id:
+            return _redirect(f"{self._public}/account")
+        return _html(
+            "<h1>PSE Edge MCP</h1>"
+            "<p>End-of-day Philippine Stock Exchange data over the Model Context "
+            "Protocol.</p>"
+            "<p>Point an MCP client at this server and it will bring you back here to "
+            "authorize — you do not need to sign up first:</p>"
+            f"<pre>{self._public}/mcp</pre>"
+            "<p><a href='/signup'>Create an account</a> · <a href='/login'>Sign in</a> · "
+            "<a href='/privacy'>Privacy</a></p>"
+        )
+
+    async def _favicon(
+        self, scope: dict[str, Any], body: bytes
+    ) -> tuple[int, dict[str, str], bytes]:
+        # 204 rather than a fall-through 401: every browser asks for this, and the refusals
+        # are pure noise in a log someone is reading to debug something real.
+        return 204, {}, b""
 
     # --- metadata ------------------------------------------------------------
 
@@ -392,7 +427,15 @@ class AuthApp:
         payload = json.loads(body)
         await self._passkeys.finish_login(session, payload["credential"])
         flow_id = payload.get("flow_id") or ""
-        next_url = f"{self._public}/oauth/authorize?flow={flow_id}" if flow_id else self._public
+        # No flow means a person signed in directly rather than being sent by an MCP client,
+        # so send them somewhere built for a person. This used to be the bare public URL,
+        # which is not a page — it fell through to the MCP app and answered a freshly
+        # authenticated user with "Missing bearer token".
+        next_url = (
+            f"{self._public}/oauth/authorize?flow={flow_id}"
+            if flow_id
+            else f"{self._public}/account"
+        )
         return _json_response({"ok": True, "next": next_url, "flow_id": flow_id})
 
     # --- privacy & account (plan §6a) ----------------------------------------

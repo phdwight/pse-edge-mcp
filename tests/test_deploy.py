@@ -11,9 +11,11 @@ from __future__ import annotations
 import json
 import logging
 import re
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
+import anyio
 import httpx
 import pytest
 
@@ -22,6 +24,35 @@ from pse_edge_mcp.health import HealthApp
 from pse_edge_mcp.logging_config import JsonFormatter, configure_logging, redact
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+
+
+@asynccontextmanager
+async def app_lifespan(app):
+    """httpx's ASGITransport does not run the lifespan, and the MCP session manager's task
+    group is created there — without this, /mcp fails with "task group is not initialized"."""
+    done = anyio.Event()
+    started = anyio.Event()
+
+    async def run():
+        async def receive():
+            if not started.is_set():
+                return {"type": "lifespan.startup"}
+            await done.wait()
+            return {"type": "lifespan.shutdown"}
+
+        async def send(message):
+            if message["type"] == "lifespan.startup.complete":
+                started.set()
+
+        await app({"type": "lifespan"}, receive, send)
+
+    async with anyio.create_task_group() as tg:
+        tg.start_soon(run)
+        await started.wait()
+        try:
+            yield
+        finally:
+            done.set()
 
 
 class Inner:
@@ -243,3 +274,68 @@ def test_https_without_auth_warns_loudly(caplog):
         create_app(Settings(public_url="https://mcp.example.com", throttle_rate_per_sec=1000))
 
     assert any("anonymous and unlimited" in record.message for record in caplog.records)
+
+
+def test_server_advertises_its_version_in_serverinfo():
+    """It shipped as an empty string: `version` was never passed, and the SDK defaults it.
+    Every initialize response carries serverInfo, so this is the first thing a connecting
+    client is told about the server."""
+    from pse_edge_mcp.server import build_server
+
+    server = build_server(Settings(throttle_rate_per_sec=1000))
+    version = getattr(server, "version", None)
+
+    assert version, "serverInfo.version must not be empty"
+    assert version[0].isdigit(), f"expected a release version, got {version!r}"
+
+
+# --- transport security ------------------------------------------------------
+
+
+def test_the_public_host_is_allowed_by_the_dns_rebinding_guard():
+    """Production shipped with the SDK's default allowlist — localhost and 127.0.0.1 only.
+
+    Behind any reverse proxy the Host header carries the public hostname, so every real
+    request was refused with `421 Invalid Host header` *after* OAuth had fully succeeded:
+    the client held a valid token and only the first POST /mcp failed. The old journey test
+    passed the setting explicitly, so it exercised a configuration production never built.
+    """
+    from pse_edge_mcp.asgi import transport_security_for
+
+    security = transport_security_for("https://pse.example.com")
+
+    assert "pse.example.com" in security.allowed_hosts
+    assert "pse.example.com:443" in security.allowed_hosts, "a proxy may include the port"
+    assert "https://pse.example.com" in security.allowed_origins
+    assert "localhost" in security.allowed_hosts, "healthchecks call 127.0.0.1 directly"
+
+
+async def test_a_proxied_request_with_the_public_host_reaches_the_mcp_app():
+    """End to end through the real factory: the Host header a proxy sends must not 421."""
+    from pse_edge_mcp.asgi import create_app
+
+    app = create_app(Settings(public_url="https://pse.example.com", throttle_rate_per_sec=1000))
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="https://pse.example.com"
+    ) as http:
+        async with app_lifespan(app):
+            response = await http.post(
+                "/mcp",
+                headers={"accept": "application/json, text/event-stream"},
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "initialize",
+                    "params": {
+                        "protocolVersion": "2025-06-18",
+                        "capabilities": {},
+                        "clientInfo": {"name": "probe", "version": "1"},
+                    },
+                },
+            )
+
+    assert response.status_code != 421, (
+        f"DNS-rebinding guard refused the public host: {response.text}"
+    )
+    assert response.status_code == 200
+    assert response.json()["result"]["serverInfo"]["version"], "serverInfo.version was empty"
