@@ -53,7 +53,12 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  # Schema is applied by an explicit one-shot job, never by the server on boot.
+  # Schema is applied by an explicit one-shot job, never by the server on boot: replicas must
+  # not race to mutate their own schema (plan §5).
+  #
+  # This container RUNS ONCE AND EXITS 0. That is success, not failure. NAS Docker UIs show
+  # it as "Not in use" / "Exited" and often colour the whole project red because of it —
+  # check its log says "Running upgrade" and nothing after, and ignore the badge.
   migrate:
     image: ghcr.io/phdwight/pse-edge-mcp:${PSE_IMAGE_TAG:-latest}
     entrypoint: ["alembic", "upgrade", "head"]

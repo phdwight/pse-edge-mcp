@@ -5,6 +5,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/) · Versioning: [SemVer](
 
 ## [Unreleased]
 
+### Fixed
+- **`compose.prod.yaml` now says that `Caddyfile` must sit beside it.** It is bind-mounted, and Docker cannot mount a file that does not exist, so importing the compose file on its own leaves `caddy` *created but never started* with an opaque OCI "not a directory" error while every other service comes up — which in a NAS UI reads as the project being broken for no visible reason. `compose.nas.yaml` mounts no repository files, so a single-file import of that one is complete.
+- **Documented that `migrate` exiting is success, not failure.** It runs `alembic upgrade head` once and exits 0, because the schema must not be applied by the server on boot (replicas would race to mutate it). NAS Docker UIs list any stopped container as "Not in use" and colour the whole project red on that basis, so a healthy stack looks broken; the deploy guide now gives the expected per-container states and says what a genuine failure looks like instead.
+
 ## [0.7.1] - 2026-07-31
 
 ### Fixed

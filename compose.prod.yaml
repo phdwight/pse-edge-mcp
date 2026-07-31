@@ -3,6 +3,12 @@
 #
 #   docker compose -f compose.prod.yaml up -d
 #
+# !! THE `Caddyfile` FROM THIS REPOSITORY MUST SIT NEXT TO THIS FILE. !!
+# It is bind-mounted below, and Docker cannot mount a file that does not exist: the caddy
+# container is then *created but never started*, with an OCI "not a directory" error, while
+# every other service comes up fine. In a NAS UI that reads as the project being broken for
+# no visible reason. If you imported only this compose file, copy Caddyfile beside it.
+#
 # Standalone, not an overlay on compose.yaml: production should not inherit a development
 # file's build directives and published ports only to undo them, and a self-contained file
 # is what NAS and PaaS UIs can import. It *pulls* the published image — production should
