@@ -22,6 +22,24 @@ docker compose -f compose.yaml -f compose.prod.yaml up -d
 Neither `app` nor `db` publishes a port: everything arrives through Caddy. A stray firewall
 rule therefore cannot expose the app unencrypted or the database at all.
 
+## Ports, and what ACME requires of them
+
+Caddy publishes on **8280** and **8243** rather than 80 and 443, to stay clear of whatever
+else already runs on the host — on a NAS, 80 and 443 usually belong to the device's own web
+UI. Only the published side moves; Caddy still listens on 80/443 *inside* the container, so
+the Caddyfile is untouched. Override with `PSE_HTTP_PORT` / `PSE_HTTPS_PORT`.
+
+**Your router must forward 80 → 8280 and 443 → 8243.** This is not a preference. A
+certificate authority validates by connecting to your domain on port 80 (HTTP-01) or 443
+(TLS-ALPN-01); those numbers are fixed in the ACME protocol, and no Caddy setting moves them.
+If the internet cannot reach this host on 80 and 443 by some path, Caddy never obtains a
+certificate, and the site never serves at all — the failure is total, not degraded.
+
+So this file suits a host you control the edge of. Where you cannot forward those ports —
+CGNAT, a locked-down router, an ISP that blocks 80, or a NAS whose ports are already
+spoken for — use `compose.nas.yaml` + `compose.tunnel.yaml` instead. That path needs no
+inbound ports whatsoever, and Cloudflare handles the certificate.
+
 ## Required configuration
 
 ```bash
@@ -128,22 +146,65 @@ lengthens the window in which a revoked token still works.
 
 ---
 
-# NAS + Cloudflare Tunnel
+# NAS deployment, in two stages
 
-The topology most home deployments actually want: a NAS with no ports open to the internet,
-reached through a Cloudflare subdomain. `cloudflared` dials **out** to Cloudflare, so there
-is no port forwarding, nothing for CGNAT to break, no dynamic-DNS to maintain, and no
-contest with the NAS's own web UI over ports 80 and 443.
+Bring the stack up on the NAS first and confirm it works on your LAN; add the public
+hostname afterwards. Each stage is one compose file, and stage 2 is additive.
 
-Use `compose.nas.yaml`, which is standalone rather than an overlay — NAS Docker UIs import
-a single file much more happily — and **pulls** the published image instead of building,
-since a NAS is a poor build host.
+`compose.nas.yaml` is standalone rather than an overlay — NAS Docker UIs import a single
+file much more happily — and **pulls** the published image instead of building, since a NAS
+is a poor build host.
+
+## Stage 1 — LAN only
+
+```bash
+PSE_IMAGE_TAG=0.7.0            # pin a version; see the warning below
+POSTGRES_PASSWORD=<long random value>
+```
 
 ```bash
 docker compose -f compose.nas.yaml up -d
 ```
 
-## Setting it up
+That is the whole stage. No Cloudflare account, domain or token is involved yet — those
+variables live in the stage 2 file, so nothing asks for them until you opt in. The server
+is reachable at `http://<nas-ip>:8200`, and nothing is exposed to the internet.
+
+Check it:
+
+```bash
+curl http://<nas-ip>:8200/health           # {"status": "ok", "version": "0.7.0", ...}
+curl -X POST http://<nas-ip>:8200/mcp      # 401 — auth is on
+```
+
+**Auth is on even on the LAN**, because a NAS is a shared machine and turning auth on
+afterwards would orphan any token minted while it was off. Passkey signup, though, cannot
+work here: browsers restrict WebAuthn to secure contexts, and this is plain http. So mint a
+token directly instead:
+
+```bash
+docker compose -f compose.nas.yaml exec app pse-edge-admin create-user you@example.com
+docker compose -f compose.nas.yaml exec app pse-edge-admin issue-token you@example.com --note nas
+```
+
+```bash
+curl -X POST http://<nas-ip>:8200/mcp \
+  -H "Authorization: Bearer pse_..." \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json, text/event-stream' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
+```
+
+Eleven tools back means the stack is sound: image, migrations, database, auth and the MCP
+transport are all working. What stage 1 *cannot* tell you is whether passkeys, OAuth and
+verification email work — all three need the real https origin, so they are stage 2's
+checklist, not something you have deferred by accident.
+
+## Stage 2 — public hostname via Cloudflare Tunnel
+
+`cloudflared` dials **out** to Cloudflare, so there is no port forwarding, nothing for CGNAT
+to break, no dynamic-DNS to maintain, and no contest with the NAS's own web UI over ports 80
+and 443.
 
 1. **Cloudflare Zero Trust → Networks → Tunnels → Create a tunnel** (type: Cloudflared).
    Copy the token it shows you.
@@ -152,19 +213,42 @@ docker compose -f compose.nas.yaml up -d
    - Service type: **HTTP**, URL: **`app:8000`**
 
    HTTP, not HTTPS — that hop runs inside the compose network. TLS is terminated at
-   Cloudflare's edge, which is why no certificate or ACME appears anywhere in this file.
-3. Fill in `.env` beside the compose file:
+   Cloudflare's edge, which is why no certificate or ACME appears anywhere in this
+   deployment.
+3. Add to the same `.env`:
 
    ```bash
    PSE_DOMAIN=mcp.example.com
    CLOUDFLARE_TUNNEL_TOKEN=<the token from step 1>
-   POSTGRES_PASSWORD=<long random value>
-   ZEPTOMAIL_API_KEY=<key>
-   PSE_IMAGE_TAG=0.6.0        # pin a version; see the warning below
+   ZEPTOMAIL_API_KEY=<key>          # verification email, now that strangers can sign up
    ```
 
-4. `docker compose -f compose.nas.yaml up -d`, then check
-   `https://$PSE_DOMAIN/.well-known/oauth-protected-resource` from anywhere.
+4. Bring it up with both files:
+
+   ```bash
+   docker compose -f compose.nas.yaml -f compose.tunnel.yaml up -d --remove-orphans
+   ```
+
+The overlay starts `cloudflared` **and** unpublishes the LAN port, so going public and
+closing the local door are one action rather than two, the second of which is easy to
+forget. It also swaps `PSE_PUBLIC_URL` to the https hostname. Confirm both:
+
+```bash
+curl -sf https://mcp.example.com/health && echo "public: up"
+curl -s -m 4 http://<nas-ip>:8200/health || echo "LAN port: closed (correct)"
+```
+
+Then **do one real passkey signup immediately.** It is the only check that proves
+`PSE_PUBLIC_URL` matches the origin browsers see; caught now it costs a minute, caught later
+it arrives as "passkeys just don't work", and enrolled credentials cannot be migrated, only
+re-enrolled.
+
+If you would rather run a single file long-term — some NAS UIs only import one — flatten the
+two once the tunnel works:
+
+```bash
+docker compose -f compose.nas.yaml -f compose.tunnel.yaml config > compose.merged.yaml
+```
 
 ## Pin the image tag
 
@@ -200,7 +284,7 @@ protects you from mistakes, not from disk failure.
 **Architecture.** Both the app image and `cloudflared` are published for `linux/amd64` and
 `linux/arm64`, so Intel and ARM NAS models are both covered without any change.
 
-## Verifying, from outside
+## Verifying stage 2, from outside
 
 ```bash
 curl -fsS https://$PSE_DOMAIN/.well-known/oauth-protected-resource
@@ -208,9 +292,9 @@ curl -sS -o /dev/null -w '%{http_code}\n' -X POST https://$PSE_DOMAIN/mcp   # ex
 ```
 
 The 401 is the point — it confirms auth is on, and it carries a `WWW-Authenticate` header
-naming the metadata URL, which is how an MCP client discovers where to authenticate.
+naming the metadata URL, which is how an MCP client discovers where to authenticate. Check
+that the `resource` field in the metadata is your real hostname and not `localhost`: that is
+`PSE_PUBLIC_URL` reflected back, and it is what clients will try to authenticate against.
 
-Then visit `https://$PSE_DOMAIN/signup` and complete a real signup. Do this once,
-deliberately: it is the only way to confirm `PSE_PUBLIC_URL` and email delivery are both
-right, and an origin mismatch discovered here costs minutes rather than arriving later as a
-user's bug report about passkeys "just not working".
+Then visit `https://$PSE_DOMAIN/signup` and complete a real signup, as above — the one check
+stage 1 could not perform.

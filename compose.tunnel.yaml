@@ -1,0 +1,54 @@
+# Stage 2: put the NAS deployment on a public hostname through a Cloudflare Tunnel.
+#
+#   docker compose -f compose.nas.yaml -f compose.tunnel.yaml up -d --remove-orphans
+#
+# cloudflared dials *out* to Cloudflare, so there is no port forwarding, no dynamic-DNS,
+# nothing for CGNAT to break, and no contest with the NAS's own web UI over 80/443.
+# Cloudflare terminates TLS at its edge, which is why no certificate, Caddy or ACME appears
+# anywhere in this deployment.
+#
+# This overlay is also what *closes* the LAN port opened by compose.nas.yaml, so going
+# public and closing the local door are the same action rather than two, the second of
+# which is easy to forget.
+#
+# Required in .env, and only once you use this file:
+#   PSE_DOMAIN                mcp.example.com — the public hostname on your Cloudflare zone
+#   CLOUDFLARE_TUNNEL_TOKEN   from the Zero Trust dashboard when you create the tunnel
+#   ZEPTOMAIL_API_KEY         for verification emails, now that strangers can sign up
+#
+# In the Cloudflare Zero Trust dashboard, the tunnel's public hostname must route to:
+#   Service:  HTTP   →   app:8000
+# (http, not https: the hop from cloudflared to the app is inside the compose network.)
+#
+# Do NOT put Cloudflare Access in front of this hostname. An MCP client cannot complete a
+# browser login and would receive an Access redirect where it expected JSON; this server
+# already authenticates its own callers.
+
+services:
+  # Outbound-only connection to Cloudflare's edge. No inbound firewall rule exists.
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN:?set CLOUDFLARE_TUNNEL_TOKEN in .env}
+    depends_on:
+      app:
+        condition: service_healthy
+    logging: &logging
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  app:
+    # The LAN port from compose.nas.yaml goes away: everything now arrives through the
+    # tunnel, so a public deployment is not simultaneously open on the local network.
+    ports: !reset []
+    environment:
+      # MUST be the Cloudflare hostname. WebAuthn binds every passkey to the origin it was
+      # enrolled under, so a wrong value here breaks passkeys in a way that looks like a
+      # browser bug — and enrolled credentials cannot be migrated, only re-enrolled.
+      # Do one real signup right after this comes up; an origin mismatch found then costs
+      # a minute, found later it arrives as "passkeys just don't work".
+      PSE_PUBLIC_URL: https://${PSE_DOMAIN:?set PSE_DOMAIN in .env}
+      PSE_EMAIL_FROM: ${PSE_EMAIL_FROM:-no-reply@${PSE_DOMAIN}}
+    logging: *logging

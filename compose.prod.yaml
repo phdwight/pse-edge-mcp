@@ -5,11 +5,17 @@
 # What this adds over the dev stack: TLS at the edge, auth on by default, restart policies,
 # resource limits, log rotation, daily database backups, and a daily usage-retention purge.
 #
+# It pulls the published image rather than building: production should run the artifact CI
+# gated — size-checked, secret-scanned, smoke-tested, multi-arch — not a rebuild from
+# whatever the deploy host's source tree happened to contain.
+#
 # Required in .env — the deployment will not be correct without them:
 #   PSE_DOMAIN         the public hostname (Caddy obtains a certificate for it)
 #   PSE_ACME_EMAIL     contact address for the certificate authority
 #   POSTGRES_PASSWORD  something long and random
 #   ZEPTOMAIL_API_KEY  for verification emails
+# Strongly recommended:
+#   PSE_IMAGE_TAG      pin a version (e.g. 0.7.0) instead of tracking :latest
 #
 # PSE_PUBLIC_URL is derived from PSE_DOMAIN below. Getting it wrong breaks passkeys in a way
 # that looks like a browser bug, because WebAuthn binds credentials to the origin.
@@ -21,8 +27,19 @@ services:
     image: caddy:2-alpine
     restart: unless-stopped
     ports:
-      - "80:80"
-      - "443:443"
+      # Published high to stay clear of whatever else already runs on the host — a NAS
+      # usually has its own web UI on 80 and 443. Only the *published* side moves; Caddy
+      # still listens on 80/443 inside the container, so the Caddyfile is unchanged.
+      #
+      # THIS REQUIRES YOUR ROUTER TO FORWARD 80 -> 8280 AND 443 -> 8243. Certificate
+      # authorities always connect on port 80 (HTTP-01) or 443 (TLS-ALPN-01); those numbers
+      # are fixed in the protocol and no Caddy setting changes them. If the internet cannot
+      # reach this host on 80/443 by some path, Caddy never obtains a certificate and the
+      # site never serves. Where that forwarding is impossible — CGNAT, a locked-down
+      # router, an ISP that blocks 80 — use compose.nas.yaml + compose.tunnel.yaml instead,
+      # which needs no inbound ports at all.
+      - "${PSE_HTTP_PORT:-8280}:80"
+      - "${PSE_HTTPS_PORT:-8243}:443"
     environment:
       PSE_DOMAIN: ${PSE_DOMAIN:?set PSE_DOMAIN in .env}
       PSE_ACME_EMAIL: ${PSE_ACME_EMAIL:?set PSE_ACME_EMAIL in .env}
@@ -40,6 +57,12 @@ services:
         max-file: "3"
 
   app:
+    # Pull the published image; do not build here. The base file builds from source for
+    # development, but production must run the artifact CI actually gated — size-checked,
+    # secret-scanned, smoke-tested and multi-arch — not a rebuild from whatever the deploy
+    # host's source tree and Docker cache happened to contain.
+    build: !reset null
+    image: ghcr.io/phdwight/pse-edge-mcp:${PSE_IMAGE_TAG:-latest}
     # No published ports: the app is reachable only through Caddy, so a stray firewall rule
     # cannot expose it unencrypted.
     ports: !reset []
@@ -71,7 +94,10 @@ services:
     logging: *logging
 
   migrate:
-    # Runs to completion before app starts; unchanged from the base file except for logging.
+    # Same image as app, for the same reason — and it must be the *same tag*, or the schema
+    # gets applied by a different build than the one that reads it.
+    build: !reset null
+    image: ghcr.io/phdwight/pse-edge-mcp:${PSE_IMAGE_TAG:-latest}
     logging: *logging
 
   db:
@@ -128,7 +154,7 @@ services:
   # running server also purges opportunistically once a day, so this is the belt-and-braces
   # for a deployment that restarts often enough to never reach its own purge.
   purge:
-    image: ghcr.io/phdwight/pse-edge-mcp:latest
+    image: ghcr.io/phdwight/pse-edge-mcp:${PSE_IMAGE_TAG:-latest}
     restart: unless-stopped
     environment:
       DATABASE_URL: postgresql+asyncpg://pse:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@db:5432/pse_edge
