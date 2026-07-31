@@ -5,6 +5,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/) · Versioning: [SemVer](
 
 ## [Unreleased]
 
+## [0.7.3] - 2026-07-31
+
 ### Fixed
 - **`POST /mcp` returned `421 Invalid Host header` behind any reverse proxy.** The SDK's DNS-rebinding guard allows `localhost` and `127.0.0.1` only unless told otherwise, and production never told it otherwise — so behind Caddy or a Cloudflare Tunnel, where the `Host` header carries the public hostname, every real request was refused. The failure was unusually hard to read: registration, authorize, consent and token exchange all succeeded, the client stored a valid token, and only the first tool call failed. The allowlist is now derived from `PSE_PUBLIC_URL` (both the bare host and `:443`, since proxies differ on whether `Host` carries a port), so there is nothing new to configure. The guard is kept rather than disabled — auth stops a stranger calling the API, this stops a browser on the victim's own network reaching a server that trusts its network position.
   - **248 tests did not catch it because the journey test passed `transport_security` explicitly**, exercising a configuration production never built. The new tests go through `create_app()` and assert a proxied `Host` does not 421.
