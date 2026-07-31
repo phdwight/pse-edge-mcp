@@ -5,6 +5,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/) · Versioning: [SemVer](
 
 ## [Unreleased]
 
+### Fixed
+- **A failing mail provider no longer answers signup with a 500.** Seen in production: ZeptoMail returned 500 with an empty body, the exception escaped the handler, and a user typing their address got a bare "Internal Server Error" — which invites them to conclude the address was at fault and try a different one, which cannot help. Signup now answers **503** with "this is our problem, try again in a few minutes", and the detail goes to the log where an operator can act on it. The signup token is already stored by then, so retrying genuinely works.
+- **The send failure now names the sender address**, and says `<empty body>` rather than nothing when the provider returns one. An unverified sender is by far the most common cause and ZeptoMail often reports it as a bare 500, so the old message identified neither the problem nor the value that caused it. Note ZeptoMail verifies **exact** domains: a verified `example.com` does not cover `sub.example.com`.
+
 ### Added
 - **README: the end-to-end flow for connecting to a hosted server.** A deployment with auth on is an ordinary OAuth 2.1 protected resource, so a modern MCP client needs only the URL — but nothing said so, and the auth section still claimed the self-service flow had not shipped. It now walks the sequence a client actually performs (401 → resource metadata → AS metadata → dynamic registration → PKCE authorize → signup/passkey → consent → code exchange → bearer), names the only two steps a human performs, and gives the operator-issued-token path for clients that do not speak OAuth yet — which is also the only route on a LAN deployment, since passkeys need a secure context.
 
