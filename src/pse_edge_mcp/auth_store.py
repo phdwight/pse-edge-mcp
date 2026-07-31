@@ -32,7 +32,7 @@ class PostgresAuthStore:
                 users.c.quota_per_day,
             )
             .select_from(auth_tokens.join(users, auth_tokens.c.user_id == users.c.id))
-            .where(auth_tokens.c.token_hash == token_hash)
+            .where(auth_tokens.c.token_hash == token_hash, auth_tokens.c.kind == "access")
         )
         async with self._engine.connect() as conn:
             row = (await conn.execute(stmt)).first()

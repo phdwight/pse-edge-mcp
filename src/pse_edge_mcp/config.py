@@ -43,6 +43,17 @@ class Settings:
     quota_per_minute: int = 60
     quota_per_day: int = 2000
 
+    # Phase 5 stage 2: the OAuth/passkey surface. public_url is what browsers and OAuth
+    # clients see — it drives the WebAuthn rp_id/origin, email links, and the metadata
+    # issuer, so it must be the externally reachable base URL in production.
+    public_url: str = "http://localhost:8000"
+    access_token_ttl_min: int = 30
+    refresh_token_ttl_days: int = 30
+    # ZeptoMail (decided 2026-07-30). Key arrives via env only; unset -> emails are
+    # logged to the console, which is the dev/test mode.
+    zeptomail_api_key: str | None = None
+    email_from: str = "no-reply@localhost"
+
     @classmethod
     def from_env(cls) -> Settings:
         def _bool(name: str) -> bool:
@@ -74,4 +85,13 @@ class Settings:
             ),
             quota_per_minute=int(os.environ.get("PSE_QUOTA_PER_MIN", cls.quota_per_minute)),
             quota_per_day=int(os.environ.get("PSE_QUOTA_PER_DAY", cls.quota_per_day)),
+            public_url=os.environ.get("PSE_PUBLIC_URL", cls.public_url).rstrip("/"),
+            access_token_ttl_min=int(
+                os.environ.get("PSE_ACCESS_TTL_MIN", cls.access_token_ttl_min)
+            ),
+            refresh_token_ttl_days=int(
+                os.environ.get("PSE_REFRESH_TTL_DAYS", cls.refresh_token_ttl_days)
+            ),
+            zeptomail_api_key=os.environ.get("ZEPTOMAIL_API_KEY") or None,
+            email_from=os.environ.get("PSE_EMAIL_FROM", cls.email_from),
         )

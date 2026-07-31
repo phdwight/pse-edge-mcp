@@ -145,4 +145,76 @@ auth_tokens = Table(
     Column("expires_at", DateTime(timezone=True), nullable=False, index=True),
     Column("revoked_at", DateTime(timezone=True)),
     Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+    Column("client_id", String),  # OAuth client the token was minted for (null = CLI)
+    Column("family_id", String, index=True),  # refresh-rotation family, for reuse detection
+)
+
+# --- Phase 5 stage 2: passkeys and OAuth -------------------------------------
+#
+# The browser-facing flows need server-side state that any replica can pick up
+# (stateless HTTP means no process affinity): short-lived web sessions, pending email
+# verifications, WebAuthn credentials, registered OAuth clients, and in-flight
+# authorization requests. Everything secret-shaped is stored hashed.
+
+web_sessions = Table(
+    "web_sessions",
+    metadata,
+    Column("sid_hash", String, primary_key=True),  # sha256 of the cookie value
+    Column("user_id", String, ForeignKey("users.id")),  # null until login completes
+    Column("email", String),
+    # 'pending' (login ceremony started), 'verified' (email proven, enrolling),
+    # 'authenticated' (passkey ceremony completed).
+    Column("kind", String, nullable=False),
+    Column("current_challenge", String),  # base64url; one ceremony in flight per session
+    Column("expires_at", DateTime(timezone=True), nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+)
+
+email_verifications = Table(
+    "email_verifications",
+    metadata,
+    Column("token_hash", String, primary_key=True),
+    Column("email", String, nullable=False),
+    Column("expires_at", DateTime(timezone=True), nullable=False),
+    Column("consumed_at", DateTime(timezone=True)),
+    Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+)
+
+webauthn_credentials = Table(
+    "webauthn_credentials",
+    metadata,
+    Column("credential_id", String, primary_key=True),  # base64url, as the browser sends it
+    Column("user_id", String, ForeignKey("users.id"), nullable=False, index=True),
+    Column("public_key", String, nullable=False),  # base64url COSE bytes
+    Column("sign_count", Integer, nullable=False, server_default="0"),
+    Column("aaguid", String),
+    Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+)
+
+oauth_clients = Table(
+    "oauth_clients",
+    metadata,
+    Column("client_id", String, primary_key=True),
+    Column("client_name", String, nullable=False),
+    # Public clients only (RFC 7591 registration, PKCE mandatory): no secret column at
+    # all, so there is no secret to leak or to be tempted to check.
+    Column("redirect_uris", JSONB, nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+)
+
+oauth_flows = Table(
+    "oauth_flows",
+    metadata,
+    Column("flow_id", String, primary_key=True),
+    Column("client_id", String, nullable=False),
+    Column("redirect_uri", String, nullable=False),
+    Column("state", String),
+    Column("code_challenge", String, nullable=False),  # S256 only
+    Column("scope", String),
+    Column("user_id", String),  # set at consent
+    Column("code_hash", String, index=True),  # set when the code is issued; single-use
+    Column("code_expires_at", DateTime(timezone=True)),
+    Column("consumed_at", DateTime(timezone=True)),
+    Column("expires_at", DateTime(timezone=True), nullable=False),  # flow TTL
+    Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
 )

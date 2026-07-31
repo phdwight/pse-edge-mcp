@@ -20,14 +20,14 @@ COPY pyproject.toml uv.lock* ./
 # The stdio install stays thin — those modules are imported lazily, only when DATABASE_URL
 # is set, so `pip install pse-edge-mcp` without the extra still runs.
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-install-project --no-dev --no-editable --extra postgres || \
-    uv sync --no-install-project --no-dev --no-editable --extra postgres
+    uv sync --frozen --no-install-project --no-dev --no-editable --extra postgres --extra auth || \
+    uv sync --no-install-project --no-dev --no-editable --extra postgres --extra auth
 COPY src ./src
 COPY README.md ./
 # --no-editable installs the project as a real wheel into the venv, so the runtime
 # stage needs no copy of src/ and no .pth indirection. An editable install is a
 # development convenience and has no place in a shipped image.
-RUN --mount=type=cache,target=/root/.cache/uv uv sync --no-dev --no-editable --extra postgres
+RUN --mount=type=cache,target=/root/.cache/uv uv sync --no-dev --no-editable --extra postgres --extra auth
 # Defensive: strip any bytecode a wheel brought with it, before the venv is copied out.
 RUN find /app/.venv -name '__pycache__' -type d -prune -exec rm -rf {} + \
  && find /app/.venv -name '*.pyc' -delete
