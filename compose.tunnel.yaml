@@ -12,6 +12,12 @@
 #   CLOUDFLARE_TUNNEL_TOKEN   from the Zero Trust dashboard when you create the tunnel
 #   ZEPTOMAIL_API_KEY         for verification emails, now that strangers can sign up
 #   PSE_LAN_BIND=127.0.0.1    closes the stage 1 LAN port — see below
+#   PSE_EMAIL_FROM            an address on a domain ZeptoMail has VERIFIED. This defaults
+#                             to no-reply@$PSE_DOMAIN, which is wrong whenever the hostname
+#                             is a subdomain: ZeptoMail verifies exact domains, so a
+#                             verified example.com does not cover mcp.example.com. An
+#                             unverified sender is refused with a bare 500 and an empty
+#                             body, which reads as the server being broken.
 #
 # In the Cloudflare Zero Trust dashboard, the tunnel's public hostname must route to:
 #   Service:  HTTP   →   app:8000
