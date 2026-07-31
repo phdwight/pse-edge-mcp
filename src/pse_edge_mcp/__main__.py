@@ -85,8 +85,12 @@ def _serve_http_with_auth(args: argparse.Namespace, settings: Settings) -> None:
     import uvicorn
 
     from .auth import QuotaTracker, TokenService
+    from .auth_app import AuthApp
     from .auth_middleware import AuthMiddleware
     from .auth_store import PostgresAuthStore, check_auth_schema
+    from .email import build_email_sender
+    from .oauth import OAuthService
+    from .passkeys import PasskeyService
     from .server import build_storage
 
     storage, archive, engine = build_storage(settings)
@@ -113,7 +117,30 @@ def _serve_http_with_auth(args: argparse.Namespace, settings: Settings) -> None:
         default_quota_per_minute=settings.quota_per_minute,
         default_quota_per_day=settings.quota_per_day,
     )
-    uvicorn.run(AuthMiddleware(app, tokens, QuotaTracker()), host=args.host, port=args.port)
+
+    # Layering matters here. The bearer middleware wraps only the MCP app, and the OAuth
+    # surface wraps *that* — so /oauth/* and the signup pages are reachable without a
+    # token (you cannot present one before you have one), while everything else still
+    # requires it. `/.well-known/*` is additionally exempt inside the middleware so
+    # discovery works even if the ordering is ever changed.
+    guarded = AuthMiddleware(
+        app,
+        tokens,
+        QuotaTracker(),
+        resource_metadata_url=f"{settings.public_url}/.well-known/oauth-protected-resource",
+    )
+    surface = AuthApp(
+        guarded,
+        oauth=OAuthService(
+            engine,
+            access_ttl_min=settings.access_token_ttl_min,
+            refresh_ttl_days=settings.refresh_token_ttl_days,
+        ),
+        passkeys=PasskeyService(engine, public_url=settings.public_url),
+        email=build_email_sender(settings.zeptomail_api_key, settings.email_from),
+        public_url=settings.public_url,
+    )
+    uvicorn.run(surface, host=args.host, port=args.port)
 
 
 if __name__ == "__main__":

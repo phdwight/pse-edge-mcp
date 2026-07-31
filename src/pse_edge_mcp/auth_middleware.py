@@ -27,10 +27,23 @@ _EXEMPT_PREFIXES = ("/.well-known/",)
 
 
 class AuthMiddleware:
-    def __init__(self, app: Any, tokens: TokenService, quotas: QuotaTracker) -> None:
+    def __init__(
+        self,
+        app: Any,
+        tokens: TokenService,
+        quotas: QuotaTracker,
+        *,
+        resource_metadata_url: str | None = None,
+    ) -> None:
         self._app = app
         self._tokens = tokens
         self._quotas = quotas
+        # RFC 9728 §5.1: advertising the metadata URL on a 401 is how a client discovers
+        # *where* to authenticate. Without it a refusal is a dead end and the whole
+        # "paste the URL and authorize" flow cannot start.
+        self._challenge = b"Bearer"
+        if resource_metadata_url:
+            self._challenge = f'Bearer resource_metadata="{resource_metadata_url}"'.encode()
 
     async def __call__(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
         if scope["type"] != "http" or scope["path"].startswith(_EXEMPT_PREFIXES):
@@ -43,7 +56,7 @@ class AuthMiddleware:
                 send,
                 401,
                 {"error": "UNAUTHORIZED", "message": "Missing bearer token."},
-                [(b"www-authenticate", b"Bearer")],
+                [(b"www-authenticate", self._challenge)],
             )
             return
 
@@ -52,8 +65,11 @@ class AuthMiddleware:
             await _refuse(
                 send,
                 401,
-                {"error": "UNAUTHORIZED", "message": "Invalid, expired or revoked token."},
-                [(b"www-authenticate", b'Bearer error="invalid_token"')],
+                {
+                    "error": "UNAUTHORIZED",
+                    "message": "Invalid, expired or revoked token.",
+                },
+                [(b"www-authenticate", self._challenge + b', error="invalid_token"')],
             )
             return
 
