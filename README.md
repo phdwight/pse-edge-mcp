@@ -52,6 +52,32 @@ Use `--stateful` if you need MCP sessions (resumability or server-initiated mess
 `--sse` for event-stream framing; they are independent flags. Note `--stateful` requires
 clients to complete the `initialize` handshake and forces sticky routing behind a balancer.
 
+### Bearer auth and quotas (opt-in)
+
+Set `PSE_AUTH_REQUIRED=1` (needs `DATABASE_URL`) and every HTTP request must carry
+`Authorization: Bearer <token>`. Until the self-service OAuth flow ships, accounts are
+provisioned by the operator:
+
+```bash
+pse-edge-admin create-user you@example.com
+pse-edge-admin issue-token you@example.com --note laptop   # plaintext shown once
+```
+
+Two ways in. **Self-service (OAuth 2.1 + passkeys):** an MCP client points at this server,
+discovers it via `/.well-known/oauth-protected-resource`, registers itself (RFC 7591) and
+sends the user through `/signup` — email link, then a passkey. No passwords exist anywhere.
+PKCE is mandatory (S256 only), refresh tokens rotate, and replaying a rotated one revokes the
+whole session family. **Operator-issued:** `pse-edge-admin` mints a token directly, which is
+what the CLI examples above do.
+
+Tokens are opaque and stored only as SHA-256 hashes. Revocation
+(`pse-edge-admin revoke-token …` / `disable-user …`) takes effect within the validation
+cache's TTL — 60 s by default (`PSE_TOKEN_CACHE_TTL`), which is precisely the
+revocation-latency budget. Per-user quotas (default 60/min, 2,000/day, overridable per
+user) are counted in-process and answer HTTP 429 with `Retry-After`; with N replicas the
+effective ceiling is up to N× nominal, which is fine for abuse prevention. stdio mode
+never authenticates — it runs on your own machine.
+
 **Postgres is optional.** Without `DATABASE_URL` the server uses an in-memory cache and keeps
 no archive — the zero-config path for local stdio use, and it needs neither the `postgres`
 extra nor a database. With `DATABASE_URL` set you get two things: replicas **share one cache**,
@@ -92,7 +118,7 @@ Edge's own units labels are inconsistent between its annual and quarterly sectio
 period reports its `currency_units` for you to check. Index changes are signed here even
 though Edge prints them unsigned (it shows direction only as a colour and an arrow).
 
-Roadmap (see `docs/plan.md`): OAuth 2.1 accounts with passkeys, per-user quotas, production deployment.
+Roadmap (see `docs/plan.md`): usage audit log, account self-deletion, production deployment (TLS, backups).
 
 ## Container image
 

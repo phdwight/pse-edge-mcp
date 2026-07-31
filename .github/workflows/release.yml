@@ -137,7 +137,7 @@ jobs:
           {
             echo "### \`${{ matrix.arch }}\` image"
             echo '```'
-            uv run python scripts/check_image.py pse-edge-mcp:candidate --extra postgres
+            uv run python scripts/check_image.py pse-edge-mcp:candidate --extra postgres --extra auth
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 

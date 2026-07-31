@@ -309,3 +309,61 @@ async def test_quote_falls_back_to_autocomplete_identity(stock_data_html, chart_
     assert served.value.symbol == "SM"
     assert served.value.company_name
     assert served.value.company_id == "599"
+
+
+# --- duplicate bars (Edge really does this) ----------------------------------
+
+
+def _chart_row(chart_date: str, close: float = 588.0) -> dict[str, Any]:
+    return {
+        "CHART_DATE": chart_date,
+        "OPEN": 585.0,
+        "HIGH": 590.0,
+        "LOW": 584.0,
+        "CLOSE": close,
+        "VALUE": 1.0,
+    }
+
+
+async def test_identical_duplicate_bars_are_collapsed(stock_data_html):
+    """Observed live 2026-07-30: Edge's chartData repeated Jul 21 2026 with identical
+    values, so a range reported 22 bars for 21 trading days. Identical repeats collapse;
+    order and the other days survive."""
+    chart = {
+        "chartData": [
+            _chart_row("Jul 20, 2026 00:00:00", close=580.0),
+            _chart_row("Jul 21, 2026 00:00:00"),
+            _chart_row("Jul 21, 2026 00:00:00"),  # the duplicate, byte-identical
+            _chart_row("Jul 22, 2026 00:00:00", close=591.0),
+        ],
+        "tableData": [],
+    }
+    cache = FakeCache()
+    companies = CompanyRepository(FakeCompanySource(SM_AUTOCOMPLETE), cache)
+    repo = QuoteRepository(FakeQuoteSource(stock_data_html, chart), companies, cache)
+
+    served = await repo.history("SM", date(2026, 7, 20), date(2026, 7, 22))
+
+    dates = [bar.trade_date for bar in served.value.bars]
+    assert dates == [date(2026, 7, 20), date(2026, 7, 21), date(2026, 7, 22)]
+    assert served.value.bars[1].close == 588.0
+
+
+async def test_conflicting_duplicate_bars_raise_endpoint_changed(stock_data_html):
+    """The same date with DIFFERENT values is drift we don't understand — invariant #4
+    says be loud rather than silently pick one."""
+    from pse_edge_mcp.errors import EndpointChangedError
+
+    chart = {
+        "chartData": [
+            _chart_row("Jul 21, 2026 00:00:00", close=588.0),
+            _chart_row("Jul 21, 2026 00:00:00", close=999.0),
+        ],
+        "tableData": [],
+    }
+    cache = FakeCache()
+    companies = CompanyRepository(FakeCompanySource(SM_AUTOCOMPLETE), cache)
+    repo = QuoteRepository(FakeQuoteSource(stock_data_html, chart), companies, cache)
+
+    with pytest.raises(EndpointChangedError, match="appears twice"):
+        await repo.history("SM", date(2026, 7, 21), date(2026, 7, 21))

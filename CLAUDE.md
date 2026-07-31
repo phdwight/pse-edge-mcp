@@ -131,7 +131,26 @@ Unofficial — Edge has no public API; we speak to the portal's own internal end
   at runtime — compose has a one-shot `migrate` service and `check_schema()` fails loudly
   at startup if migrations were skipped. **A failed archive write never fails a read**
   (caught broadly: a dead database raises OSError, not just SQLAlchemyError).
-- **Phase 5 (next):** OAuth 2.1
+- **Phase 5 (staged; stage 1 done):** bearer auth + quotas + admin CLI, opt-in via
+  `PSE_AUTH_REQUIRED=1` (needs `DATABASE_URL`; stdio never authenticates). Key rules:
+  tokens are opaque, `pse_`-prefixed, stored as SHA-256 only; the validation-cache TTL
+  **is the revocation-latency budget and nothing else** (default 60 s); refusals are never
+  cached; quotas count **in-process** (per-request counter UPDATEs are hot-row contention
+  — plan §6 records why the old "DB hit per request anyway" JWT argument is retired);
+  `auth.py` must stay SQLAlchemy-free (lean-install path), Postgres bits live in
+  `auth_store.py` and import lazily. Provisioning: `pse-edge-admin`.
+- **Phase 5 stage 2 (done):** OAuth 2.1 + passkeys. `oauth.py` (DCR/authorize/PKCE/refresh),
+  `passkeys.py` (WebAuthn + web sessions), `auth_app.py` (pure-ASGI route table wrapping the
+  guarded MCP app), `email.py` (ZeptoMail | console). **Authlib was dropped** — it has no
+  server-side ASGI integration (Flask/Django only); see plan §6. Rules that must not regress:
+  unknown client/redirect is fatal and never redirects (open-redirector); redirect URIs match
+  exactly; PKCE mandatory + S256 only; codes single-use via one atomic UPDATE...RETURNING;
+  refresh reuse revokes the whole family; only `kind='access'` authenticates as a bearer.
+  Layering is `AuthApp(AuthMiddleware(mcp_app))` so `/oauth/*` and signup are reachable
+  without a token. Journey test: `tests/test_auth_journey.py` (soft-webauthn, real
+  signatures, real Postgres).
+- **Phase 5 remaining:** default auth on at deploy, usage audit log + retention,
+  disposable-email blocklist, CSRF token on /consent, account self-deletion (plan §6a).
 - **Phase 6:** production deploy (compose.prod.yaml overlay, TLS, backups).
 
 ## Holiday table

@@ -17,7 +17,10 @@ Tools (Phase 3): get_company_profile, get_financial_highlights, get_dividends_an
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncEngine
 
 try:  # MCP SDK >= 2.x
     from mcp.server.mcpserver import MCPServer
@@ -102,7 +105,7 @@ async def reply(call: Callable[[], Awaitable[Served[Any]]]) -> dict[str, Any]:
         return exc.payload()
 
 
-def build_storage(settings: Settings) -> tuple[Storage | None, Archive]:
+def build_storage(settings: Settings) -> tuple[Storage | None, Archive, AsyncEngine | None]:
     """Pick the storage backend from configuration.
 
     `DATABASE_URL` unset is the zero-config stdio path: an in-memory cache and no archive.
@@ -114,7 +117,7 @@ def build_storage(settings: Settings) -> tuple[Storage | None, Archive]:
     there is exactly one place that decides what "no database" means.
     """
     if not settings.database_url:
-        return None, NullArchive()
+        return None, NullArchive(), None
 
     # Imported here, not at module scope: these pull in SQLAlchemy and asyncpg, which a
     # plain install without the `postgres` extra does not have. A stdio user must never
@@ -123,8 +126,14 @@ def build_storage(settings: Settings) -> tuple[Storage | None, Archive]:
     from .db import create_engine, normalise_url
     from .storage_postgres import PostgresStorage
 
-    engine = create_engine(normalise_url(settings.database_url))
-    return PostgresStorage(engine), PostgresArchive(engine)
+    engine = create_engine(
+        normalise_url(settings.database_url),
+        pool_size=settings.db_pool_size,
+        max_overflow=settings.db_max_overflow,
+    )
+    # The engine rides along so callers that need another consumer of the same pool
+    # (auth's token lookups) don't open a second one to the same database.
+    return PostgresStorage(engine), PostgresArchive(engine), engine
 
 
 def build_server(
@@ -140,7 +149,7 @@ def build_server(
         tz=settings.market_tz, open_time=settings.market_open, close_time=settings.market_close
     )
     if storage is None and archive is None:
-        storage, archive = build_storage(settings)
+        storage, archive, _engine = build_storage(settings)
     client = PseEdgeClient(settings)
     cache = FreezeService(calendar=calendar, storage=storage)
 

@@ -19,11 +19,12 @@ cannot be dropped on the way to the caller.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from datetime import date
 from typing import Any, Literal
 
 from .archive import Archive, NullArchive
-from .errors import InvalidArgumentError, SymbolNotFoundError
+from .errors import EndpointChangedError, InvalidArgumentError, SymbolNotFoundError
 from .memo import ParsedMemo
 from .models import (
     CompanyHit,
@@ -79,6 +80,28 @@ def _company_hit(raw: dict[str, Any]) -> CompanyHit:
         symbol=raw["symbol"],
         is_etf=raw.get("etfYn") == "1",
     )
+
+
+def _dedupe_bars(bars: Iterable[OhlcBar]) -> list[OhlcBar]:
+    """Collapse repeated trade dates, loudly if they disagree.
+
+    Edge's own chartData genuinely repeats days — observed live 2026-07-30: Jul 21 2026
+    appeared twice with identical values, so a range reported 22 bars for 21 trading days
+    and a day-counting or averaging consumer would silently double-count. An identical
+    repeat is an upstream quirk and is collapsed; the same date with *different* values is
+    data drift we don't understand, and invariant #4 says be loud, not guess.
+    """
+    seen: dict[date, OhlcBar] = {}
+    for bar in bars:
+        previous = seen.get(bar.trade_date)
+        if previous is None:
+            seen[bar.trade_date] = bar
+        elif previous != bar:
+            raise EndpointChangedError(
+                f"DisclosureCht.ax: {bar.trade_date.isoformat()} appears twice with "
+                f"different values — upstream data changed shape"
+            )
+    return list(seen.values())
 
 
 def _has_more(page: int, pages: int | None) -> bool:
@@ -157,16 +180,15 @@ class QuoteRepository:
             key,
             lambda: self._source.fetch_price_history(company_id, security_id, start, end),
         )
-        history = self._memo.resolve(
-            f"{key}#history",
-            served,
-            lambda data: PriceHistory(
+
+        def build(data: dict[str, Any]) -> PriceHistory:
+            return PriceHistory(
                 symbol=parsed.value["symbol"],
                 company_id=company_id,
                 security_id=security_id,
                 start_date=start,
                 end_date=end,
-                bars=[
+                bars=_dedupe_bars(
                     OhlcBar(
                         trade_date=parse_chart_date(row["CHART_DATE"]),
                         open=row["OPEN"],
@@ -176,9 +198,10 @@ class QuoteRepository:
                         value=row["VALUE"],
                     )
                     for row in data["chartData"]
-                ],
-            ),
-        )
+                ),
+            )
+
+        history = self._memo.resolve(f"{key}#history", served, build)
         # Opportunistic archive (plan §6a): bars fetched for this caller are recorded on
         # the way past, so history deepens without a single extra request to PSE Edge.
         # Failures are logged, never raised — see archive.py.
