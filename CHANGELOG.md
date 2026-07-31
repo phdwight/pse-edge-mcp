@@ -12,6 +12,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/) · Versioning: [SemVer](
 - **Structured JSON logging** (`PSE_LOG_JSON=1`), stdlib-only, with secret redaction as a backstop and uvicorn's own handlers routed through the same formatter.
 - `--workers` on the CLI, and 20 new tests (240 total) covering the probes, the formatter, and the factory.
 
+- **`compose.nas.yaml`** — a standalone deployment for a NAS behind a **Cloudflare Tunnel**: no inbound ports at all, no port forwarding, nothing for CGNAT to break, and no contest with the NAS web UI over 80/443. Cloudflare terminates TLS at its edge, so no Caddy or ACME is involved. Standalone rather than an overlay because NAS Docker UIs import a single file far more happily, and it pulls the published image rather than building, since a NAS is a poor build host. Both it and `cloudflared` are multi-arch, so Intel and ARM models are covered.
+
 ### Changed
 - `configure_logging` replaces only handlers it installed. Clearing every root handler would have been idempotent by stomping on whatever else was listening — pytest's capture, or a host application that embedded this server.
 

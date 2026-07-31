@@ -1,0 +1,174 @@
+# Standalone deployment for a NAS behind a Cloudflare Tunnel.
+#
+#   docker compose -f compose.nas.yaml up -d
+#
+# Self-contained on purpose: NAS Docker UIs (UGREEN UGOS, Synology Container Manager,
+# QNAP Container Station) import a single compose file far more happily than a base file
+# plus an overlay. It also *pulls* the published image rather than building — a NAS is a
+# poor build host, and the published image is already gated and multi-arch.
+#
+# Nothing here publishes a port. cloudflared dials out to Cloudflare, so there is no port
+# forwarding, no dynamic-DNS, nothing for CGNAT to break, and no contest with the NAS's own
+# web UI over 80/443. Cloudflare terminates TLS at its edge, which is why no Caddy or ACME
+# appears in this file.
+#
+# Required in .env next to this file:
+#   PSE_DOMAIN                mcp.example.com — the public hostname on your Cloudflare zone
+#   CLOUDFLARE_TUNNEL_TOKEN   from the Zero Trust dashboard when you create the tunnel
+#   POSTGRES_PASSWORD         long and random
+#   ZEPTOMAIL_API_KEY         for verification emails
+#
+# In the Cloudflare Zero Trust dashboard, the tunnel's public hostname must route to:
+#   Service:  HTTP   →   app:8000
+# (http, not https: the hop from cloudflared to the app is inside the compose network.)
+
+services:
+  # Outbound-only connection to Cloudflare's edge. No inbound firewall rule exists.
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN:?set CLOUDFLARE_TUNNEL_TOKEN in .env}
+    depends_on:
+      app:
+        condition: service_healthy
+    logging: &logging
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  db:
+    image: postgres:18
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: pse
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: pse_edge
+    volumes:
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pse -d pse_edge"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    deploy:
+      resources:
+        limits:
+          memory: ${DB_MEMORY_LIMIT:-1g}
+    logging: *logging
+
+  # Schema is applied by an explicit one-shot job, never by the server on boot.
+  migrate:
+    image: ghcr.io/phdwight/pse-edge-mcp:${PSE_IMAGE_TAG:-latest}
+    entrypoint: ["alembic", "upgrade", "head"]
+    environment:
+      DATABASE_URL: postgresql+asyncpg://pse:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/pse_edge
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+    logging: *logging
+
+  app:
+    image: ghcr.io/phdwight/pse-edge-mcp:${PSE_IMAGE_TAG:-latest}
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+asyncpg://pse:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/pse_edge
+      # Auth on: the whole point of a public hostname is that strangers can reach it.
+      PSE_AUTH_REQUIRED: "1"
+      # MUST be the Cloudflare hostname. WebAuthn binds every passkey to the origin it was
+      # enrolled under, so a wrong value here breaks passkeys in a way that looks like a
+      # browser bug — and enrolled credentials cannot be migrated, only re-enrolled.
+      PSE_PUBLIC_URL: https://${PSE_DOMAIN:?set PSE_DOMAIN in .env}
+      PSE_LOG_JSON: "1"
+      ZEPTOMAIL_API_KEY: ${ZEPTOMAIL_API_KEY:-}
+      PSE_EMAIL_FROM: ${PSE_EMAIL_FROM:-no-reply@${PSE_DOMAIN}}
+      PSE_DB_POOL_SIZE: ${PSE_DB_POOL_SIZE:-10}
+      PSE_DB_MAX_OVERFLOW: ${PSE_DB_MAX_OVERFLOW:-5}
+      PSE_QUOTA_PER_MIN: ${PSE_QUOTA_PER_MIN:-60}
+      PSE_QUOTA_PER_DAY: ${PSE_QUOTA_PER_DAY:-2000}
+    # One worker by default. A NAS CPU has few cores, and every worker multiplies the
+    # in-memory quota ceiling (limits are per process) while adding a second parse memo to
+    # warm. Raise it only if you measure CPU saturation, and raise limits with it.
+    command: ["--http", "--port", "8000", "--workers", "${PSE_WORKERS:-1}"]
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    read_only: true
+    tmpfs:
+      - /tmp
+    healthcheck:
+      # Liveness only — a readiness probe here would restart the container during a
+      # database blip instead of merely taking it out of rotation.
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health').read()"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          memory: ${APP_MEMORY_LIMIT:-768m}
+    logging: *logging
+
+  # Daily pg_dump into ./backups. Keep this directory on a NAS share that is itself part of
+  # your normal backup routine — a dump sitting on the same disk as the database protects
+  # you from mistakes, not from disk failure.
+  backup:
+    image: postgres:18
+    restart: unless-stopped
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-14}
+    volumes:
+      - ./backups:/backups
+    depends_on:
+      db:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        while true; do
+          # 18:00 UTC = 02:00 Asia/Manila: after the close and away from the boundary
+          # refetch, so a dump never competes with the day's one upstream fetch.
+          if [ "$$(date -u +%H%M)" = "1800" ]; then
+            stamp=$$(date -u +%Y%m%dT%H%M%SZ)
+            if pg_dump -h db -U pse -d pse_edge --format=custom \
+                 --file="/backups/pse_edge-$$stamp.dump"; then
+              echo "backup: wrote pse_edge-$$stamp.dump"
+              # Rotate only after a *successful* dump: pruning first would trade a good
+              # backup for a failed one.
+              find /backups -name 'pse_edge-*.dump' -type f \
+                   -mtime +$${BACKUP_RETENTION_DAYS} -delete
+            else
+              echo "backup: FAILED for $$stamp" >&2
+            fi
+            sleep 3600
+          fi
+          sleep 30
+        done
+    logging: *logging
+
+  # Usage-retention purge (plan §6a). The server also purges once a day on its own, so this
+  # is the belt-and-braces for a NAS that reboots often enough to never reach that.
+  purge:
+    image: ghcr.io/phdwight/pse-edge-mcp:${PSE_IMAGE_TAG:-latest}
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+asyncpg://pse:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/pse_edge
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        while true; do
+          sleep 86400
+          pse-edge-admin purge-usage --retention-days ${PSE_USAGE_RETENTION_DAYS:-90} || true
+        done
+    logging: *logging
+
+volumes:
+  pgdata:

@@ -125,3 +125,92 @@ pse-edge-admin purge-usage --retention-days 90
 Revocation takes effect within `PSE_TOKEN_CACHE_TTL` (60 s default). That TTL is the
 revocation-latency budget and nothing else — lowering it costs database reads, raising it
 lengthens the window in which a revoked token still works.
+
+---
+
+# NAS + Cloudflare Tunnel
+
+The topology most home deployments actually want: a NAS with no ports open to the internet,
+reached through a Cloudflare subdomain. `cloudflared` dials **out** to Cloudflare, so there
+is no port forwarding, nothing for CGNAT to break, no dynamic-DNS to maintain, and no
+contest with the NAS's own web UI over ports 80 and 443.
+
+Use `compose.nas.yaml`, which is standalone rather than an overlay — NAS Docker UIs import
+a single file much more happily — and **pulls** the published image instead of building,
+since a NAS is a poor build host.
+
+```bash
+docker compose -f compose.nas.yaml up -d
+```
+
+## Setting it up
+
+1. **Cloudflare Zero Trust → Networks → Tunnels → Create a tunnel** (type: Cloudflared).
+   Copy the token it shows you.
+2. Add a **public hostname** on that tunnel:
+   - Subdomain/domain: your `PSE_DOMAIN`
+   - Service type: **HTTP**, URL: **`app:8000`**
+
+   HTTP, not HTTPS — that hop runs inside the compose network. TLS is terminated at
+   Cloudflare's edge, which is why no certificate or ACME appears anywhere in this file.
+3. Fill in `.env` beside the compose file:
+
+   ```bash
+   PSE_DOMAIN=mcp.example.com
+   CLOUDFLARE_TUNNEL_TOKEN=<the token from step 1>
+   POSTGRES_PASSWORD=<long random value>
+   ZEPTOMAIL_API_KEY=<key>
+   PSE_IMAGE_TAG=0.6.0        # pin a version; see the warning below
+   ```
+
+4. `docker compose -f compose.nas.yaml up -d`, then check
+   `https://$PSE_DOMAIN/.well-known/oauth-protected-resource` from anywhere.
+
+## Pin the image tag
+
+**`:latest` is whatever was released last, which may predate a feature this compose file
+uses.** That is not hypothetical: an earlier version of this file used `:latest` while the
+newest release lacked `--workers`, and the container crash-looped with
+`unrecognized arguments: --workers`. Pin `PSE_IMAGE_TAG` to a version you have read the
+changelog for, and bump it deliberately.
+
+## Things worth knowing
+
+**Do not put Cloudflare Access in front of this hostname.** Access requires a browser login,
+and an MCP client cannot complete one — it will see an Access redirect where it expected
+JSON. This server does its own authentication (OAuth 2.1 with passkeys); Access on top would
+break every client while adding nothing you do not already have.
+
+**`/health` and `/health/ready` are reachable through the tunnel.** They return status,
+version and uptime only. If you would rather not publish the version, add a Cloudflare WAF
+rule blocking `/health*`, or give the tunnel a path-scoped ingress rule. The container's own
+healthcheck uses `127.0.0.1` and is unaffected either way.
+
+**Workers on a NAS.** The default is 1. NAS CPUs have few cores, and each worker is a
+separate process with its own quota windows, parse memo and token cache — so N workers means
+a user's effective quota ceiling is N× the nominal one. Raise `PSE_WORKERS` only if you
+measure CPU saturation, and raise the limits with it.
+
+**Put `./backups` on a share you already back up.** A dump on the same disk as the database
+protects you from mistakes, not from disk failure.
+
+**Memory.** Defaults are modest for a NAS: 768 MB for the app, 1 GB for Postgres. Tune with
+`APP_MEMORY_LIMIT` and `DB_MEMORY_LIMIT`.
+
+**Architecture.** Both the app image and `cloudflared` are published for `linux/amd64` and
+`linux/arm64`, so Intel and ARM NAS models are both covered without any change.
+
+## Verifying, from outside
+
+```bash
+curl -fsS https://$PSE_DOMAIN/.well-known/oauth-protected-resource
+curl -sS -o /dev/null -w '%{http_code}\n' -X POST https://$PSE_DOMAIN/mcp   # expect 401
+```
+
+The 401 is the point — it confirms auth is on, and it carries a `WWW-Authenticate` header
+naming the metadata URL, which is how an MCP client discovers where to authenticate.
+
+Then visit `https://$PSE_DOMAIN/signup` and complete a real signup. Do this once,
+deliberately: it is the only way to confirm `PSE_PUBLIC_URL` and email delivery are both
+right, and an origin mismatch discovered here costs minutes rather than arriving later as a
+user's bug report about passkeys "just not working".

@@ -157,7 +157,14 @@ retention purge. `app` and `db` publish no ports — everything arrives through 
 Health probes are at `/health` (liveness) and `/health/ready` (readiness). The app is also
 importable for other servers: `uvicorn pse_edge_mcp.asgi:app --workers 4`.
 
-See **[docs/deploy.md](docs/deploy.md)** for the full guide, including the one setting most
+On a **NAS behind a Cloudflare Tunnel** — no open ports, no port forwarding — use the
+standalone `compose.nas.yaml` instead:
+
+```bash
+docker compose -f compose.nas.yaml up -d
+```
+
+See **[docs/deploy.md](docs/deploy.md)** for both guides, including the one setting most
 worth getting right: `PSE_PUBLIC_URL` must be the real external https URL, because WebAuthn
 binds every passkey to the origin it was enrolled under.
 
