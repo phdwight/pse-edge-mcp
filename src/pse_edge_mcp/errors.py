@@ -46,3 +46,32 @@ class MarketOpenNoCacheError(PseEdgeMcpError):
 
     def payload(self) -> dict[str, Any]:
         return {**super().payload(), "retry_after": self.retry_after.isoformat()}
+
+
+class ActionUnavailableError(PseEdgeMcpError):
+    """An action tool cannot run in this deployment or session.
+
+    Distinct from INVALID_ARGUMENT: the arguments may be perfect and the action still
+    unavailable — no authenticated caller (stdio has none by design), or the operator has
+    not configured the capability. A client should stop asking rather than retry.
+    """
+
+    code = "ACTION_UNAVAILABLE"
+
+
+class ActionRateLimitedError(PseEdgeMcpError):
+    """An action tool's own budget is spent, separately from the HTTP request quota.
+
+    Same `RATE_LIMITED` code the middleware uses at the HTTP layer, deliberately: a client
+    already knows that vocabulary, and "you may read but not send right now" is the same
+    kind of answer whichever layer decided it.
+    """
+
+    code = "RATE_LIMITED"
+
+    def __init__(self, message: str, retry_after_seconds: int):
+        super().__init__(message)
+        self.retry_after_seconds = retry_after_seconds
+
+    def payload(self) -> dict[str, Any]:
+        return {**super().payload(), "retry_after_seconds": self.retry_after_seconds}

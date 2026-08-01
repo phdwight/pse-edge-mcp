@@ -231,6 +231,14 @@ DATABASE_URL=postgresql+asyncpg://user:pass@host/db uv run alembic upgrade head
 | `get_dividends_and_rights(symbol)` | Declared dividends and stock rights, linked to their disclosures |
 | `get_indices()` | PSEi and the 7 sector indices, with signed daily change |
 | `get_market_summary()` | Index levels plus PSE Edge's homepage disclosure feeds |
+| `send_email(subject, body)` | Email **yourself** a note (auth-enabled deployments only) |
+
+`send_email` is the only tool that acts rather than reads. **It has no recipient argument**:
+the message always goes to the account that authenticated the session, so it cannot be used
+as a relay and there is nothing for prompt injection to redirect — which matters because
+this server returns disclosure text the operator does not control. It appears only on
+deployments with auth enabled (there is no verified address otherwise), the body is escaped
+rather than rendered as HTML, and it is capped at 20 messages per user per day.
 
 Disclosure tools return metadata and links only — this server never downloads or parses
 attachments, so your MCP client can fetch the returned URLs itself if it needs the files.

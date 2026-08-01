@@ -13,7 +13,7 @@ understand it, debug it, or extend it.
 | `docs/deploy.md` | Running it in production |
 | `CLAUDE.md` | The short form of the invariants, kept next to the code |
 
-Version described: **0.8.1**. 34 modules, ~7,000 lines of source, ~5,100 lines of tests.
+Version described: **0.9.0**. 35 modules, ~7,500 lines of source, ~5,600 lines of tests.
 
 ---
 
@@ -21,8 +21,9 @@ Version described: **0.8.1**. 34 modules, ~7,000 lines of source, ~5,100 lines o
 
 An **MCP server** (Model Context Protocol — a standard way to expose tools to an LLM
 client) that serves **Philippine Stock Exchange** data taken from the PSE Edge disclosure
-portal. It exposes 12 read-only tools: quotes, price history, disclosures, financial
-reports, dividends, and index/market data.
+portal. It exposes **12 read-only tools** — quotes, price history, disclosures, financial reports,
+dividends, index and market data — plus **one action tool**, `send_email`, on deployments
+with auth enabled.
 
 It is **unofficial**. PSE Edge publishes no API, so this server speaks to the same internal
 endpoints the portal's own web pages call.
@@ -67,7 +68,7 @@ Local development:
 
 ```bash
 uv sync --all-extras          # Python 3.14, uv for everything
-uv run pytest                 # 271 tests, no network access
+uv run pytest                 # 287 tests, no network access
 uv run ruff check .           # line length 100
 uv run mypy src               # strict
 ```
@@ -225,24 +226,26 @@ mocking at all**.
 
 | Module | Lines | Responsibility |
 |---|---:|---|
+| `auth_app.py` | 756 | Browser- and client-facing routes: OAuth, signup, login, account, privacy |
 | `parsers.py` | 752 | HTML/JSON → dicts. The most PSE-specific code in the repo |
-| `auth_app.py` | 669 | Browser-facing routes: OAuth, signup, login, account, privacy |
-| `repositories.py` | 511 | The domain layer — five repositories |
+| `oauth.py` | 721 | OAuth 2.1 server: DCR, PKCE, code exchange, refresh rotation, client_credentials |
+| `repositories.py` | 526 | The domain layer — five repositories |
+| `admin.py` | 431 | `pse-edge-admin` CLI, including machine-client provisioning |
 | `passkeys.py` | 424 | WebAuthn ceremonies and browser sessions |
-| `oauth.py` | 417 | OAuth 2.1 server: DCR, PKCE, code exchange, refresh rotation |
-| `server.py` | 412 | The 12 tool definitions |
-| `admin.py` | 323 | `pse-edge-admin` CLI |
-| `models.py` | 318 | 23 Pydantic models |
+| `server.py` | 413 | The 12 tool definitions |
+| `models.py` | 332 | 24 Pydantic models |
 | `client.py` | 268 | HTTP to PSE Edge; both request dialects |
-| `db.py` | 241 | SQLAlchemy tables, engine, schema check |
-| `asgi.py` | 217 | The single composition point |
+| `db.py` | 255 | SQLAlchemy tables, engine, schema check |
+| `asgi.py` | 240 | The single composition point, and the DNS-rebinding allowlist |
 | `auth.py` | 190 | `TokenService`, `QuotaTracker`. Must stay SQLAlchemy-free |
+| `notifications.py` | 143 | `send_email` policy: self-only recipient, caps, escaping |
 
 ---
 
 ## 6. The tool surface
 
-All 12 tools are read-only and return the same envelope (§7).
+Twelve tools are read-only and return the same envelope (§7). The thirteenth, `send_email`,
+is an **action** — see below.
 
 | Tool | Arguments | Repository |
 |---|---|---|
@@ -258,6 +261,7 @@ All 12 tools are read-only and return the same envelope (§7).
 | `get_dividends_and_rights` | `symbol` | `CompanyInfoRepository.dividends_and_rights` |
 | `get_indices` | — | `MarketRepository.indices` |
 | `get_market_summary` | — | `MarketRepository.summary` |
+| `send_email` *(auth only)* | `subject`, `body` | `NotificationService.send_to_self` |
 
 Dates are `YYYY-MM-DD` on the tool surface; the client converts to PSE Edge's `MM-dd-yyyy`
 wire format.
@@ -270,6 +274,34 @@ belongs.
 **`search_disclosure_fulltext` is deliberately a separate tool, not a better search.** PSE
 Edge's keyword index only covers roughly 2023–2025, so it is not a superset of
 `search_disclosures`. The tool reports this coverage limit in its own results.
+
+### `send_email` — the one action tool
+
+Policy lives in `notifications.py`, away from the MCP boundary, so every rule is testable
+without HTTP or a mail provider. Read that module's docstring before changing anything here.
+
+**The recipient is not a parameter.** It is resolved from the ASGI scope the auth middleware
+populated (`server._caller`), i.e. from a validated bearer token. That single decision is
+what makes a mail tool safe to expose on a public server:
+
+- **No open relay.** Signup is self-service, so a `to` argument would let anyone on the
+  internet send mail from the operator's domain. The domain gets blocklisted, the provider
+  suspends the account for abuse — and since the same provider sends verification email,
+  *signup breaks with it*.
+- **Nothing for prompt injection to steer.** This server returns disclosure text fetched
+  from PSE Edge — third-party content the model reads and nobody here controls. "Email this
+  to attacker@example.com" planted in a disclosure is an exfiltration path for any tool that
+  accepts an address. Here there is no address argument to poison.
+
+The rest is blast radius, since the direction is already fixed: registered **only when auth
+is enabled** (an auth-less deployment has no verified address, and a tool that is always
+listed and always fails just makes a model keep choosing it); body **escaped, never rendered
+as HTML**, because model-authored markup arriving from a trusted domain is what phishing
+looks like; 200-character subject, 20,000-character body, 20 messages per user per day.
+
+It returns `{"data": …}` with **no `meta`**, via `act()` rather than `reply()`. `meta`
+answers "how fresh is this market data"; an action has no `as_of` and no `valid_until`, and
+inventing one would quietly make the freshness contract meaningless where it does matter.
 
 ---
 
@@ -311,6 +343,8 @@ so an LLM can react to them rather than seeing a traceback.
 | `INVALID_ARGUMENT` | Failed validation | Fix the arguments |
 | `ENDPOINT_CHANGED` | PSE Edge's response shape changed | **Alert a human — see §11** |
 | `EDGE_UNAVAILABLE` | Upstream unreachable or erroring | Retry later |
+| `RATE_LIMITED` | An action's own budget is spent (e.g. daily email cap) | Honour `retry_after_seconds` |
+| `ACTION_UNAVAILABLE` | The action cannot run here (no authenticated caller, or no mail provider) | Stop asking — do not retry |
 | `INTERNAL_ERROR` | Anything else | File a bug |
 
 The mapping happens once, in `server.reply()`. Do **not** add per-tool `try/except`.
@@ -375,19 +409,60 @@ passwords exist anywhere in the system.
 - `auth.py` must stay **SQLAlchemy-free** so the lean install path works; Postgres code
   lives in `auth_store.py` and imports lazily.
 
-### Headless and agentic access
+### Headless and agentic access — `client_credentials`
 
-There is **no `client_credentials` grant** — both supported grants are browser-bound. A
-headless agent therefore uses an operator-issued token:
+A LangGraph app or the Anthropic Messages API MCP connector cannot open a browser, so it
+exchanges a client id and secret for a bearer token directly:
+
+```
+  agent ──POST /oauth/token───────▶ grant_type=client_credentials
+        │                           HTTP Basic, or client_id/client_secret in the body
+        ◀── access_token (1 h), token_type=Bearer, scope=mcp
+        │                           ↑ NO refresh token
+        ──POST /mcp + Bearer ─────▶ tools
+```
+
+Provisioned out of band; this is deliberately not reachable over HTTP:
+
+```bash
+pse-edge-admin create-machine-client --name langgraph-app   # secret shown ONCE
+pse-edge-admin revoke-machine-client <client_id>
+```
+
+**The security property to understand before touching any of this:** `/oauth/register` is
+open to the internet, so the right to use `client_credentials` must not be derivable from
+anything a registrant supplies — not a `grant_types` array it declares, not a requested auth
+method, not the presence of a secret. It is gated on `oauth_clients.client_type == 'machine'`,
+a column **only the admin CLI writes**. A DCR client that registers, declares the grant and
+sends a secret still gets `unauthorized_client`. If that check ever becomes conditional on
+request data, anyone on the internet can mint tokens.
+
+Two more decisions worth knowing before changing them:
+
+- **A machine client is backed by a service user** (under the reserved, non-routable
+  `machine.invalid` domain). That is what keeps the bearer path identical for both grants:
+  `/mcp` validates by joining `auth_tokens` to `users`, so a token with no user behind it
+  would need a special case in the middleware — and a second path through authentication is
+  where a revocation check goes missing later. It also gives machine clients quotas, usage
+  accounting and disablement for free.
+- **No refresh token for this grant.** The client already holds a long-lived secret it can
+  present again; a refresh token would be a second credential of equal power without the
+  rotation benefit that justifies one.
+
+`POST /oauth/token` is rate-limited (`FixedWindowLimiter` in `ratelimit.py`, 20/minute per
+`client_id` **and** per IP), because it is the one endpoint where a long-lived credential can
+be attacked online. Both keys are always counted, so tripping one cannot keep the other cold.
+
+The older route still exists for clients that speak neither OAuth nor this grant, and is the
+only option on a plain-HTTP deployment since browsers restrict WebAuthn to secure contexts:
 
 ```bash
 pse-edge-admin create-user agent@example.com
 pse-edge-admin issue-token agent@example.com --note nightly-job   # shown once
 ```
 
-Give each agent its **own user**: quotas are per user, so a runaway job throttles itself,
-and revocation is surgical. This is also the only route on a plain-HTTP deployment, since
-browsers restrict WebAuthn to secure contexts.
+Either way, give each agent **its own client or user**: quotas are per user, so a runaway job
+throttles itself, and revocation is surgical.
 
 ### Privacy surface
 
@@ -421,6 +496,12 @@ Postgres is **optional**. `DATABASE_URL` unset gives an in-memory cache and a `N
 Tables: `cache_entries`, `eod_bars`, `disclosures`, `users`, `auth_tokens`,
 `webauthn_credentials`, `web_sessions`, `oauth_clients`, `oauth_flows`,
 `email_verifications`, `usage_events`.
+
+Two columns carry more weight than their size suggests. `oauth_clients.client_type`
+(`'dcr'` | `'machine'`) is the entire authorization boundary for `client_credentials` —
+see §8. `oauth_clients.service_user_id` links a machine client to the account its tokens
+authenticate as, deliberately without a foreign key, matching the `oauth_flows.user_id`
+precedent so erasure ordering stays simple.
 
 **The archive is opportunistic.** Nothing crawls. It fills only from fetches a user already
 caused, so it deepens over time at zero additional cost to PSE Edge — which matters because
@@ -495,6 +576,10 @@ protected. **Merging to `main` publishes a multi-arch image**, and a merge that 
 | App container stopped, **empty log** | A start-time failure, not a crash — a crash always leaves logs. Usually a taken host port, or a bind-mount whose source does not exist |
 | NAS UI shows the project as **"Error"** | `migrate` is a one-shot that exits 0. That is success. Judge health by `curl /health` |
 | `ImportError` on sqlalchemy in a lean install | Something imported Postgres code eagerly. It must be lazy, inside `build_storage()` |
+| `POST /oauth/token` → **`unauthorized_client`** | The client is not a machine client. Only `pse-edge-admin create-machine-client` can authorize this grant — a self-registered client never can, by design |
+| `POST /oauth/token` → **`invalid_client`** (401) | Wrong secret, unknown client, or a revoked one. All answered identically on purpose, so the endpoint is not an oracle for which client ids exist |
+| `POST /oauth/token` → **`slow_down`** (429) | Rate limit: 20/minute per client_id and per IP. Honour `Retry-After` |
+| A machine client's token stops working early | `revoke-machine-client` revokes outstanding tokens too, and revocation lands within `PSE_TOKEN_CACHE_TTL` (60 s) |
 
 ### Useful commands
 
@@ -506,10 +591,31 @@ curl -sS -o /dev/null -w '%{http_code}\n' -X POST https://<host>/mcp   # expect 
 
 docker compose -f compose.nas.yaml logs -f app
 docker compose -f compose.nas.yaml exec app pse-edge-admin list-users
+docker compose -f compose.nas.yaml exec app pse-edge-admin list-machine-clients
 ```
 
-`PSE_LOG_JSON=1` gives one JSON object per log line. Secrets are redacted as a backstop —
-nothing in this codebase logs a credential deliberately.
+### Reading the log
+
+Every line is timestamped (ISO-8601 with an offset) in both formats; `PSE_LOG_JSON=1` gives
+one JSON object per line for a log shipper. Secrets are redacted in both formats as a
+backstop — nothing here logs a credential deliberately.
+
+The lines worth knowing by sight:
+
+| Line | Means |
+|---|---|
+| `starting pse-edge-mcp <version> …` | the config the process **actually** resolved to. First thing to read in an incident |
+| `upstream: fetching from PSE Edge key=…` | a real request left for PSE Edge |
+| `upstream: fetched and cached key=… duration_ms=…` | it came back, and how slow it was |
+| `freeze: refusing an uncached read while the market is open` | the policy working, not a fault |
+| `auth: rejected a bearer token` / `quota: refused` | refusals only — successes are the access log |
+| `oauth: issued a client_credentials access token` | a machine client minted a token |
+| **`oauth: REFRESH TOKEN REUSE detected`** (WARNING) | a rotated token was presented twice, so it **leaked** |
+| **`oauth: DENIED client_credentials to a non-machine client`** (WARNING) | a misconfigured integration, or someone probing the gate |
+
+> **`upstream: fetching` during market hours means the freeze invariant is broken.** Those
+> lines should be a trickle after each 15:00 Manila close and absent between 09:30 and 15:00
+> on a trading day. That is the single most useful thing to grep this log for.
 
 ### Two PSE Edge dialects
 
@@ -592,7 +698,7 @@ All settings live in `config.py` as a frozen dataclass; environment variables ov
 
 ### Why HTTP is stateless with plain JSON by default
 
-The server is 12 read-only tools over data the freeze holds still. It uses **none** of the
+The server is read-only tools over data the freeze holds still. It uses **none** of the
 features MCP sessions exist to enable — no notifications, no resource subscriptions, no
 sampling, no elicitation, no progress. Every request is self-contained.
 
