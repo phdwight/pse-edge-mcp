@@ -385,37 +385,32 @@ the NAS UI, then:
 PSE_PGDATA_PATH=/volume1/docker/pse-mcp/pgdata
 PSE_BACKUP_PATH=/volume1/docker/pse-mcp/backups
 ```
-```bash
-docker compose -f compose.nas.yaml -f compose.storage.yaml up -d
-# with a tunnel:
-docker compose -f compose.nas.yaml -f compose.tunnel.yaml -f compose.storage.yaml up -d
-```
+No extra file and no extra flags — the same `up -d` as before.
 
-### Why the database needs the overlay and the backups do not
+### Why no `chown` is needed
 
-**Postgres runs as uid 999.** A plain bind mount hands the container the host directory's
-own ownership, which on a NAS is root — so Postgres cannot write, and the container
-crash-loops on:
+**Postgres runs as uid 999.** A bind mount hands the container the host directory's own
+ownership, which on a NAS is root — so Postgres cannot write, and the container crash-loops
+on:
 
 ```
 mkdir: cannot create directory '/var/lib/postgresql': Permission denied
 ```
 
-The usual advice is `chown -R 999:999 <path>`, which is no help at all if your NAS UI gives
-you no shell. `compose.storage.yaml` declares the path as a **named volume backed by a
-bind** instead, and Docker then applies the image's own ownership to the empty mount point.
-Measured both ways:
+The usual advice is `chown -R 999:999 <path>`, which is no help at all when the NAS UI gives
+you no shell — and a NAS UI is exactly what this file is for. So a small `pgdata-owner`
+container does it instead, as root, before the database starts:
 
-| mount form | mount point ends up as | Postgres can write? |
-|---|---|---|
-| plain bind `path:/var/lib/postgresql` | `root:root 755` | no |
-| `compose.storage.yaml` (driver_opts) | `postgres:postgres 1777` | **yes** |
+```
+pgdata-owner: chowning /pgdata to postgres (999:999)     ← first boot on a fresh directory
+pgdata-owner: ownership already correct                  ← every boot after that
+```
 
-That ownership is applied only while the directory is **empty**, which is why the overlay
-insists on a fresh one.
+It is a no-op for the default named volume, idempotent on every boot, and — unlike setting
+ownership only at creation time — it also **repairs a directory that is already wrong**, so
+a deployment that already crash-looped recovers by restarting.
 
-`PSE_BACKUP_PATH` needs none of this: the backup container runs as root, so a plain bind is
-fine, and it works without the overlay.
+`PSE_BACKUP_PATH` never needed it: that container runs as root.
 
 **Keep the backups directory outside the database directory.** Nesting it inside `pgdata`
 puts your dumps in the tree Postgres manages, so a corrupted or wiped data directory takes

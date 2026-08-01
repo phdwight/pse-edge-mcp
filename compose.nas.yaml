@@ -23,15 +23,18 @@
 #                       but never started, with NO logs at all — the process never ran, so
 #                       an empty log is the symptom. `docker ps --format '{{.Ports}}'`
 #                       shows what already holds it.
-#   PSE_BACKUP_PATH     absolute host path for pg_dump output. Unset, dumps go to
-#                       ./backups beside this file. Safe to bind directly: the backup
-#                       container runs as root, so ownership is not an issue.
-#                       Keep it OUTSIDE the database directory — a backup stored inside
+#   PSE_PGDATA_PATH     absolute host path for the database, e.g. /volume1/docker/pse/pgdata
+#   PSE_BACKUP_PATH     absolute host path for pg_dump output
+#                       Unset, both use Docker-managed storage. Set, they become directories
+#                       you can see and snapshot from the NAS UI. CREATE THEM FIRST —
+#                       Docker will not, and the mount error does not name the missing path.
+#                       Keep backups OUTSIDE the database directory: a backup stored inside
 #                       the thing it protects is not a backup.
 #
-# To put the DATABASE on a NAS directory, add compose.storage.yaml (see docs/deploy.md).
-# Do not bind it directly here: Postgres runs as uid 999 and a plain bind leaves the mount
-# point root-owned, which is the "Permission denied" crash loop.
+#                       ⚠ Setting PSE_PGDATA_PATH on an EXISTING deployment starts from an
+#                       empty database — the old volume is untouched but no longer read, so
+#                       accounts, passkeys and machine clients appear to vanish. Dump first,
+#                       switch, then restore; see docs/deploy.md.
 #
 # Passkey signup does not work over plain http — browsers restrict WebAuthn to secure
 # contexts — so on the LAN you mint a token with the admin CLI instead:
@@ -48,15 +51,19 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
       POSTGRES_DB: pse_edge
     volumes:
-      # A named volume by default. To put the database on a NAS directory instead, add
-      # compose.storage.yaml — do NOT change this line to a bind path. A plain bind mount
-      # leaves the mount point owned by root, and Postgres runs as uid 999, so it dies with
-      # "mkdir: cannot create directory '/var/lib/postgresql': Permission denied" until
-      # someone chowns the directory from a shell. The overlay's named-volume form makes
-      # Docker apply the image's own ownership instead, which needs no shell at all.
-      - pgdata:/var/lib/postgresql
+      # Unset, a Docker-managed named volume. Set to an absolute path, a bind mount on a
+      # NAS directory you can see and snapshot. Compose picks which from the shape of the
+      # value, so one variable covers both.
+      #
+      # The `pgdata-owner` service below is what makes the bind case work — see there.
+      # It must be the NAS's OWN internal volume, never SMB/NFS/USB: Postgres needs POSIX
+      # locking and honest fsync, and will refuse to start or corrupt quietly without them.
+      - ${PSE_PGDATA_PATH:-pgdata}:/var/lib/postgresql
     # Not published. Only app, backup and purge reach Postgres, over the compose network;
     # exposing 5432 to a LAN is the most common way these get compromised.
+    depends_on:
+      pgdata-owner:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U pse -d pse_edge"]
       interval: 10s
@@ -71,6 +78,33 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+
+  # Postgres runs as uid 999, and a bind mount hands the container the HOST directory's
+  # ownership — root, on a NAS. Without this, the database crash-loops forever on
+  # "mkdir: cannot create directory '/var/lib/postgresql': Permission denied".
+  #
+  # The usual advice is to chown the directory from a shell, which is no use at all on a
+  # NAS whose UI gives you none — and a NAS UI is exactly what this file is for. So the
+  # chown happens here, in a root container, before the database starts. It is a no-op for
+  # the default named volume (Docker already sets that ownership) and idempotent on every
+  # boot, and unlike setting ownership at creation time it also repairs a directory that is
+  # already wrong.
+  pgdata-owner:
+    image: postgres:18
+    user: root
+    volumes:
+      - ${PSE_PGDATA_PATH:-pgdata}:/pgdata
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        if [ "$$(stat -c %u /pgdata)" != "999" ]; then
+          echo "pgdata-owner: chowning /pgdata to postgres (999:999)"
+          chown -R 999:999 /pgdata
+        else
+          echo "pgdata-owner: ownership already correct"
+        fi
+    restart: "no"
+    logging: *logging
 
   # Schema is applied by an explicit one-shot job, never by the server on boot: replicas must
   # not race to mutate their own schema (plan §5).
