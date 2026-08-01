@@ -80,15 +80,19 @@ services:
         max-file: "3"
 
   # Postgres runs as uid 999, and a bind mount hands the container the HOST directory's
-  # ownership — root, on a NAS. Without this, the database crash-loops forever on
-  # "mkdir: cannot create directory '/var/lib/postgresql': Permission denied".
+  # ownership — root, on a NAS — so without help the database crash-loops forever on
+  # "mkdir: ... Permission denied". The usual advice is to chown from a shell, which is no
+  # use on a NAS whose UI gives you none; so it happens here, before the database starts.
   #
-  # The usual advice is to chown the directory from a shell, which is no use at all on a
-  # NAS whose UI gives you none — and a NAS UI is exactly what this file is for. So the
-  # chown happens here, in a root container, before the database starts. It is a no-op for
-  # the default named volume (Docker already sets that ownership) and idempotent on every
-  # boot, and unlike setting ownership at creation time it also repairs a directory that is
-  # already wrong.
+  # The repair is UNCONDITIONAL (no "already looks right" shortcut — a top directory can
+  # stat as uid 999 while the real answer is no), and then PROVED: a write is attempted as
+  # uid 999, exactly as postgres will run. If that probe fails the container exits 1 and
+  # the db never starts — one FATAL line naming the cause, instead of a crash loop. On a
+  # NAS the usual culprit is folder ACLs layered over classic permissions; those are fixed
+  # in the NAS file manager (grant read/write on the folder), no shell needed.
+  #
+  # It also prints what it found, because the operator has no shell to look for
+  # themselves: the log is the `ls -la` they cannot run.
   pgdata-owner:
     image: postgres:18
     user: root
@@ -97,11 +101,20 @@ services:
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
-        if [ "$$(stat -c %u /pgdata)" != "999" ]; then
-          echo "pgdata-owner: chowning /pgdata to postgres (999:999)"
-          chown -R 999:999 /pgdata
+        echo "pgdata-owner: running as uid=$$(id -u), fs=$$(stat -f -c %T /pgdata 2>/dev/null || echo unknown)"
+        echo "pgdata-owner: contents of the mounted directory:"
+        ls -la /pgdata | head -12
+        chown -R 999:999 /pgdata 2>&1 | head -3
+        chmod -R u+rwX /pgdata 2>&1 | head -3
+        if gosu postgres sh -c "touch /pgdata/.pse-write-probe && rm -f /pgdata/.pse-write-probe"; then
+          echo "pgdata-owner: verified uid 999 can write — OK"
         else
-          echo "pgdata-owner: ownership already correct"
+          echo "pgdata-owner: FATAL — uid 999 (postgres) cannot write here even after" >&2
+          echo "  chown/chmod. On a NAS this usually means folder ACLs override classic" >&2
+          echo "  permissions. Fix in the NAS file manager: grant read/write on the" >&2
+          echo "  PSE_PGDATA_PATH folder to all users, or recreate it in a plain (non-" >&2
+          echo "  shared, no-ACL) location. The db will not start until this passes." >&2
+          exit 1
         fi
     restart: "no"
     logging: *logging

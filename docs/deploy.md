@@ -399,16 +399,25 @@ mkdir: cannot create directory '/var/lib/postgresql': Permission denied
 
 The usual advice is `chown -R 999:999 <path>`, which is no help at all when the NAS UI gives
 you no shell — and a NAS UI is exactly what this file is for. So a small `pgdata-owner`
-container does it instead, as root, before the database starts:
+container repairs ownership as root before the database starts, and then **proves it**: it
+attempts a write as uid 999, exactly as postgres will run.
 
 ```
-pgdata-owner: chowning /pgdata to postgres (999:999)     ← first boot on a fresh directory
-pgdata-owner: ownership already correct                  ← every boot after that
+pgdata-owner: running as uid=0, fs=ext4
+pgdata-owner: contents of the mounted directory:   ← the ls -la you have no shell to run
+...
+pgdata-owner: verified uid 999 can write — OK
 ```
 
-It is a no-op for the default named volume, idempotent on every boot, and — unlike setting
-ownership only at creation time — it also **repairs a directory that is already wrong**, so
-a deployment that already crash-looped recovers by restarting.
+The repair is unconditional (a top directory can stat as uid 999 while the honest answer is
+no), idempotent on every boot, and it repairs a directory that already crash-looped — so
+recovery is just a restart.
+
+If the probe still fails, the container exits 1 and **the db never starts**: one FATAL line
+naming the cause replaces an unbounded crash loop. On a NAS the usual culprit is **folder
+ACLs layered over classic permissions** — `chown` succeeds, `stat` shows uid 999, and writes
+are still denied. Fix it in the NAS file manager: grant read/write on the `PSE_PGDATA_PATH`
+folder to all users, or recreate it in a plain, non-shared location. No shell needed.
 
 `PSE_BACKUP_PATH` never needed it: that container runs as root.
 
