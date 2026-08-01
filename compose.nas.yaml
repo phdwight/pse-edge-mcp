@@ -16,7 +16,7 @@
 # Required in .env next to this file:
 #   POSTGRES_PASSWORD   long and random
 # Strongly recommended:
-#   PSE_IMAGE_TAG       pin a version (e.g. 0.10.2). :latest is a moving target, and a tag
+#   PSE_IMAGE_TAG       pin a version (e.g. 0.11.0). :latest is a moving target, and a tag
 #                       that lags this file reads as a broken deployment rather than a
 #                       version mismatch.
 #   PSE_LAN_PORT        if 8200 is already taken. A clash leaves the app container created
@@ -154,6 +154,10 @@ services:
       # On, even on the LAN: a NAS is a shared machine, and turning auth on afterwards
       # would orphan any token minted while it was off.
       PSE_AUTH_REQUIRED: "1"
+      # Accounts allowed to provision machine clients from the /account web page (comma-
+      # separated). Same authority as the pse-edge-admin CLI — the way to grant headless
+      # agent access on a NAS with no shell. Empty = web provisioning off, CLI only.
+      PSE_ADMIN_EMAILS: ${PSE_ADMIN_EMAILS:-}
       # Stage 1 has no public hostname yet. compose.tunnel.yaml overrides this with the
       # real https URL, which is the value WebAuthn binds every passkey to.
       PSE_PUBLIC_URL: ${PSE_PUBLIC_URL:-http://localhost:${PSE_LAN_PORT:-8200}}

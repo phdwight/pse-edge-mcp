@@ -20,6 +20,7 @@ readable file is a page an operator can audit.
 from __future__ import annotations
 
 import base64
+import html
 import json
 import logging
 from collections.abc import Awaitable, Callable
@@ -207,6 +208,7 @@ class AuthApp:
         email: EmailSender,
         public_url: str,
         engine: AsyncEngine,
+        admin_emails: frozenset[str] | None = None,
         token_limiter: FixedWindowLimiter | None = None,
     ) -> None:
         self._engine = engine
@@ -216,6 +218,10 @@ class AuthApp:
         self._email = email
         self._public = public_url.rstrip("/")
         self._secure = self._public.startswith("https://")
+        # Accounts allowed to provision machine clients from /account. Stored lowercased so
+        # the comparison matches `users.email`, which is stored lowercased. Empty = the web
+        # provisioning surface does not exist and the CLI is the only route.
+        self._admin_emails = frozenset(e.lower() for e in (admin_emails or frozenset()))
         # 20 token requests per client_id and per IP per minute. Generous for a legitimate
         # agent (a machine token lasts an hour, so one request per hour is the norm) and
         # far below what online guessing would need against a 48-byte secret.
@@ -268,6 +274,8 @@ class AuthApp:
             ("/privacy", "GET"): self._privacy,
             ("/account", "GET"): self._account,
             ("/account/delete", "POST"): self._account_delete,
+            ("/account/machine-clients", "POST"): self._create_machine_client,
+            ("/account/machine-clients/revoke", "POST"): self._revoke_machine_client,
         }
         return table.get((path, method))
 
@@ -558,6 +566,9 @@ class AuthApp:
         # is not a privacy policy.
         return _html(PRIVACY_POLICY)
 
+    def _is_admin(self, session: WebSession) -> bool:
+        return bool(session.email and session.email.lower() in self._admin_emails)
+
     async def _account(
         self, scope: dict[str, Any], body: bytes
     ) -> tuple[int, dict[str, str], bytes]:
@@ -565,7 +576,87 @@ class AuthApp:
         if not session or session.kind != "authenticated" or not session.user_id:
             return _redirect(f"{self._public}/login")
         summary = await summarise(self._engine, session.user_id)
-        return _html(_account_page(summary, session.csrf_token))
+        # The machine-client panel appears only for operators (PSE_ADMIN_EMAILS). A normal
+        # account never sees it and cannot reach the routes behind it — the same authority
+        # as the admin CLI, so it is deliberately not self-service.
+        machine_panel = ""
+        if self._is_admin(session):
+            from .admin import list_machine_clients
+
+            clients = await list_machine_clients(self._engine)
+            machine_panel = _machine_clients_panel(clients, session.csrf_token)
+        return _html(_account_page(summary, session.csrf_token, machine_panel))
+
+    async def _admin_form(
+        self, scope: dict[str, Any], body: bytes
+    ) -> tuple[WebSession, dict[str, str]] | tuple[int, dict[str, str], bytes]:
+        """Shared guard for the machine-client routes: authenticated + operator + CSRF.
+
+        Returns the session and parsed form on success, or a ready-to-send refusal. The
+        403 for a non-operator is deliberately identical to the not-signed-in redirect's
+        end state — a normal account gets no signal that this surface exists.
+        """
+        session = await self._passkeys.load_session(_cookies(scope).get(SESSION_COOKIE))
+        if not session or session.kind != "authenticated" or not session.user_id:
+            return _redirect(f"{self._public}/login")
+        if not self._is_admin(session):
+            return _html("<h1>Not found</h1>", 404)
+        form = {k: v[0] for k, v in parse_qs(body.decode("utf-8")).items()}
+        if not constant_time_equals(form.get("csrf_token", ""), session.csrf_token):
+            return _html("<h1>Invalid request</h1><p>Return to your account page.</p>", 403)
+        return session, form
+
+    async def _create_machine_client(
+        self, scope: dict[str, Any], body: bytes
+    ) -> tuple[int, dict[str, str], bytes]:
+        guard = await self._admin_form(scope, body)
+        if len(guard) == 3:
+            return guard  # a refusal
+        _, form = guard
+        from .admin import AdminError, create_machine_client
+
+        name = (form.get("name") or "").strip()
+        try:
+            created = await create_machine_client(self._engine, name or "machine-client")
+        except AdminError as exc:
+            return _html(
+                "<h1>Could not create client</h1>"
+                f"<div class='msg err'>{html.escape(str(exc))}</div>",
+                400,
+            )
+        logger.info(
+            "machine client %s provisioned from the account page by an operator",
+            created["client_id"],
+        )
+        # The secret is rendered here and never again — only its hash is stored. Deliberately
+        # the whole response, so it cannot be missed, with the token endpoint spelled out so
+        # the operator can hand the two values straight to an agent. no-store for the same
+        # reason the token endpoint sets it (RFC 6749 §5.1): a cached copy of this page IS
+        # the credential.
+        status, headers, page = _html(_machine_client_created_page(created, self._public))
+        return status, {**headers, "cache-control": "no-store"}, page
+
+    async def _revoke_machine_client(
+        self, scope: dict[str, Any], body: bytes
+    ) -> tuple[int, dict[str, str], bytes]:
+        guard = await self._admin_form(scope, body)
+        if len(guard) == 3:
+            return guard
+        _, form = guard
+        from .admin import AdminError, revoke_machine_client
+
+        client_id = (form.get("client_id") or "").strip()
+        try:
+            await revoke_machine_client(self._engine, client_id)
+        except AdminError as exc:
+            # exc can echo the submitted client_id; escape it. CSRF already blocks a
+            # cross-site POST from reaching here, so this is defence in depth, not the gate.
+            return _html(
+                f"<h1>Could not revoke</h1><div class='msg err'>{html.escape(str(exc))}</div>",
+                400,
+            )
+        logger.info("machine client %s revoked from the account page", client_id)
+        return _redirect(f"{self._public}/account")
 
     async def _account_delete(
         self, scope: dict[str, Any], body: bytes
@@ -748,7 +839,65 @@ market pages on its own behalf, never yours.</p>
 """
 
 
-def _account_page(summary: AccountSummary, csrf_token: str) -> str:
+def _machine_clients_panel(clients: list[dict[str, Any]], csrf_token: str) -> str:
+    """Operator-only: list machine clients and provide create/revoke controls."""
+    active = [c for c in clients if not c["revoked_at"]]
+    rows = "".join(
+        "<tr><td><code>{cid}</code></td><td>{name}</td>"
+        "<td><form method=post action='/account/machine-clients/revoke' style='margin:0'>"
+        "<input type=hidden name=csrf_token value='{csrf}'>"
+        "<input type=hidden name=client_id value='{cid}'>"
+        "<button type=submit style='background:#c01c28;padding:.3rem .7rem'>Revoke</button>"
+        "</form></td></tr>".format(
+            cid=html.escape(c["client_id"]),
+            name=html.escape(c["client_name"]),
+            csrf=csrf_token,
+        )
+        for c in active
+    )
+    table = (
+        f"<table><tr><th>client_id</th><th>Name</th><th></th></tr>{rows}</table>"
+        if rows
+        else "<p>No machine clients yet.</p>"
+    )
+    return f"""
+<h2>Machine clients (headless / agent access)</h2>
+<p>Create a <code>client_id</code>/<code>client_secret</code> pair for an agent that cannot
+sign in through a browser — a LangGraph app, a scheduled job. It authenticates with the
+<code>client_credentials</code> grant and gets its own quota. Give each agent its own.</p>
+{table}
+<form method=post action='/account/machine-clients'>
+  <input type=hidden name=csrf_token value='{csrf_token}'>
+  <label>Name <input name=name placeholder="langgraph-app" required></label>
+  <button type=submit>Create machine client</button>
+</form>
+"""
+
+
+def _machine_client_created_page(created: dict[str, str], public_url: str) -> str:
+    """Shown once, with the secret. It is not recoverable — only revocable and reissuable."""
+    return f"""
+<h1>Machine client created</h1>
+<div class='msg err'><strong>Copy the secret now — it is shown only this once.</strong>
+Only its hash is stored, so it cannot be retrieved later, only revoked and reissued from
+your account page.</div>
+<div class=msg>
+  <p><strong>client_id:</strong> <code>{html.escape(created['client_id'])}</code></p>
+  <p><strong>client_secret:</strong> <code>{html.escape(created['client_secret'])}</code></p>
+</div>
+<h2>Use it</h2>
+<p>Exchange the pair for a 1-hour bearer token (no refresh token — re-request when it
+expires), then call the MCP endpoint with it:</p>
+<pre>curl -X POST {public_url}/oauth/token \\
+  -d grant_type=client_credentials \\
+  -d client_id={html.escape(created['client_id'])} \\
+  -d client_secret=&lt;the secret above&gt; \\
+  -d scope=mcp -d resource={public_url}/mcp</pre>
+<p><a href='/account'>Back to your account</a></p>
+"""
+
+
+def _account_page(summary: AccountSummary, csrf_token: str, machine_panel: str = "") -> str:
     """The subject-access view plus the deletion control, on one page."""
     rows = "".join(
         f"<tr><td>{day['day']}</td><td>{day['requests']}</td><td>{day['rejected']}</td></tr>"
@@ -769,6 +918,7 @@ def _account_page(summary: AccountSummary, csrf_token: str) -> str:
 </div>
 <h2>Usage (kept 90 days)</h2>
 {usage_table}
+{machine_panel}
 <h2>Delete your account</h2>
 <p>This removes your account, passkeys, tokens and usage history immediately and
 permanently. It cannot be undone. See the <a href="/privacy">privacy page</a>.</p>

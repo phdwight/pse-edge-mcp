@@ -57,6 +57,14 @@ class Settings:
     # logs, but nobody is told — which is worth a warning, because a canary nobody reads is
     # indistinguishable from no canary.
     operator_email: str | None = None
+    # Accounts allowed to provision machine clients from the /account web page. This is the
+    # SAME authority the `pse-edge-admin create-machine-client` CLI has — moved from "has a
+    # shell" to "is a named operator" — so it must stay narrow: the machine-only gate on the
+    # client_credentials grant depends on machine clients being created only by an admin, and
+    # this list defines who that is over HTTP. Empty (the default) means the web path is off
+    # and the CLI is the only route, exactly as before. Never populate it from anything a
+    # user can set about themselves.
+    admin_emails: frozenset[str] = field(default_factory=frozenset)
     # Privacy (plan §6a): usage counts are deleted after this many days. The privacy page
     # states 90, so changing it here means changing what users were told.
     usage_retention_days: int = 90
@@ -109,6 +117,11 @@ class Settings:
             zeptomail_api_key=os.environ.get("ZEPTOMAIL_API_KEY") or None,
             email_from=os.environ.get("PSE_EMAIL_FROM", cls.email_from),
             operator_email=os.environ.get("PSE_OPERATOR_EMAIL") or None,
+            admin_emails=frozenset(
+                e.strip().lower()
+                for e in os.environ.get("PSE_ADMIN_EMAILS", "").split(",")
+                if e.strip()
+            ),
             usage_retention_days=int(
                 os.environ.get("PSE_USAGE_RETENTION_DAYS", cls.usage_retention_days)
             ),
