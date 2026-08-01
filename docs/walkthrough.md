@@ -13,7 +13,7 @@ understand it, debug it, or extend it.
 | `docs/deploy.md` | Running it in production |
 | `CLAUDE.md` | The short form of the invariants, kept next to the code |
 
-Version described: **0.10.0**. 36 modules, ~7,800 lines of source, ~5,800 lines of tests.
+Version described: **0.10.0**. 36 modules, ~7,900 lines of source, ~5,700 lines of tests.
 
 ---
 
@@ -244,7 +244,7 @@ mocking at all**.
 | `asgi.py` | 240 | The single composition point, and the DNS-rebinding allowlist |
 | `auth.py` | 190 | `TokenService`, `QuotaTracker`. Must stay SQLAlchemy-free |
 | `notifications.py` | 143 | `send_email` policy: self-only recipient, caps, escaping |
-| `canary.py` | 300 | Nightly schema check: one endpoint per family, validated against its model |
+| `canary.py` | 320 | Nightly schema check: one endpoint per family, validated against its model |
 
 ---
 
