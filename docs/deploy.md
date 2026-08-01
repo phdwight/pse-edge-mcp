@@ -117,6 +117,54 @@ Then visit `https://$PSE_DOMAIN/signup` and complete a real signup — email, pa
 confirm `PSE_PUBLIC_URL` and email delivery are both right. Doing this once, deliberately, is
 much cheaper than discovering an origin mismatch from a user's bug report.
 
+## The schema canary
+
+PSE Edge can restyle its HTML at any time, with no warning and no obligation to us. The
+parse layer then breaks — and without this, **the first person to find out is a user whose
+tool call just failed.**
+
+The `canary` service runs one check per endpoint family every night at 08:00 UTC (16:00
+Manila, an hour after the close), fetches for real, and validates each result against the
+Pydantic model the tool would build. Set where to report:
+
+```bash
+PSE_OPERATOR_EMAIL=ops@example.com
+```
+
+**It emails only on failure.** A nightly "all fine" message is filtered within a week, and a
+filtered alert is worse than none because it feels like coverage. Every run is logged either
+way. With the variable unset the canary still runs and still logs, and warns that nobody is
+being told.
+
+Run one by hand any time:
+
+```bash
+docker compose -f compose.nas.yaml exec app pse-edge-canary
+```
+
+```
+8/8 endpoint families healthy
+
+[PASS] search_companies (autocomplete JSON) (417 ms)
+[PASS] get_stock_quote (stockData.do → StockQuote) (306 ms)
+...
+```
+
+It exits non-zero on failure, so a cron wrapper or CI job can notice without parsing output.
+
+Three properties worth knowing before changing it:
+
+- **It bypasses the cache.** `FreezeService` would answer from a warm entry and validate
+  yesterday's HTML, proving nothing about today's.
+- **It still refuses to run during market hours**, and makes no request at all then.
+  Bypassing the cache does not mean bypassing invariant #1 — protecting PSE Edge outranks
+  learning about drift a few hours sooner.
+- **It validates the model, not the HTTP status.** A 200 carrying a restyled table is
+  exactly the failure this exists for, and it is invisible at the HTTP layer.
+
+When it fails, the fix is to re-capture the affected fixture, compare against
+`docs/endpoints.md`, and fix the parser — never to relax the validation until it passes.
+
 ## Running under another ASGI server
 
 The app is importable, so it is not tied to the bundled CLI:
@@ -195,7 +243,7 @@ restarting in a loop.
 ## Stage 1 — LAN only
 
 ```bash
-PSE_IMAGE_TAG=0.9.0            # pin a version; see the warning below
+PSE_IMAGE_TAG=0.10.0            # pin a version; see the warning below
 POSTGRES_PASSWORD=<long random value>
 ```
 
@@ -210,7 +258,7 @@ is reachable at `http://<nas-ip>:8200`, and nothing is exposed to the internet.
 Check it:
 
 ```bash
-curl http://<nas-ip>:8200/health           # {"status": "ok", "version": "0.9.0", ...}
+curl http://<nas-ip>:8200/health           # {"status": "ok", "version": "0.10.0", ...}
 curl -X POST http://<nas-ip>:8200/mcp      # 401 — auth is on
 ```
 

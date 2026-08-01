@@ -26,7 +26,7 @@
 #   POSTGRES_PASSWORD  something long and random
 #   ZEPTOMAIL_API_KEY  for verification emails
 # Strongly recommended:
-#   PSE_IMAGE_TAG      pin a version (e.g. 0.9.0) instead of tracking :latest
+#   PSE_IMAGE_TAG      pin a version (e.g. 0.10.0) instead of tracking :latest
 #
 # PSE_PUBLIC_URL is derived from PSE_DOMAIN below. Getting it wrong breaks passkeys in a way
 # that looks like a browser bug, because WebAuthn binds credentials to the origin.
@@ -206,6 +206,37 @@ services:
         while true; do
           sleep 86400
           pse-edge-admin purge-usage --retention-days ${PSE_USAGE_RETENTION_DAYS:-90} || true
+        done
+    logging: *logging
+
+  # Nightly schema canary (plan §6a). PSE Edge can restyle its HTML at any time; without
+  # this the first person to find out is a user whose tool call just failed. Runs an hour
+  # after the close, when the day's data exists, and emails PSE_OPERATOR_EMAIL only on
+  # failure — a nightly "all fine" mail is filtered within a week, and a filtered alert is
+  # worse than none because it feels like coverage.
+  canary:
+    image: ghcr.io/phdwight/pse-edge-mcp:${PSE_IMAGE_TAG:-latest}
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+asyncpg://pse:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/pse_edge
+      PSE_OPERATOR_EMAIL: ${PSE_OPERATOR_EMAIL:-}
+      ZEPTOMAIL_API_KEY: ${ZEPTOMAIL_API_KEY:-}
+      PSE_EMAIL_FROM: ${PSE_EMAIL_FROM:-no-reply@localhost}
+      PSE_LOG_JSON: "1"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        while true; do
+          # 08:00 UTC = 16:00 Asia/Manila: one hour after the close, so the day's figures
+          # are published. The canary refuses to run during market hours anyway.
+          if [ "$$(date -u +%H%M)" = "0800" ]; then
+            pse-edge-canary || echo "canary: FAILURES — see the report above" >&2
+            sleep 3600
+          fi
+          sleep 30
         done
     logging: *logging
 

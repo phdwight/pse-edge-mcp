@@ -7,6 +7,10 @@ Decision table for every read (see market_calendar for boundary semantics):
   fresh       | serve                  | serve
   expired     | fetch anew, cache      | serve STALE (flagged; never fetch)
   missing     | fetch anew, cache      | raise MARKET_OPEN_NO_CACHE
+
+If the fetch itself fails because PSE Edge is unreachable, an expired entry is served
+STALE rather than discarded: holding the last close and answering with an error instead
+is strictly worse, and `stale` already means "real data, past its boundary".
 """
 
 from __future__ import annotations
@@ -18,7 +22,7 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 
 from .cache import CacheEntry, InMemoryStorage, Storage
-from .errors import MarketOpenNoCacheError
+from .errors import EdgeUnavailableError, MarketOpenNoCacheError
 from .market_calendar import MarketCalendar
 from .models import Meta
 from .ratelimit import SingleFlight
@@ -114,7 +118,23 @@ class FreezeService:
             return fresh
 
         # Concurrent misses for the same key collapse into one upstream request.
-        stored = await self._flight.do(key, _fetch_and_store)
+        try:
+            stored = await self._flight.do(key, _fetch_and_store)
+        except EdgeUnavailableError:
+            if entry is None:
+                raise  # Nothing cached and nothing upstream: there is no answer to give.
+            # We hold the last close and PSE Edge is unreachable. Throwing that away to
+            # return an error is strictly worse than serving it: the data is real, it is
+            # simply past its boundary — which is exactly what `stale` already means, so a
+            # client that handles `stale` handles an outage with no change. `as_of` says
+            # precisely how old it is, and callers already have to read it.
+            logger.warning(
+                "upstream: PSE Edge unreachable — serving the cached value as stale "
+                "key=%s as_of=%s",
+                key,
+                entry.fetched_at.isoformat(),
+            )
+            return self._served(entry, from_cache=True, stale=True, immutable=immutable)
         return self._served(stored, from_cache=False, stale=False, immutable=immutable)
 
     def _served(

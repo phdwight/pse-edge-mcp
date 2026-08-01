@@ -187,6 +187,19 @@ Unofficial — Edge has no public API; we speak to the portal's own internal end
   20,000 chars and 20 per user per day; policy lives in `notifications.py`, not `server.py`.
   Action tools return `{"data": …}` with **no `meta`** via `act()` — `meta` is a *freshness*
   contract and an action has no `as_of`.
+- **Schema canary (0.10.0) — plan §6a delivered.** `canary.py` + `pse-edge-canary` + a
+  nightly compose service. Rules: it **bypasses the cache** (a warm entry would validate
+  yesterday's HTML), **still refuses to run while the market is open** (invariant #1
+  outranks it), and **validates the Pydantic model, not the HTTP status** — a 200 with a
+  restyled table is the failure it exists for. Emails `PSE_OPERATOR_EMAIL` **only on
+  failure**; a nightly "all fine" gets filtered and then feels like coverage. Each check
+  must mirror how the *repository* builds its model, or the canary reports drift the tools
+  never see. Exits non-zero so cron/CI can notice.
+- **Upstream outage = stale, not error (0.10.0).** If a fetch fails with
+  `EdgeUnavailableError` and an expired entry exists, `FreezeService` serves it flagged
+  `stale` instead of raising. Discarding real data to return an error is strictly worse, and
+  `stale` already means "real data, past its boundary", so clients need no change.
+  `EDGE_UNAVAILABLE` now means unreachable **and nothing cached**.
 - **Phase 5 remaining:** flip auth to default-on at deploy.
 - **Phase 6 (done):** `compose.prod.yaml` + `Caddyfile` + `docs/deploy.md`. Rules:
   the HTTP stack is composed **once** in `asgi.py` — `__main__` and production must not
