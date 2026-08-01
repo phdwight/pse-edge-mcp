@@ -5,6 +5,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/) · Versioning: [SemVer](
 
 ## [Unreleased]
 
+### Added
+- **`PSE_PGDATA_PATH` and `PSE_BACKUP_PATH`** put the database and its dumps on a host directory you can see, snapshot and back up from the NAS, instead of inside Docker-managed storage. Compose decides bind-vs-named from the shape of the value, so **unset is byte-for-byte the previous behaviour** and no second compose file is needed. A useful property, verified: with a bind path, `docker compose down -v` reports the volume removed but the host directory and its contents survive and the stack comes back up reading them — the data stops being something a stray `-v` can destroy.
+  Two warnings are in the file and the guide because both fail in ways that do not name their cause. `PSE_PGDATA_PATH` must be on the NAS's **own internal volume** — never SMB/NFS/USB, since Postgres needs POSIX locking and honest `fsync` and will otherwise refuse to start or corrupt quietly (dumps are just files, so a network share is right for backups). And **switching the path on an existing deployment starts an empty database**: the old volume is untouched but unread, so accounts, passkeys and machine clients appear to vanish. `docs/deploy.md` gains a dump → switch → restore → verify sequence.
+
 ## [0.9.0] - 2026-08-01
 
 ### Added

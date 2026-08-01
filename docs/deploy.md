@@ -327,6 +327,59 @@ protects you from mistakes, not from disk failure.
 **Architecture.** Both the app image and `cloudflared` are published for `linux/amd64` and
 `linux/arm64`, so Intel and ARM NAS models are both covered without any change.
 
+## Moving the database onto a NAS share
+
+By default the database lives in a Docker-managed volume, which is durable but invisible
+from the NAS file manager and awkward to snapshot. Point it at a real directory instead:
+
+```bash
+mkdir -p /volume1/docker/pse-edge-mcp/pgdata /volume1/docker/pse-edge-mcp/backups
+```
+```bash
+PSE_PGDATA_PATH=/volume1/docker/pse-edge-mcp/pgdata
+PSE_BACKUP_PATH=/volume1/docker/pse-edge-mcp/backups
+```
+
+Compose decides bind-vs-named from the shape of the value, so unset means exactly the old
+behaviour and no second file is needed. Create the directories first: Docker will not, and
+the mount error it raises does not mention the missing path.
+
+**`PSE_PGDATA_PATH` must be on the NAS's own internal volume.** Never an SMB/NFS mount or
+external USB — Postgres needs POSIX locking and honest `fsync`, which network filesystems
+do not provide reliably, and it will either refuse to start or corrupt quietly. Dumps are
+just files, so `PSE_BACKUP_PATH` on a network share is fine, and is in fact better: a dump
+beside the database it came from protects you from mistakes but not from disk failure.
+
+### ⚠ On an existing deployment, migrate — do not just switch
+
+Pointing `PSE_PGDATA_PATH` at an empty directory initialises a **new, empty** database. The
+old volume is untouched, but nothing reads it any more, so accounts, passkeys and machine
+clients all appear to have vanished.
+
+```bash
+# 1. Dump from the CURRENT volume, while it is still in use
+docker compose -f compose.nas.yaml exec db \
+  pg_dump -U pse -d pse_edge --format=custom --file=/backups/premove.dump
+docker compose -f compose.nas.yaml exec db ls -lh /backups/premove.dump
+
+# 2. Copy that dump somewhere outside the old volume, set the two variables, then
+docker compose -f compose.nas.yaml up -d --force-recreate
+
+# 3. Restore into the new, genuinely empty database
+docker compose -f compose.nas.yaml exec db \
+  pg_restore -U pse -d pse_edge --clean --if-exists /backups/premove.dump
+
+# 4. Verify before trusting it
+docker compose -f compose.nas.yaml exec db psql -U pse -d pse_edge -c \
+  "select (select count(*) from users) users, (select count(*) from oauth_clients) clients"
+```
+
+Step 3 is the one place `--clean` is correct, because that database really is empty.
+
+A useful property of the bind form, verified: `docker compose down -v` reports the volume
+removed, but the host directory and its contents survive and the stack comes back up
+reading them. The data stops being something a stray `-v` can destroy.
+
 ## Verifying stage 2, from outside
 
 ```bash

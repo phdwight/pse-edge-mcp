@@ -23,6 +23,17 @@
 #                       but never started, with NO logs at all — the process never ran, so
 #                       an empty log is the symptom. `docker ps --format '{{.Ports}}'`
 #                       shows what already holds it.
+#   PSE_PGDATA_PATH     absolute host path for the database, e.g. /volume1/docker/pse/pgdata
+#   PSE_BACKUP_PATH     absolute host path for pg_dump output
+#                       Unset, both use Docker-managed storage as before. Set, they become
+#                       bind mounts you can see and snapshot from the NAS UI. CREATE THE
+#                       DIRECTORIES FIRST — Docker will not, and fails with a mount error
+#                       that does not mention the missing path.
+#
+#                       ⚠ Switching PSE_PGDATA_PATH on an EXISTING deployment starts from
+#                       an empty database: the old volume is untouched but no longer read,
+#                       so accounts, passkeys and machine clients appear to vanish. Dump
+#                       first, switch, then restore — see docs/deploy.md.
 #
 # Passkey signup does not work over plain http — browsers restrict WebAuthn to secure
 # contexts — so on the LAN you mint a token with the admin CLI instead:
@@ -39,7 +50,15 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
       POSTGRES_DB: pse_edge
     volumes:
-      - pgdata:/var/lib/postgresql
+      # Unset, this is a Docker-managed named volume (`pgdata`). Set to an absolute path,
+      # Compose treats it as a bind mount instead — which is how you put the database on a
+      # NAS share you can see, back up and snapshot. Compose decides which from the shape
+      # of the value, so one variable covers both without a second file.
+      #
+      # It must be the NAS's OWN internal volume. Never an SMB/NFS mount or external USB:
+      # Postgres needs POSIX locking and honest fsync, which network filesystems do not
+      # provide reliably, and it will either refuse to start or corrupt quietly.
+      - ${PSE_PGDATA_PATH:-pgdata}:/var/lib/postgresql
     # Not published. Only app, backup and purge reach Postgres, over the compose network;
     # exposing 5432 to a LAN is the most common way these get compromised.
     healthcheck:
@@ -138,7 +157,10 @@ services:
       PGPASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
       BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-14}
     volumes:
-      - ./backups:/backups
+      # Same switch as pgdata. Unlike the database, dumps are just files, so a network
+      # share is fine here — and is in fact the better place for them, since a dump beside
+      # the database it came from protects you from mistakes but not from disk failure.
+      - ${PSE_BACKUP_PATH:-./backups}:/backups
     depends_on:
       db:
         condition: service_healthy
