@@ -13,7 +13,7 @@ understand it, debug it, or extend it.
 | `docs/deploy.md` | Running it in production |
 | `CLAUDE.md` | The short form of the invariants, kept next to the code |
 
-Version described: **0.10.0**. 36 modules, ~7,900 lines of source, ~5,700 lines of tests.
+Version described: **0.11.0**. 36 modules, ~8,100 lines of source, ~6,150 lines of tests.
 
 ---
 
@@ -68,7 +68,7 @@ Local development:
 
 ```bash
 uv sync --all-extras          # Python 3.14, uv for everything
-uv run pytest                 # 302 tests, no network access
+uv run pytest                 # 309 tests, no network access
 uv run ruff check .           # line length 100
 uv run mypy src               # strict
 ```
@@ -231,13 +231,13 @@ mocking at all**.
 
 | Module | Lines | Responsibility |
 |---|---:|---|
-| `auth_app.py` | 756 | Browser- and client-facing routes: OAuth, signup, login, account, privacy |
+| `auth_app.py` | 930 | Browser- and client-facing routes: OAuth, signup, login, account, privacy |
 | `parsers.py` | 752 | HTML/JSON → dicts. The most PSE-specific code in the repo |
 | `oauth.py` | 721 | OAuth 2.1 server: DCR, PKCE, code exchange, refresh rotation, client_credentials |
 | `repositories.py` | 526 | The domain layer — five repositories |
-| `admin.py` | 431 | `pse-edge-admin` CLI, including machine-client provisioning |
+| `admin.py` | 460 | `pse-edge-admin` CLI, including machine-client provisioning |
 | `passkeys.py` | 424 | WebAuthn ceremonies and browser sessions |
-| `server.py` | 413 | The 12 tool definitions |
+| `server.py` | 491 | The 13 tool definitions |
 | `models.py` | 332 | 24 Pydantic models |
 | `client.py` | 268 | HTTP to PSE Edge; both request dialects |
 | `db.py` | 255 | SQLAlchemy tables, engine, schema check |
@@ -347,7 +347,7 @@ so an LLM can react to them rather than seeing a traceback.
 | `MARKET_OPEN_NO_CACHE` | Nothing cached and the market is open | Retry after `retry_after` |
 | `SYMBOL_NOT_FOUND` | No such ticker | Try `search_companies` |
 | `INVALID_ARGUMENT` | Failed validation | Fix the arguments |
-| `ENDPOINT_CHANGED` | PSE Edge's response shape changed | **Alert a human — see §11** |
+| `ENDPOINT_CHANGED` | PSE Edge's response shape changed | **Alert a human — see §12** |
 | `EDGE_UNAVAILABLE` | Upstream unreachable **and nothing cached** | Retry later |
 | `RATE_LIMITED` | An action's own budget is spent (e.g. daily email cap) | Honour `retry_after_seconds` |
 | `ACTION_UNAVAILABLE` | The action cannot run here (no authenticated caller, or no mail provider) | Stop asking — do not retry |
@@ -428,20 +428,31 @@ exchanges a client id and secret for a bearer token directly:
         ──POST /mcp + Bearer ─────▶ tools
 ```
 
-Provisioned out of band; this is deliberately not reachable over HTTP:
+Provisioned by an **operator**, never by a registrant. Two routes, one authority:
 
 ```bash
 pse-edge-admin create-machine-client --name langgraph-app   # secret shown ONCE
 pse-edge-admin revoke-machine-client <client_id>
 ```
 
+Since **0.11.0** the same two operations also appear on the `/account` page, for accounts whose
+email is listed in `PSE_ADMIN_EMAILS`. That route exists because the deployment this server was
+built for is a NAS, where there is no shell to run the CLI in. It moved the authority from *has
+a shell* to *is a named operator* — it did not widen it. A non-operator account sees no panel,
+and both routes answer `404` rather than `403`, so there is no signal the surface exists.
+
 **The security property to understand before touching any of this:** `/oauth/register` is
 open to the internet, so the right to use `client_credentials` must not be derivable from
 anything a registrant supplies — not a `grant_types` array it declares, not a requested auth
 method, not the presence of a secret. It is gated on `oauth_clients.client_type == 'machine'`,
-a column **only the admin CLI writes**. A DCR client that registers, declares the grant and
-sends a secret still gets `unauthorized_client`. If that check ever becomes conditional on
-request data, anyone on the internet can mint tokens.
+a column **only operator-authorized paths write** — the CLI and the `PSE_ADMIN_EMAILS`-gated
+web route, never DCR. A client that registers, declares the grant and sends a secret still gets
+`unauthorized_client`. If that check ever becomes conditional on request data, or if
+`admin_emails` is ever populated from something a user can set about themselves, anyone on the
+internet can mint tokens.
+
+A worked client for the app-on-top-of-this case — one machine client, its token lifecycle, and
+the agent instructions to go with it — is in [`examples/langgraph_client.py`](../examples/langgraph_client.py).
 
 Two more decisions worth knowing before changing them:
 
@@ -484,7 +495,223 @@ purged after 90 days.
 
 ---
 
-## 9. Storage and the archive
+## 9. Credentials and the token lifecycle
+
+§8 covers *which* flow a caller uses. This section covers what is actually generated,
+what is stored, and how a credential lives and dies. Two things surprise most readers:
+the **passkey private key is never generated here** (§9.3), and there are **three
+different ways to end up holding a bearer token** (§9.5) that all converge on one row
+shape.
+
+### 9.1 Every credential in one table
+
+Everything random comes from `secrets` — the CSPRNG — never `random`.
+
+| Credential | Generated by | Shape | At rest | Lifetime |
+|---|---|---|---|---|
+| Bearer token (access) | `"pse_" + secrets.token_urlsafe(32)` | `pse_` + 43 chars | **SHA-256 only** | 30 min (`PSE_ACCESS_TTL_MIN`) |
+| Bearer token (refresh) | same generator | `pse_` + 43 chars | **SHA-256 only** | 30 days (`PSE_REFRESH_TTL_DAYS`) |
+| Machine access token | same generator | `pse_` + 43 chars | **SHA-256 only** | **1 h**, no refresh |
+| CLI-issued token | same generator | `pse_` + 43 chars | **SHA-256 only** | 30 days |
+| DCR `client_id` | `secrets.token_urlsafe(16)` | 22 chars | plaintext — a public identifier | until revoked |
+| DCR `client_secret` | — | **none is issued** | — | — |
+| Machine `client_id` | `"mcp-" + secrets.token_urlsafe(12)` | `mcp-` + 16 chars | plaintext | until revoked |
+| Machine `client_secret` | `secrets.token_urlsafe(48)` | 64 chars | **SHA-256 only** | until revoked |
+| Authorization code | `secrets.token_urlsafe(32)` | 43 chars | **SHA-256 only** | **300 s**, single-use |
+| Web session id | `secrets.token_urlsafe(32)` | 43 chars | **SHA-256 only** | 20 min |
+| OAuth flow id | `secrets.token_urlsafe(16)` | 22 chars | plaintext — see below | 15 min |
+| Email verification token | `secrets.token_urlsafe(32)` | 43 chars | **SHA-256 only** | 30 min |
+| `user_id`, `family_id` | `uuid.uuid4().hex` | 32 hex chars | plaintext — identifiers, not secrets | — |
+| **Passkey private key** | **the authenticator, not this server** | — | **never leaves the device** | until the user deletes it |
+
+The `pse_` prefix is not structural — it exists so a leaked token is **greppable by secret
+scanners**. The `mcp-` prefix on a machine `client_id` is likewise cosmetic: it is *not*
+what authorizes `client_credentials`. That is the `client_type` column, and nothing in a
+request can influence it (§8).
+
+### 9.2 What is stored, and what is not
+
+One rule covers everything above: **anything that authenticates is stored as SHA-256 and is
+never recoverable.** The plaintext exists exactly once, in the response that issues it —
+which is why the CLI prints *"Store the secret now — it is not recoverable, only revocable"*
+and the created-machine-client page is `cache-control: no-store`. The session cookie is
+covered by that rule too — `web_sessions` stores `sid_hash`, not the `sid`.
+
+The one deliberate exception is the **OAuth flow id**, stored in the clear because it is an
+identifier rather than a credential: holding it authenticates nothing. The secrets in that
+flow are the authorization code (hashed, single-use, 300 s) and the PKCE verifier, which the
+server never sees at all — it only ever stores the S256 challenge and recomputes.
+
+A fast hash rather than bcrypt/argon2 is deliberate, and recorded in `plan.md` §6: these are
+**32–48 bytes of CSPRNG output, not passwords**. There is no dictionary to attack and no
+low-entropy guess to slow down, so a KDF would buy nothing while adding latency to every
+single authenticated request. That reasoning holds *only* because the values are
+full-entropy — if a human-chosen secret is ever accepted anywhere, it does not transfer.
+
+### 9.3 The passkey — the one credential this server never generates
+
+This is the part most people get backwards. The server generates a **challenge**; the
+*authenticator* (Touch ID, a phone, a security key) generates the keypair, keeps the private
+half forever, and hands back only the public half.
+
+```
+  browser + authenticator              server                        database
+        │                                │                              │
+        │   POST /signup {email}         │                              │
+        │───────────────────────────────▶│  token = token_urlsafe(32)   │
+        │                                │──── store SHA-256 ──────────▶│  30 min
+        │◀── emailed link ───────────────│                              │
+        │                                │                              │
+        │   GET /enroll?token=…          │                              │
+        │───────────────────────────────▶│  consume; open a session     │
+        │                                │──── session id, 20 min ─────▶│
+        │                                │  challenge = random bytes    │
+        │◀── options {challenge, rp_id} ─│──── store challenge ────────▶│  per session
+        │                                │                              │
+   ┌────┴─────────────────────┐          │                              │
+   │ navigator.credentials    │          │                              │
+   │   .create()              │          │                              │
+   │ AUTHENTICATOR generates  │          │                              │
+   │ the keypair. The private │          │                              │
+   │ key never leaves it.     │          │                              │
+   └────┬─────────────────────┘          │                              │
+        │  {credential_id, public_key,   │                              │
+        │   signed challenge}            │                              │
+        │───────────────────────────────▶│  py_webauthn verifies:       │
+        │                                │   expected_challenge         │
+        │                                │   expected_rp_id             │
+        │                                │   expected_origin            │
+        │                                │──── store credential_id,  ──▶│
+        │                                │     public_key, sign_count   │
+```
+
+Four consequences worth internalising:
+
+- **The database holds no passkey secret.** A full dump of `webauthn_credentials` lets an
+  attacker *verify* signatures, never *produce* them.
+- **The challenge is stored server-side per session and cleared on use**, so a replayed
+  assertion has nothing to match.
+- **`rp_id` is the hostname of `PSE_PUBLIC_URL`**, and WebAuthn scopes credentials to it.
+  Change that value and every enrolled passkey stops working — they cannot be migrated, only
+  re-enrolled. This is why a wrong `PSE_PUBLIC_URL` presents as "passkeys are broken" rather
+  than as a configuration error (§16).
+- **`sign_count` must advance.** py_webauthn rejects a counter that fails to increase — the
+  standard cloned-authenticator signal.
+
+### 9.4 `client_id` — two kinds, and only one of them can be a machine
+
+```
+   POST /oauth/register              pse-edge-admin create-machine-client
+   (open to the internet)            /account panel (PSE_ADMIN_EMAILS only)
+        │                                        │
+        ▼                                        ▼
+   client_id = token_urlsafe(16)         client_id = "mcp-" + token_urlsafe(12)
+   client_secret: NONE ─ public client   client_secret = token_urlsafe(48), SHA-256 at rest
+   client_type = 'dcr'  ◀── written      client_type = 'machine'
+                            explicitly           │
+        │                                        │
+        ▼                                        ▼
+   authorization_code + PKCE only        client_credentials only
+```
+
+A DCR client is **public and holds no secret at all** — PKCE binds the code instead, which is
+what makes registration safe to leave open. The `client_type` value is written explicitly at
+the point untrusted input creates a client, rather than left to a schema default three files
+away, precisely because it is the value that denies `client_credentials`.
+
+### 9.5 Three ways to mint a bearer token
+
+| Path | Who uses it | Returns | Refresh? |
+|---|---|---|---|
+| `authorization_code` + PKCE | a human in a browser, via a DCR client | access + refresh | yes |
+| `refresh_token` | that same client, silently | a **new** access + refresh pair | rotates |
+| `client_credentials` | a headless agent, via a machine client | access only | **no** |
+| `pse-edge-admin issue-token` | a client that speaks no OAuth | access (30 days) | n/a |
+
+All four write **the same `auth_tokens` row shape** — same `kind='access'`, same hashing.
+That sameness is load-bearing, and `_mint_machine`'s docstring says why: `/mcp` validation is
+one indexed lookup joining `auth_tokens` to `users`, and a token of any other shape would
+need a special case there — "exactly the kind of second code path that later turns out to
+skip a revocation check."
+
+A machine token gets **no refresh token** on purpose: the client already holds a long-lived
+secret it can present again, so a refresh token would be a second credential of equal power
+without the rotation benefit that justifies one.
+
+### 9.6 The lifecycle, end to end
+
+```
+   MINT ──────────────────────────────────────────────────────────────────────┐
+     token = "pse_" + token_urlsafe(32)      ← plaintext exists ONLY here      │
+     INSERT auth_tokens(token_hash=sha256, kind, expires_at, client_id,        │
+                        family_id)                                            │
+     returned once, never again                                               │
+                                                                              ▼
+   PRESENT ─── Authorization: Bearer pse_…  on every request (never a session id)
+                                                                              │
+                                                                              ▼
+   VALIDATE ── sha256(presented) ─▶ in-process cache (60 s) ─── hit ──▶ user + quota
+                                            │ miss
+                                            ▼
+                                   one indexed SELECT joining users
+                                   reject if: unknown · expired · revoked · user disabled
+                                            │
+                                   cache the SUCCESS only, for
+                                   min(60 s, remaining token life)
+                                                                              │
+                                                                              ▼
+   END ─────── expiry (30 min / 1 h / 30 d)   or   revocation (§9.8)
+```
+
+**Refusals are never cached.** Only successful validations are, and the cached entry can
+never outlive the token itself.
+
+### 9.7 The 60-second cache is a revocation budget, not a performance knob
+
+`PSE_TOKEN_CACHE_TTL` (default 60 s) means exactly one thing: **a revoked or disabled token
+keeps working for at most that long.** Nothing else in the system depends on the number.
+
+`plan.md` §6 records the arithmetic that set it, and it is worth knowing before anyone
+"tunes" it: `auth lookups/s ≈ min(request rate, active tokens ÷ cache TTL)`. On an EOD
+service where few users make more than one request every few seconds, a 5-second cache saves
+almost nothing, while 60 seconds cuts auth reads roughly 6× and caps revocation lag at one
+minute. Lower it if you want faster revocation; do not lower it expecting a speedup.
+
+### 9.8 Rotation, reuse, and revocation
+
+Every refresh mints a **new** access+refresh pair and revokes the presented one. All tokens
+descended from one authorization share a `family_id`:
+
+```
+   auth code ─▶ [access₁ refresh₁]  family=F
+                     └─ refresh ──▶ [access₂ refresh₂]  family=F   (refresh₁ revoked)
+                                          └─ refresh ─▶ [access₃ refresh₃]  family=F
+
+   refresh₁ presented again  ──▶  it was already revoked, so it leaked
+                             ──▶  REVOKE THE ENTIRE FAMILY F  (RFC 9700 §4.14)
+                             ──▶  invalid_grant + a WARNING log line
+```
+
+Reuse of an already-rotated refresh token is treated as **theft, not a mistake** — the
+legitimate holder gets logged out too, which is the intended trade.
+
+What revokes what:
+
+| Action | Effect |
+|---|---|
+| `revoke-token <plaintext>` | that one token |
+| `disable-user` | the account and all its tokens |
+| `revoke-machine-client` | the client, its outstanding tokens, **and** its service account |
+| refresh reuse detected | every token in that `family_id` |
+| `delete-user` | hard-deletes everything, in one transaction |
+
+All of these land within `PSE_TOKEN_CACHE_TTL` at the `/mcp` boundary — but **immediately** at
+`/oauth/token`, which reads the client row directly. A revoked machine client cannot mint even
+one more token, while a token it minted a moment earlier may survive up to 60 seconds.
+
+---
+
+## 10. Storage and the archive
 
 Postgres is **optional**. `DATABASE_URL` unset gives an in-memory cache and a `NullArchive`
 — the zero-config stdio path, which does not even need the `postgres` extra installed.
@@ -525,7 +752,7 @@ Rules:
 
 ---
 
-## 10. Extending the server
+## 11. Extending the server
 
 ### Adding a tool to an existing domain
 
@@ -542,7 +769,7 @@ A new domain is **a new repository plus thin tools** — never fetch/parse orche
 `server.py`. Concretely:
 
 1. Add the narrow Protocol to `sources.py`.
-2. Add the fetch method to `client.py`, using the correct dialect (§11).
+2. Add the fetch method to `client.py`, using the correct dialect (§12).
 3. Add the parser to `parsers.py`. Parse by **`<thead>` label, never column position.**
 4. Add the repository, the models, and the tools.
 5. Capture a real fixture; tests never touch the network.
@@ -565,7 +792,7 @@ protected. **Merging to `main` publishes a multi-arch image**, and a merge that 
 
 ---
 
-## 11. Debugging guide
+## 12. Debugging guide
 
 ### Symptom → cause
 
@@ -646,7 +873,7 @@ Getting this wrong produces an HTTP 415 that looks like a server fault:
 
 ---
 
-## 12. Testing
+## 13. Testing
 
 **Tests never touch PSE Edge.** All HTTP is mocked with `respx` against 15 fixtures in
 `tests/fixtures/`, recorded from real captures. A new endpoint requires a new fixture.
@@ -673,7 +900,7 @@ defect it should have caught.
 
 ---
 
-## 13. Configuration reference
+## 14. Configuration reference
 
 All settings live in `config.py` as a frozen dataclass; environment variables override.
 
@@ -723,7 +950,7 @@ ceiling is up to N× nominal. Scale workers for CPU, and scale limits with them.
 
 ---
 
-## 14. Deployment topologies
+## 15. Deployment topologies
 
 ```
    A. VPS that owns ports 80/443          B. NAS behind Cloudflare Tunnel
@@ -758,7 +985,7 @@ information only — **the gate is necessity, not a number.**
 
 ---
 
-## 15. Gotchas
+## 16. Gotchas
 
 Findings that cost real debugging time. Most are recorded in `docs/endpoints.md` with the
 evidence.
@@ -786,7 +1013,7 @@ evidence.
 
 ---
 
-## 16. Where to look next
+## 17. Where to look next
 
 | I want to… | Read |
 |---|---|

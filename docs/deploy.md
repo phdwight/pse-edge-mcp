@@ -286,7 +286,7 @@ curl -X POST http://<nas-ip>:8200/mcp \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
 ```
 
-Twelve tools back means the stack is sound: image, migrations, database, auth and the MCP
+Thirteen tools back means the stack is sound: image, migrations, database, auth and the MCP
 transport are all working. What stage 1 *cannot* tell you is whether passkeys, OAuth and
 verification email work — all three need the real https origin, so they are stage 2's
 checklist, not something you have deferred by accident.
