@@ -12,6 +12,7 @@ import json
 import logging
 import re
 from contextlib import asynccontextmanager
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -21,7 +22,14 @@ import pytest
 
 from pse_edge_mcp.config import Settings
 from pse_edge_mcp.health import HealthApp
-from pse_edge_mcp.logging_config import JsonFormatter, configure_logging, redact
+from pse_edge_mcp.logging_config import (
+    _PLAIN_FORMAT,
+    _TIME_FORMAT,
+    JsonFormatter,
+    PlainFormatter,
+    configure_logging,
+    redact,
+)
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -339,3 +347,89 @@ async def test_a_proxied_request_with_the_public_host_reaches_the_mcp_app():
     )
     assert response.status_code == 200
     assert response.json()["result"]["serverInfo"]["version"], "serverInfo.version was empty"
+
+
+# --- timestamps and critical-path logging ------------------------------------
+
+
+def test_plain_log_lines_carry_an_iso_timestamp():
+    """The JSON formatter always had one; the plain formatter did not — so the format a
+    developer reads in a terminal, and the one a deployment without PSE_LOG_JSON writes,
+    produced lines that could not be correlated with anything."""
+    record = logging.LogRecord(
+        name="pse", level=logging.INFO, pathname=__file__, lineno=1,
+        msg="upstream: fetching", args=(), exc_info=None,
+    )
+    line = PlainFormatter(_PLAIN_FORMAT, datefmt=_TIME_FORMAT).format(record)
+
+    stamp = line.split()[0]
+    parsed = datetime.strptime(stamp, "%Y-%m-%dT%H:%M:%S%z")
+    assert parsed.tzinfo is not None, "an offset is what makes the stamp unambiguous"
+    assert "INFO" in line and "upstream: fetching" in line
+
+
+def test_the_plain_formatter_redacts_too():
+    """Otherwise the safer-looking format is the leakier one."""
+    record = logging.LogRecord(
+        name="pse", level=logging.INFO, pathname=__file__, lineno=1,
+        msg="client_secret=hunter2hunter2", args=(), exc_info=None,
+    )
+    line = PlainFormatter(_PLAIN_FORMAT, datefmt=_TIME_FORMAT).format(record)
+    assert "hunter2" not in line
+    assert "[redacted]" in line
+
+
+async def test_every_upstream_fetch_is_logged(caplog):
+    """The one log line this server exists to keep rare. If it appears during market
+    hours the freeze invariant is broken, so it has to be visible per fetch."""
+    from pse_edge_mcp.market_calendar import MarketCalendar
+    from pse_edge_mcp.service import FreezeService
+
+    class Closed(MarketCalendar):
+        def is_market_open(self, dt=None) -> bool:
+            return False
+
+    service = FreezeService(calendar=Closed())
+    with caplog.at_level(logging.INFO, logger="pse_edge_mcp.service"):
+        await service.get("quote:SM", lambda: _answer("value"))
+        await service.get("quote:SM", lambda: _answer("value"))  # cache hit, no fetch
+
+    fetches = [r for r in caplog.records if "upstream: fetching" in r.message]
+    assert len(fetches) == 1, "one line per real fetch, and none for a cache hit"
+    assert "quote:SM" in fetches[0].message
+    assert any("duration_ms" in r.message for r in caplog.records)
+
+
+async def test_refusing_an_uncached_read_during_market_hours_is_logged(caplog):
+    from pse_edge_mcp.errors import MarketOpenNoCacheError
+    from pse_edge_mcp.market_calendar import MarketCalendar
+    from pse_edge_mcp.service import FreezeService
+
+    class Open(MarketCalendar):
+        def is_market_open(self, dt=None) -> bool:
+            return True
+
+    service = FreezeService(calendar=Open())
+    with caplog.at_level(logging.INFO, logger="pse_edge_mcp.service"):
+        with pytest.raises(MarketOpenNoCacheError):
+            await service.get("quote:SM", lambda: _answer("never"))
+
+    assert any("refusing an uncached read" in r.message for r in caplog.records)
+
+
+async def _answer(value):
+    return value
+
+
+def test_startup_logs_the_resolved_configuration(caplog):
+    """"What config is this actually running?" is the first question in any incident, and
+    answering it from env vars and compose files is guesswork."""
+    from pse_edge_mcp.asgi import create_app
+
+    with caplog.at_level(logging.INFO, logger="pse_edge_mcp.asgi"):
+        create_app(Settings(public_url="http://localhost:8000", throttle_rate_per_sec=1000))
+
+    line = next(r.message for r in caplog.records if r.message.startswith("starting pse-edge-mcp"))
+    for field in ("public_url=", "auth=", "storage=", "transport=", "email=", "market="):
+        assert field in line, f"{field} missing from the startup summary"
+    assert "auth=OFF" in line, "an auth-less deployment must be obvious in the log"

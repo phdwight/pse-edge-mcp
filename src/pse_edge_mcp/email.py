@@ -63,6 +63,12 @@ class ZeptoMailSender:
             "htmlbody": html,
         }
         response = await self._http.post(ZEPTOMAIL_URL, json=payload, headers=self._headers)
+        if response.status_code < 400:
+            # Logged because "did the email actually go out?" is the first question when a
+            # user says they never got their link, and the answer is otherwise unknowable
+            # from this side. The recipient is already in the database; the body is not
+            # logged, and the API key never appears here.
+            logger.info("email: sent to=%s subject=%r from=%s", to, subject, self._from)
         if response.status_code >= 400:
             # Loud: an unsendable verification link means signup is silently broken.
             #

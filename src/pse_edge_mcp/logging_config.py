@@ -99,7 +99,26 @@ class JsonFormatter(logging.Formatter):
         return json.dumps(payload, default=str)
 
 
+class PlainFormatter(logging.Formatter):
+    """Human-readable single line, timestamped, with the same redaction as the JSON one.
+
+    Redaction has to be applied here too, not only in JsonFormatter: the plain format is
+    what a developer sees in a terminal and what a deployment with `PSE_LOG_JSON` unset
+    writes to its container log, so leaving it unredacted would mean the safer-looking
+    format is the leakier one.
+    """
+
+    def format(self, record: logging.LogRecord) -> str:
+        return redact(super().format(record))
+
+
 _HANDLER_NAME = "pse-edge-mcp"
+
+# ISO-8601 with an explicit offset, matching JsonFormatter's `timestamp`. A log line with
+# no time on it cannot be correlated with anything — not an incident, not a user's report,
+# not the line above it after a restart — and this format sorts lexicographically.
+_PLAIN_FORMAT = "%(asctime)s %(levelname)-8s %(name)s: %(message)s"
+_TIME_FORMAT = "%Y-%m-%dT%H:%M:%S%z"
 
 
 def configure_logging(*, json_output: bool, level: str = "INFO") -> None:
@@ -108,7 +127,7 @@ def configure_logging(*, json_output: bool, level: str = "INFO") -> None:
     handler.setFormatter(
         JsonFormatter()
         if json_output
-        else logging.Formatter("%(levelname)-8s %(name)s: %(message)s")
+        else PlainFormatter(_PLAIN_FORMAT, datefmt=_TIME_FORMAT)
     )
     handler.set_name(_HANDLER_NAME)
     root = logging.getLogger()

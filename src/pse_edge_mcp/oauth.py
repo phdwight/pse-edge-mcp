@@ -39,6 +39,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import logging
 import secrets
 import uuid
 from collections.abc import Callable, Mapping
@@ -66,6 +67,8 @@ CLIENT_TYPE_MACHINE = "machine"
 # holds a long-lived secret already, so a refresh token would be a second credential of the
 # same power with none of the rotation benefit it exists to provide.
 MACHINE_ACCESS_TTL = timedelta(hours=1)
+
+logger = logging.getLogger(__name__)
 
 
 class OAuthError(Exception):
@@ -204,6 +207,10 @@ class OAuthService:
                     client_type=CLIENT_TYPE_DCR,
                 )
             )
+        logger.info(
+            "oauth: registered a dynamic client client_id=%s name=%r redirect_uris=%d",
+            client_id, client_name, len(redirect_uris),
+        )
         # Public client: no secret is issued, PKCE binds the code instead.
         return {
             "client_id": client_id,
@@ -244,6 +251,10 @@ class OAuthService:
                     service_user_id=service_user_id,
                 )
             )
+        logger.info(
+            "oauth: provisioned MACHINE client client_id=%s name=%r service_user=%s",
+            client_id, name, service_user_id,
+        )
         return {"client_id": client_id, "client_secret": secret}
 
     async def revoke_machine_client(self, client_id: str) -> bool:
@@ -271,6 +282,7 @@ class OAuthService:
                 .where(auth_tokens.c.client_id == client_id, auth_tokens.c.revoked_at.is_(None))
                 .values(revoked_at=now)
             )
+        logger.info("oauth: revoked machine client client_id=%s and all its tokens", client_id)
         return True
 
     async def list_machine_clients(self) -> list[dict[str, Any]]:
@@ -410,6 +422,7 @@ class OAuthService:
             row = (await conn.execute(stmt)).first()
         if row is None:
             raise OAuthError("invalid_request", "authorization flow expired or already used")
+        logger.info("oauth: consent granted, code issued flow_id=%s user=%s", flow_id, user_id)
         query = {"code": code}
         if row.state:
             query["state"] = row.state
@@ -469,6 +482,11 @@ class OAuthService:
         # A DCR client is told it may not use this grant; it is not told anything about
         # whether its secret would have matched, because it has no secret to match.
         if client is not None and client.client_type != CLIENT_TYPE_MACHINE:
+            logger.warning(
+                "oauth: DENIED client_credentials to a non-machine client client_id=%s "
+                "type=%s — only admin-provisioned machine clients may use this grant",
+                client_id, client.client_type,
+            )
             raise OAuthError(
                 "unauthorized_client",
                 "this client is not authorized for the client_credentials grant; "
@@ -489,6 +507,7 @@ class OAuthService:
             or client.revoked_at is not None
             or not client.service_user_id
         ):
+            logger.info("oauth: client authentication failed client_id=%s", client_id)
             raise OAuthError("invalid_client", "client authentication failed", status=401)
 
         scope = self._resolve_scope(form.get("scope"))
@@ -552,6 +571,11 @@ class OAuthService:
                     family_id=uuid.uuid4().hex,
                 )
             )
+        logger.info(
+            "oauth: issued a client_credentials access token client_id=%s user=%s scope=%s "
+            "expires_in=%ds",
+            client_id, user_id, scope, int(MACHINE_ACCESS_TTL.total_seconds()),
+        )
         return {
             "access_token": access,
             "token_type": "Bearer",
@@ -594,6 +618,11 @@ class OAuthService:
         if not _pkce_matches(verifier, row.code_challenge):
             raise OAuthError("invalid_grant", "PKCE verification failed")
 
+        logger.info(
+            "oauth: exchanged an authorization code client_id=%s user=%s",
+            row.client_id,
+            row.user_id,
+        )
         return await self._mint(row.user_id, row.client_id, row.scope or DEFAULT_SCOPE)
 
     async def _refresh(self, form: Mapping[str, str]) -> dict[str, Any]:
@@ -633,6 +662,12 @@ class OAuthService:
                         )
                         .values(revoked_at=now)
                     )
+            logger.warning(
+                "oauth: REFRESH TOKEN REUSE detected — revoking the whole family "
+                "client_id=%s family=%s user=%s. A rotated token was presented twice, "
+                "which means it leaked (RFC 9700 §4.14).",
+                row.client_id, row.family_id, row.user_id,
+            )
             raise OAuthError("invalid_grant", "refresh token reuse detected; session revoked")
         if row.expires_at <= now:
             raise OAuthError("invalid_grant", "refresh token expired")
