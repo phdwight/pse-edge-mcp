@@ -26,7 +26,7 @@
 #   POSTGRES_PASSWORD  something long and random
 #   ZEPTOMAIL_API_KEY  for verification emails
 # Strongly recommended:
-#   PSE_IMAGE_TAG      pin a version (e.g. 0.10.2) instead of tracking :latest
+#   PSE_IMAGE_TAG      pin a version (e.g. 0.11.0) instead of tracking :latest
 #
 # PSE_PUBLIC_URL is derived from PSE_DOMAIN below. Getting it wrong breaks passkeys in a way
 # that looks like a browser bug, because WebAuthn binds credentials to the origin.
@@ -112,6 +112,10 @@ services:
       # Auth is ON in production. Anonymous access to a public deployment is not a default
       # anyone should have to opt out of.
       PSE_AUTH_REQUIRED: "1"
+      # Accounts allowed to provision machine clients from the /account web page (comma-
+      # separated). Same authority as the pse-edge-admin CLI — the way to grant headless
+      # agent access on a NAS with no shell. Empty = web provisioning off, CLI only.
+      PSE_ADMIN_EMAILS: ${PSE_ADMIN_EMAILS:-}
       PSE_PUBLIC_URL: https://${PSE_DOMAIN:?set PSE_DOMAIN in .env}
       PSE_LOG_JSON: "1"
       ZEPTOMAIL_API_KEY: ${ZEPTOMAIL_API_KEY:-}

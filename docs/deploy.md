@@ -193,8 +193,14 @@ pse-edge-admin list-machine-clients
 pse-edge-admin revoke-machine-client <client_id>
 ```
 
-`create-machine-client` is the **only** thing that can authorize the `client_credentials`
-grant. `/oauth/register` is open to the internet, so a self-registered client is refused
+Machine clients can also be created and revoked **from the `/account` web page** by any
+account whose email is in `PSE_ADMIN_EMAILS` — the way to grant headless agent access on a
+NAS with no shell. The panel is invisible to every other account, and the routes behind it
+answer `404` to anyone not on the allowlist. It is the same authority as the CLI, so keep
+the allowlist to operators you trust.
+
+`create-machine-client` (CLI or web) is the **only** thing that can authorize the
+`client_credentials` grant. `/oauth/register` is open to the internet, so a self-registered client is refused
 that grant no matter what it declares about itself. `revoke-machine-client` clears the
 secret, revokes every token the client minted, and disables its service account in one
 step — the token revocation matters, or an already-issued bearer keeps working for up to
@@ -243,7 +249,7 @@ restarting in a loop.
 ## Stage 1 — LAN only
 
 ```bash
-PSE_IMAGE_TAG=0.10.2            # pin a version; see the warning below
+PSE_IMAGE_TAG=0.11.0            # pin a version; see the warning below
 POSTGRES_PASSWORD=<long random value>
 ```
 
@@ -258,7 +264,7 @@ is reachable at `http://<nas-ip>:8200`, and nothing is exposed to the internet.
 Check it:
 
 ```bash
-curl http://<nas-ip>:8200/health           # {"status": "ok", "version": "0.10.2", ...}
+curl http://<nas-ip>:8200/health           # {"status": "ok", "version": "0.11.0", ...}
 curl -X POST http://<nas-ip>:8200/mcp      # 401 — auth is on
 ```
 

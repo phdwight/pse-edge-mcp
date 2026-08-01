@@ -177,6 +177,13 @@ Unofficial — Edge has no public API; we speak to the portal's own internal end
   invariant is broken. WARNING is reserved for refresh-token reuse and a non-machine client
   denied `client_credentials`. A startup line states the resolved config (presence, never
   values).
+- **Machine clients are provisionable from `/account`, operator-gated (0.11.0).** The web
+  route creates/revokes machine clients for accounts whose email is in `PSE_ADMIN_EMAILS`,
+  so a NAS operator with no shell can grant headless agent access. **This must not widen who
+  may create machine clients:** the `client_credentials` gate depends on them being
+  admin-only, and the allowlist is that admin identity over HTTP. A non-admin sees no panel
+  and the routes answer 404; CSRF-guarded; secret shown once. `admin_emails` is never
+  populated from anything a user sets about themselves.
 - **`send_email` (0.9.0) — the first and only action tool.** Rules that must not regress:
   **the recipient is never an argument**, it comes from the validated bearer token via the
   ASGI scope (`server._caller`). Signup is open, so a `to` parameter would make this an

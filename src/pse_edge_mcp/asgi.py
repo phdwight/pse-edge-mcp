@@ -157,6 +157,7 @@ def create_app(settings: Settings | None = None) -> Any:
             email=email_sender,
             public_url=settings.public_url,
             engine=engine,
+            admin_emails=settings.admin_emails,
         )
     elif settings.public_url.startswith("https://"):
         # An https deployment with auth off is almost certainly a misconfiguration rather

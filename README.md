@@ -83,15 +83,17 @@ and the session dies.
 For a LangGraph app, the Anthropic Messages API MCP connector, or any agent that cannot
 open a browser. No redirect, no passkey, no consent screen — a client id and secret.
 
-**1. Provision** (admin, out of band — this is not reachable over HTTP):
+**1. Provision.** Two routes, same result:
 
-```bash
-pse-edge-admin create-machine-client --name langgraph-app
-# also runnable as: python -m pse_edge_mcp.admin create-machine-client --name langgraph-app
-```
+- **From the web** (needs no shell — the practical choice on a NAS): set `PSE_ADMIN_EMAILS`
+  to your account's email, sign in, and a **Machine clients** panel appears on `/account`
+  with create and revoke controls. Access is gated to that allowlist — a normal signup
+  never sees it.
+- **From the CLI:** `pse-edge-admin create-machine-client --name langgraph-app`.
 
-It prints `client_id` and `client_secret` **once**. Only the secret's SHA-256 is stored, so
-it cannot be recovered — only revoked and reissued.
+Either way `client_id` and `client_secret` are shown **once**. Only the secret's SHA-256 is
+stored, so it cannot be recovered — only revoked and reissued (from the same account page,
+or `pse-edge-admin revoke-machine-client <client_id>`).
 
 **2. Mint a token:**
 

@@ -5,6 +5,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/) · Versioning: [SemVer](
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-08-01
+
+### Added
+- **Machine clients can be created and revoked from the `/account` web page** — the way to grant a headless agent (LangGraph, a scheduled job) access on a deployment where you have no shell, which is the normal case on a NAS. A **Machine clients** panel with create/revoke controls appears for accounts whose email is in the new `PSE_ADMIN_EMAILS` allowlist; the `client_secret` is shown once, with the exact `/oauth/token` call to hand to the agent.
+  This deliberately does **not** widen who may create machine clients — that would break the security model the `client_credentials` grant rests on. It moves the existing admin authority from "has a shell" (`pse-edge-admin create-machine-client`) to "is a named operator" (`PSE_ADMIN_EMAILS`), and no further. A non-operator account never sees the panel, and the routes behind it answer `404` to anyone not on the allowlist — no signal the surface exists. Both controls are CSRF-guarded. Empty allowlist (the default) means the web path is off and the CLI is the only route, exactly as before.
+
 ## [0.10.2] - 2026-08-01
 
 ### Fixed

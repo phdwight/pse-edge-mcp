@@ -39,6 +39,7 @@ from pse_edge_mcp.server import build_server
 pytestmark = pytest.mark.postgres
 
 PUBLIC_URL = "http://localhost"  # rp_id 'localhost' is what the soft device signs for
+ADMIN_EMAIL = "operator@example.com"  # in PSE_ADMIN_EMAILS for the fixture
 REDIRECT = "http://127.0.0.1:33418/callback"
 MNL = ZoneInfo("Asia/Manila")
 
@@ -104,6 +105,9 @@ def stack(pg_engine):
         email=email,
         public_url=PUBLIC_URL,
         engine=pg_engine,
+        # One known operator, so the machine-client panel can be tested on both sides:
+        # this email sees it, any other does not.
+        admin_emails=frozenset({ADMIN_EMAIL}),
     )
     return surface, email, app
 
@@ -1019,3 +1023,113 @@ async def test_passkey_pages_explain_webauthn_failures_in_human_terms(stack):
         assert "built-in browser" in page, "name the actual cause, not the symptom"
         assert "single-use" in page, "or the user re-taps a dead link and loops"
         assert "PublicKeyCredential" in page, "no-WebAuthn contexts get told up front"
+
+
+# --- machine-client provisioning from the account page (operator only) --------
+#
+# The security property under test is the same one that guards the client_credentials
+# grant itself: machine clients are created only by an admin, never by any signed-up user.
+# Moving the mechanism from CLI to web must not widen who can do it.
+
+
+@pytest.mark.postgres
+async def test_a_normal_account_never_sees_the_machine_client_panel(stack):
+    async with serving(stack) as (http, email):
+        await enroll_passkey(http, email, "ordinary@example.com")
+        page = await http.get("/account")
+
+    assert page.status_code == 200
+    assert "Machine clients" not in page.text, "a non-operator must not even see the surface"
+
+
+@pytest.mark.postgres
+async def test_a_normal_account_cannot_reach_the_machine_client_routes(stack):
+    """Not just hidden — refused. And refused as 404, giving no hint the route exists."""
+    async with serving(stack) as (http, email):
+        await enroll_passkey(http, email, "sneaky@example.com")
+        page = await http.get("/account")
+        csrf = page.text.split("name=csrf_token value='")[1].split("'")[0]
+
+        created = await http.post(
+            "/account/machine-clients", data={"csrf_token": csrf, "name": "mine"}
+        )
+        revoked = await http.post(
+            "/account/machine-clients/revoke",
+            data={"csrf_token": csrf, "client_id": "mcp-anything"},
+        )
+
+    assert created.status_code == 404
+    assert revoked.status_code == 404
+
+
+@pytest.mark.postgres
+async def test_an_operator_creates_a_machine_client_and_sees_the_secret_once(stack, pg_engine):
+    async with serving(stack) as (http, email):
+        await enroll_passkey(http, email, ADMIN_EMAIL)
+        page = await http.get("/account")
+        assert "Machine clients" in page.text, "the operator sees the panel"
+        csrf = page.text.split("name=csrf_token value='")[1].split("'")[0]
+
+        created = await http.post(
+            "/account/machine-clients", data={"csrf_token": csrf, "name": "langgraph-app"}
+        )
+        assert created.status_code == 200
+        assert "client_secret" in created.text
+        secret = created.text.split("client_secret:</strong> <code>")[1].split("</code>")[0]
+        client_id = created.text.split("client_id:</strong> <code>")[1].split("</code>")[0]
+        assert secret and client_id.startswith("mcp-")
+
+        # The secret is shown once and never rendered again — the account page must not leak it.
+        back = await http.get("/account")
+        assert secret not in back.text
+        assert client_id in back.text, "but the client is listed so it can be revoked"
+
+    # And the minted secret actually authenticates the client_credentials grant.
+    minted = await _mint_via(pg_engine, client_id, secret)
+    assert minted is not None
+
+
+@pytest.mark.postgres
+async def test_an_operator_revokes_a_machine_client_from_the_page(stack, pg_engine):
+    async with serving(stack) as (http, email):
+        await enroll_passkey(http, email, ADMIN_EMAIL)
+        page = await http.get("/account")
+        csrf = page.text.split("name=csrf_token value='")[1].split("'")[0]
+        created = await http.post(
+            "/account/machine-clients", data={"csrf_token": csrf, "name": "revoke-me"}
+        )
+        client_id = created.text.split("client_id:</strong> <code>")[1].split("</code>")[0]
+
+        revoked = await http.post(
+            "/account/machine-clients/revoke",
+            data={"csrf_token": csrf, "client_id": client_id},
+        )
+        assert revoked.status_code == 302
+
+        after = await http.get("/account")
+        assert client_id not in after.text, "a revoked client drops off the list"
+
+
+@pytest.mark.postgres
+async def test_machine_client_creation_needs_a_valid_csrf_token(stack):
+    async with serving(stack) as (http, email):
+        await enroll_passkey(http, email, ADMIN_EMAIL)
+        forged = await http.post(
+            "/account/machine-clients", data={"csrf_token": "nope", "name": "x"}
+        )
+    assert forged.status_code == 403
+
+
+async def _mint_via(pg_engine, client_id: str, secret: str):
+    from pse_edge_mcp.oauth import OAuthService
+
+    try:
+        return await OAuthService(pg_engine).exchange(
+            {
+                "grant_type": "client_credentials",
+                "client_id": client_id,
+                "client_secret": secret,
+            }
+        )
+    except Exception:
+        return None
