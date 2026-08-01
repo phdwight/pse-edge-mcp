@@ -5,6 +5,24 @@ Format: [Keep a Changelog](https://keepachangelog.com/) · Versioning: [SemVer](
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-08-01
+
+### Added
+- **`client_credentials` grant, so headless agents can authenticate without a browser.** A LangGraph app or the Anthropic Messages API MCP connector can now exchange a client id and secret for a bearer token at `POST /oauth/token`. Client authentication accepts HTTP Basic and form-body credentials, secrets are compared in constant time against a SHA-256 stored at rest, `scope` is validated (`mcp` only — an unknown scope is refused rather than silently pruned), and the RFC 8707 `resource` parameter is checked against this server's canonical `/mcp` URL when supplied. Access tokens are minted into the same table with the same `kind='access'` and the same hashing as the authorization-code flow, so `/mcp` bearer validation needed **no change at all**. Expiry 1 hour, and no refresh token: the client already holds a long-lived secret, so a refresh token would be a second credential of equal power without the rotation benefit that justifies one.
+- **The grant is refused for every client that registered itself.** `/oauth/register` is open by design, so authorization to use `client_credentials` cannot be derived from anything a registrant supplies — not a `grant_types` array, not a requested auth method, not the presence of a secret. It is gated on an `oauth_clients.client_type` column that only the admin CLI writes; a DCR client that declares the grant and sends a secret still gets `unauthorized_client`. This is the single most important behaviour in the change and has its own test.
+- **`pse-edge-admin create-machine-client / revoke-machine-client / list-machine-clients`.** Provisioning generates a 48-byte secret, prints it once, and stores only its hash. Each machine client is backed by a service account under the reserved, non-routable `machine.invalid` domain — which is what lets the bearer path stay identical (token lookup joins `auth_tokens` to `users`) and gives machine clients quotas, usage accounting and disablement for free. Revoking clears the secret, revokes every token the client minted, and disables the service account in one step.
+- **`validate_symbol(symbol)`** — a cheap yes/no ticker check for agents, returning `valid`, the normalised uppercase symbol, and the company name and id when it exists. Unknown symbols answer `valid: false` with nulls rather than raising `SYMBOL_NOT_FOUND`: an agent checking a symbol is asking a question, and "no" is a good answer to it. Matching reuses `CompanyRepository`'s exact case-insensitive rule via a new `try_resolve`, so there is still only one implementation of "is this the right company" — two would eventually disagree, and the drifted one would answer about the wrong company rather than failing visibly.
+- Rate limiting on `POST /oauth/token`, counted per `client_id` **and** per client IP (20/minute each), answering `429` with `Retry-After`. Both keys are always counted, so an attacker cannot keep one counter cold by tripping the other.
+
+### Fixed
+- **Client secrets were not redacted from logs.** The redaction pattern used `\bsecret\b`, and `_` is a word character — so there is no word boundary before `secret` in `client_secret`, and the pattern never matched it. Anything that echoed a token-endpoint form would have logged the secret verbatim. The pattern now allows a prefix (catching `client_secret`, `api-key`, `x_auth_token`), and a `Basic <base64>` credential is redacted whole, since the secret is inside the blob.
+
+### Changed
+- `/.well-known/oauth-authorization-server` advertises `client_credentials` in `grant_types_supported` and `client_secret_basic` / `client_secret_post` in `token_endpoint_auth_methods_supported`. Advertising is not authorization — the machine-only gate still applies to every caller.
+
+### Added
+- **`docs/walkthrough.md` — a developer/architect walkthrough**, plus a rendered PDF. Written against the code rather than from memory: the request lifecycle from client to PSE Edge, the freeze decision table, the four-layer architecture and why repositories depend on Protocols, all 11 tools with their arguments and owning repositories, the response envelope and error codes, the OAuth/passkey flow, extension recipes, and a symptom-to-cause debugging table carrying the failures production found (421 Host header, empty logs meaning a start-time failure, ZeptoMail's exact-domain rule). `scripts/render_doc_pdf.py` regenerates the PDF with any Chromium — no pandoc or LaTeX toolchain, and diagrams are ASCII so they survive every renderer and stay readable on GitHub.
+
 ## [0.7.3] - 2026-07-31
 
 ### Fixed

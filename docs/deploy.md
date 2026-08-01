@@ -138,7 +138,19 @@ pse-edge-admin revoke-token <token>
 pse-edge-admin disable-user someone@example.com            # keeps the account, kills access
 pse-edge-admin delete-user someone@example.com --yes       # erases everything (§6a)
 pse-edge-admin purge-usage --retention-days 90
+
+# headless agents (client_credentials) — see the README for the full flow
+pse-edge-admin create-machine-client --name langgraph-app   # secret shown ONCE
+pse-edge-admin list-machine-clients
+pse-edge-admin revoke-machine-client <client_id>
 ```
+
+`create-machine-client` is the **only** thing that can authorize the `client_credentials`
+grant. `/oauth/register` is open to the internet, so a self-registered client is refused
+that grant no matter what it declares about itself. `revoke-machine-client` clears the
+secret, revokes every token the client minted, and disables its service account in one
+step — the token revocation matters, or an already-issued bearer keeps working for up to
+an hour.
 
 Revocation takes effect within `PSE_TOKEN_CACHE_TTL` (60 s default). That TTL is the
 revocation-latency budget and nothing else — lowering it costs database reads, raising it
@@ -183,7 +195,7 @@ restarting in a loop.
 ## Stage 1 — LAN only
 
 ```bash
-PSE_IMAGE_TAG=0.7.3            # pin a version; see the warning below
+PSE_IMAGE_TAG=0.8.0            # pin a version; see the warning below
 POSTGRES_PASSWORD=<long random value>
 ```
 
@@ -198,7 +210,7 @@ is reachable at `http://<nas-ip>:8200`, and nothing is exposed to the internet.
 Check it:
 
 ```bash
-curl http://<nas-ip>:8200/health           # {"status": "ok", "version": "0.7.3", ...}
+curl http://<nas-ip>:8200/health           # {"status": "ok", "version": "0.8.0", ...}
 curl -X POST http://<nas-ip>:8200/mcp      # 401 — auth is on
 ```
 
@@ -220,7 +232,7 @@ curl -X POST http://<nas-ip>:8200/mcp \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
 ```
 
-Eleven tools back means the stack is sound: image, migrations, database, auth and the MCP
+Twelve tools back means the stack is sound: image, migrations, database, auth and the MCP
 transport are all working. What stage 1 *cannot* tell you is whether passkeys, OAuth and
 verification email work — all three need the real https origin, so they are stage 2's
 checklist, not something you have deferred by accident.

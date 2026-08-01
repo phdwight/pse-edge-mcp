@@ -19,11 +19,12 @@ readable file is a page an operator can audit.
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, unquote_plus
 
 from sqlalchemy.ext.asyncio import AsyncEngine
 
@@ -42,6 +43,7 @@ from .passkeys import (
     WebSession,
     constant_time_equals,
 )
+from .ratelimit import FixedWindowLimiter
 
 Handler = Callable[[dict[str, Any], bytes], Awaitable[tuple[int, dict[str, str], bytes]]]
 
@@ -109,6 +111,47 @@ def _session_cookie(sid: str, secure: bool) -> str:
     return f"{SESSION_COOKIE}={sid}; Path=/; HttpOnly; SameSite=Lax{flags}"
 
 
+def _peer_ip(scope: dict[str, Any]) -> str | None:
+    """The caller's address, honouring X-Forwarded-For.
+
+    Behind Caddy or a Cloudflare Tunnel every request arrives from the proxy, so the
+    connection address alone would lump the whole internet into one rate-limit bucket. The
+    LEFTMOST XFF entry is the original client. It is client-controlled and therefore
+    spoofable — which is acceptable for this use: the per-client_id key still holds when the
+    IP key is evaded, and the alternative (one shared bucket for all traffic) is strictly
+    worse, since anyone could then lock out every other caller.
+    """
+    forwarded = _header(scope, b"x-forwarded-for")
+    if forwarded:
+        first = forwarded.split(",")[0].strip()
+        if first:
+            return first[:64]
+    client = scope.get("client")
+    return str(client[0]) if client else None
+
+
+def _basic_auth_client_id(authorization: str | None) -> str | None:
+    """The client_id from a Basic header, for rate-limit keying only.
+
+    Parsed leniently and never used for authentication — `oauth._client_auth` does that
+    properly. This only needs a stable string to count against.
+    """
+    if not authorization or not authorization.lower().startswith("basic "):
+        return None
+    try:
+        raw = base64.b64decode(authorization[6:].strip(), validate=True).decode("utf-8")
+    except (ValueError, UnicodeDecodeError):
+        return None
+    return unquote_plus(raw.partition(":")[0])[:200] or None
+
+
+def _header(scope: dict[str, Any], name: bytes) -> str | None:
+    for key, value in scope.get("headers", []):
+        if key.lower() == name:
+            return str(value.decode("latin-1"))
+    return None
+
+
 def _cookies(scope: dict[str, Any]) -> dict[str, str]:
     raw = ""
     for name, value in scope.get("headers", []):
@@ -140,6 +183,7 @@ class AuthApp:
         email: EmailSender,
         public_url: str,
         engine: AsyncEngine,
+        token_limiter: FixedWindowLimiter | None = None,
     ) -> None:
         self._engine = engine
         self._app = app
@@ -148,6 +192,10 @@ class AuthApp:
         self._email = email
         self._public = public_url.rstrip("/")
         self._secure = self._public.startswith("https://")
+        # 20 token requests per client_id and per IP per minute. Generous for a legitimate
+        # agent (a machine token lasts an hour, so one request per hour is the norm) and
+        # far below what online guessing would need against a 48-byte secret.
+        self._token_limiter = token_limiter or FixedWindowLimiter(limit=20, window_sec=60)
 
     async def __call__(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
         if scope["type"] != "http":
@@ -162,7 +210,14 @@ class AuthApp:
         try:
             status, headers, payload = await handler(scope, body)
         except OAuthError as exc:
-            status, headers, payload = _json_response(exc.payload(), exc.status)
+            # RFC 6749 §5.2: a 401 from the token endpoint MUST carry WWW-Authenticate, so
+            # a client can tell "your credentials were rejected" from a generic failure.
+            extra = (
+                {"www-authenticate": 'Basic realm="oauth", charset="UTF-8"'}
+                if exc.status == 401
+                else None
+            )
+            status, headers, payload = _json_response(exc.payload(), exc.status, extra)
         except PasskeyError as exc:
             status, headers, payload = _json_response({"error": str(exc)}, 400)
         await _send(send, status, headers, payload)
@@ -249,9 +304,23 @@ class AuthApp:
                 "token_endpoint": f"{self._public}/oauth/token",
                 "registration_endpoint": f"{self._public}/oauth/register",
                 "response_types_supported": ["code"],
-                "grant_types_supported": ["authorization_code", "refresh_token"],
+                # client_credentials is advertised because a machine client must be able to
+                # discover it. Advertising is not authorization: the grant is refused for
+                # every client except those an admin provisioned as `machine`, so a DCR
+                # client reading this list and trying it still gets `unauthorized_client`.
+                "grant_types_supported": [
+                    "authorization_code",
+                    "refresh_token",
+                    "client_credentials",
+                ],
                 "code_challenge_methods_supported": ["S256"],  # S256 only, never plain
-                "token_endpoint_auth_methods_supported": ["none"],  # public clients
+                # "none" for the public DCR clients that use PKCE instead of a secret; the
+                # two secret-based methods for provisioned machine clients.
+                "token_endpoint_auth_methods_supported": [
+                    "none",
+                    "client_secret_basic",
+                    "client_secret_post",
+                ],
                 "scopes_supported": ["mcp"],
             }
         )
@@ -305,7 +374,25 @@ class AuthApp:
 
     async def _token(self, scope: dict[str, Any], body: bytes) -> tuple[int, dict[str, str], bytes]:
         form = {k: v[0] for k, v in parse_qs(body.decode("utf-8")).items()}
-        result = await self._oauth.exchange(form)
+        # Rate-limited before the secret is even looked at: this endpoint is the one place
+        # a long-lived client secret can be guessed online, and the limiter is what turns
+        # that from "keep trying" into "come back later". Keyed on client_id AND the peer
+        # address, so one noisy client cannot exhaust another's budget and a single host
+        # cannot spray attempts across many client ids.
+        client_id = form.get("client_id") or _basic_auth_client_id(
+            _header(scope, b"authorization")
+        )
+        retry_after = self._token_limiter.check(client_id, _peer_ip(scope))
+        if retry_after is not None:
+            return _json_response(
+                {
+                    "error": "slow_down",
+                    "error_description": "too many token requests; retry shortly",
+                },
+                429,
+                {"retry-after": str(retry_after), "cache-control": "no-store"},
+            )
+        result = await self._oauth.exchange(form, authorization=_header(scope, b"authorization"))
         # RFC 6749 §5.1: token responses must not be cached anywhere.
         return _json_response(result, headers={"cache-control": "no-store", "pragma": "no-cache"})
 

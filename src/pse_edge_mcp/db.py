@@ -196,10 +196,24 @@ oauth_clients = Table(
     metadata,
     Column("client_id", String, primary_key=True),
     Column("client_name", String, nullable=False),
-    # Public clients only (RFC 7591 registration, PKCE mandatory): no secret column at
-    # all, so there is no secret to leak or to be tempted to check.
     Column("redirect_uris", JSONB, nullable=False),
     Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+    # --- machine clients (client_credentials) --------------------------------
+    #
+    # `/oauth/register` is open by design, so the right to use client_credentials CANNOT
+    # be something a registrant declares about itself. It is this column, and only an
+    # admin running the CLI can set it to 'machine'. DCR always writes 'dcr'.
+    Column("client_type", String, nullable=False, server_default="dcr"),
+    # SHA-256 of the client secret. Null for DCR clients, which are public and have no
+    # secret at all — so there is nothing to leak, and nothing to be tempted to compare.
+    Column("client_secret_hash", String),
+    # Machine clients authenticate as a *user* underneath, because that is what makes the
+    # bearer path identical for both grants: the token lookup joins auth_tokens to users,
+    # so a machine token with no user would need a special case in the middleware. It also
+    # means quotas, usage accounting and disablement work on machine clients for free.
+    # No FK, matching the oauth_flows.user_id precedent, so erasure order stays simple.
+    Column("service_user_id", String, index=True),
+    Column("revoked_at", DateTime(timezone=True)),
 )
 
 oauth_flows = Table(

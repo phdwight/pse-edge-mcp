@@ -235,6 +235,7 @@ async def test_tool_surface_is_stable():
     surface = {t.name: sorted((t.input_schema or {}).get("required", [])) for t in tools}
     assert surface == {
         "search_companies": ["query"],
+        "validate_symbol": ["symbol"],
         "get_stock_quote": ["symbol"],
         "get_price_history": ["symbol"],
         "search_disclosures": [],
@@ -249,3 +250,72 @@ async def test_tool_surface_is_stable():
     # Descriptions come from the docstrings and are how the model picks a tool.
     assert all(t.description for t in tools)
     assert "EOD-frozen" in dict((t.name, t.description) for t in tools)["get_stock_quote"]
+
+
+# --- validate_symbol ---------------------------------------------------------
+
+
+AUTOCOMPLETE_AREIT = [
+    {"cmpyId": "700", "cmpyNm": "AREIT, Inc.", "symbol": "AREIT", "etfYn": "0"},
+    {"cmpyId": "701", "cmpyNm": "Areit Holdings Corp.", "symbol": "AREITH", "etfYn": "0"},
+]
+
+
+@respx.mock
+async def test_validate_symbol_confirms_a_known_ticker():
+    respx.get(f"{BASE}/autoComplete/searchCompanyNameSymbol.ax").mock(
+        return_value=httpx.Response(200, json=AUTOCOMPLETE_AREIT)
+    )
+    result = await call(build_test_server(), "validate_symbol", symbol="AREIT")
+
+    assert result["data"] == {
+        "valid": True,
+        "symbol": "AREIT",
+        "company_name": "AREIT, Inc.",
+        "company_id": "700",
+    }
+    # The freshness contract applies here like everywhere else.
+    assert result["meta"]["data_policy"] == "EOD-frozen"
+    assert result["meta"]["as_of"] and result["meta"]["valid_until"]
+
+
+@respx.mock
+async def test_validate_symbol_is_case_insensitive_and_normalises_the_echo():
+    respx.get(f"{BASE}/autoComplete/searchCompanyNameSymbol.ax").mock(
+        return_value=httpx.Response(200, json=AUTOCOMPLETE_AREIT)
+    )
+    result = await call(build_test_server(), "validate_symbol", symbol="  areit ")
+
+    assert result["data"]["valid"] is True
+    assert result["data"]["symbol"] == "AREIT", "echo the normalised form, not the input"
+    assert result["data"]["company_id"] == "700"
+
+
+@respx.mock
+async def test_validate_symbol_answers_false_rather_than_erroring():
+    """An agent checking a symbol is asking a question; "no" is a good answer to it."""
+    respx.get(f"{BASE}/autoComplete/searchCompanyNameSymbol.ax").mock(
+        return_value=httpx.Response(200, json=[])
+    )
+    result = await call(build_test_server(), "validate_symbol", symbol="NOTATICKER")
+
+    assert result["data"] == {
+        "valid": False,
+        "symbol": "NOTATICKER",
+        "company_name": None,
+        "company_id": None,
+    }
+    assert "error" not in result
+
+
+@respx.mock
+async def test_validate_symbol_does_not_accept_a_prefix():
+    """Autocomplete is a prefix search, so AREIT would match a query for ARE. Treating
+    that as valid would greenlight a symbol that no other tool can then resolve."""
+    respx.get(f"{BASE}/autoComplete/searchCompanyNameSymbol.ax").mock(
+        return_value=httpx.Response(200, json=AUTOCOMPLETE_AREIT)
+    )
+    result = await call(build_test_server(), "validate_symbol", symbol="ARE")
+
+    assert result["data"]["valid"] is False
+    assert result["data"]["company_id"] is None
