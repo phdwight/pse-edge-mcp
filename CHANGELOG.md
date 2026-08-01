@@ -5,6 +5,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/) · Versioning: [SemVer](
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-08-01
+
 ### Added
 - **INFO logging on the critical paths**, so an operator can answer the questions that matter without a debugger. Every **upstream fetch to PSE Edge** is logged with its cache key and duration — that is the line this whole server exists to keep rare, and one appearing during market hours means the freeze invariant is broken. Also logged: refusing an uncached read while the market is open, bearer-token rejections and quota refusals (refusals only — a successful call is already an access-log line, and repeating it would double the hot path to say nothing new), the OAuth lifecycle (dynamic registration, machine-client provisioning and revocation, consent, code exchange, token issuance), and email delivery. Two get **WARNING** because they mean something is wrong rather than merely happening: refresh-token reuse (a rotated token presented twice has leaked) and a non-machine client being denied `client_credentials`.
 - **A startup line stating the resolved configuration** — version, public URL, auth on/off, storage and archive backend, transport mode, email sender, market hours. "What config is this actually running?" is the first question in any incident, and answering it from env vars and compose files is guesswork. No secrets: only whether each is present.

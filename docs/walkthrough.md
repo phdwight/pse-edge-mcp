@@ -13,7 +13,7 @@ understand it, debug it, or extend it.
 | `docs/deploy.md` | Running it in production |
 | `CLAUDE.md` | The short form of the invariants, kept next to the code |
 
-Version described: **0.8.0**. 34 modules, ~7,000 lines of source, ~5,100 lines of tests.
+Version described: **0.8.1**. 34 modules, ~7,000 lines of source, ~5,100 lines of tests.
 
 ---
 
@@ -67,7 +67,7 @@ Local development:
 
 ```bash
 uv sync --all-extras          # Python 3.14, uv for everything
-uv run pytest                 # 266 tests, no network access
+uv run pytest                 # 271 tests, no network access
 uv run ruff check .           # line length 100
 uv run mypy src               # strict
 ```
