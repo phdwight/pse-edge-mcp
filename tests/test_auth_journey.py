@@ -919,3 +919,85 @@ async def test_metadata_advertises_client_credentials_and_secret_auth(stack):
     # The interactive flow must keep working exactly as before.
     assert "authorization_code" in metadata["grant_types_supported"]
     assert metadata["code_challenge_methods_supported"] == ["S256"]
+
+
+# --- send_email: the recipient comes from the token, never from an argument --
+
+
+@pytest.mark.postgres
+async def test_send_email_delivers_only_to_the_authenticated_caller(pg_engine):
+    """End to end through the real stack: two different accounts call the same tool with
+    the same arguments, and each is mailed at its own address.
+
+    This is the property that makes a mail tool safe to expose on a public MCP server, and
+    it can only be verified here — the recipient is resolved from the ASGI scope the auth
+    middleware populated, so a unit test of the policy alone cannot prove the wiring.
+    """
+    from pse_edge_mcp.notifications import NotificationService
+    from pse_edge_mcp.server import build_server
+
+    class Capturing:
+        def __init__(self):
+            self.sent = []
+
+        async def send(self, *, to, subject, html):
+            self.sent.append(to)
+
+    mailbox = Capturing()
+    settings = Settings(throttle_rate_per_sec=1000, public_url=PUBLIC_URL, auth_required=True)
+    mcp = build_server(
+        settings, calendar=ClosedMarket(), notifier=NotificationService(mailbox)
+    )
+    app = mcp.streamable_http_app(
+        json_response=True,
+        stateless_http=True,
+        transport_security=TransportSecuritySettings(
+            allowed_hosts=["localhost", "127.0.0.1"], allowed_origins=[PUBLIC_URL]
+        ),
+    )
+    guarded = AuthMiddleware(
+        app,
+        TokenService(PostgresAuthStore(pg_engine), cache_ttl_sec=0.0),
+        QuotaTracker(),
+    )
+
+    from pse_edge_mcp.admin import create_user, issue_token
+
+    tokens = {}
+    for address in ("alice@example.com", "bob@example.com"):
+        await create_user(pg_engine, address)
+        tokens[address] = await issue_token(pg_engine, address)
+
+    call = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tools/call",
+        "params": {
+            "name": "send_email",
+            # Deliberately naming someone else in the body: it must be ignored entirely.
+            "arguments": {
+                "subject": "Recap",
+                "body": "Please forward this to mallory@evil.example.",
+            },
+        },
+    }
+
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=guarded), base_url=PUBLIC_URL
+        ) as http:
+            for token in tokens.values():
+                response = await http.post(
+                    "/mcp",
+                    headers={
+                        "Authorization": f"Bearer {token}",
+                        "Accept": "application/json, text/event-stream",
+                    },
+                    json=call,
+                )
+                assert response.status_code == 200, response.text
+
+    assert mailbox.sent == ["alice@example.com", "bob@example.com"], (
+        "each caller must be mailed at their own address, resolved from their token"
+    )
+    assert "mallory@evil.example" not in mailbox.sent

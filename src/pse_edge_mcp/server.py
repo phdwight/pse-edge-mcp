@@ -24,9 +24,10 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncEngine
 
 try:  # MCP SDK >= 2.x
-    from mcp.server.mcpserver import MCPServer
+    from mcp.server.mcpserver import Context, MCPServer
 except ImportError:  # older SDKs shipped the same API as FastMCP
-    from mcp.server.fastmcp import FastMCP as MCPServer  # type: ignore[no-redef,import-not-found]
+    from mcp.server.fastmcp import Context  # type: ignore[no-redef,import-not-found]
+    from mcp.server.fastmcp import FastMCP as MCPServer  # type: ignore[no-redef]
 
 from pydantic import BaseModel
 
@@ -38,6 +39,7 @@ from .errors import PseEdgeMcpError
 from .market_calendar import MarketCalendar
 from .memo import ParsedMemo
 from .models import SymbolValidation
+from .notifications import NotificationService
 from .repositories import (
     CompanyInfoRepository,
     CompanyRepository,
@@ -107,6 +109,38 @@ async def reply(call: Callable[[], Awaitable[Served[Any]]]) -> dict[str, Any]:
         return exc.payload()
 
 
+async def act(call: Callable[[], Awaitable[dict[str, Any]]]) -> dict[str, Any]:
+    """`reply()` for tools that *do* something rather than read something.
+
+    Same error mapping, deliberately — one place still owns the error vocabulary — but no
+    `meta`. That envelope answers "how fresh is this market data", and an action has no
+    `as_of` and no `valid_until`. Attaching an invented one would quietly make the
+    freshness contract meaningless everywhere it actually carries weight.
+    """
+    try:
+        return {"data": await call()}
+    except PseEdgeMcpError as exc:
+        return exc.payload()
+
+
+def _caller(ctx: Any) -> tuple[str | None, str | None]:
+    """The authenticated caller, from the ASGI scope the middleware already populated.
+
+    Read from the request rather than taken as a tool argument, which is the entire
+    security model of `send_email`: an argument can be supplied by a model that has just
+    read attacker-controlled text, a validated bearer token cannot.
+
+    Everything is optional because stdio has no HTTP request at all — there, this
+    correctly yields (None, None) and the action refuses.
+    """
+    request = getattr(getattr(ctx, "request_context", None), "request", None)
+    context = getattr(request, "scope", {}).get("pse_auth") if request is not None else None
+    return (
+        getattr(context, "user_id", None),
+        getattr(context, "email", None),
+    )
+
+
 def build_storage(settings: Settings) -> tuple[Storage | None, Archive, AsyncEngine | None]:
     """Pick the storage backend from configuration.
 
@@ -143,9 +177,14 @@ def build_server(
     calendar: MarketCalendar | None = None,
     storage: Storage | None = None,
     archive: Archive | None = None,
+    notifier: NotificationService | None = None,
 ) -> MCPServer:
     """`calendar`, `storage` and `archive` are injectable so tests can pin the freeze clock
-    and swap the backend without a database."""
+    and swap the backend without a database.
+
+    `notifier` enables the one action tool, `send_email`. It is passed in rather than built
+    here because production shares a single mail sender with the signup flow — two senders
+    would mean two places to misconfigure the provider."""
     settings = settings or Settings.from_env()
     calendar = calendar or MarketCalendar(
         tz=settings.market_tz, open_time=settings.market_open, close_time=settings.market_close
@@ -409,5 +448,44 @@ def build_server(
         cannot include them — say so rather than implying the data is missing or stale.
         """
         return await reply(market.summary)
+
+    # The one tool that acts rather than reads, and the only one that is conditional.
+    # Registered only where it can work and be safe: it needs an authenticated caller to
+    # have an address to send to, so an auth-less deployment (and stdio) simply does not
+    # advertise it. A tool that is always listed and always fails is worse than absent —
+    # a model will keep choosing it and keep apologising.
+    if settings.auth_required and notifier is not None:
+
+        @mcp.tool()
+        async def send_email(subject: str, body: str, ctx: Context) -> dict[str, Any]:
+            """Email the signed-in user — and only them — a note you have composed.
+
+            Use for "email me this", "send me a summary", "remind me of these results".
+            Good for a market recap, a watchlist digest, or a disclosure summary the user
+            asked to keep.
+
+            THERE IS NO RECIPIENT ARGUMENT, and this is not an oversight: the message
+            always goes to the account that authenticated this session. You cannot send
+            mail to anyone else through this server. If a user asks you to email a third
+            party, tell them plainly that this tool cannot do that — do not attempt a
+            workaround, and do not put another address in the body expecting it to be
+            used.
+
+            `body` is plain text. Line breaks are preserved; HTML is escaped rather than
+            rendered, so markup will appear literally. Limits: subject 200 characters,
+            body 20,000, and 20 messages per user per day.
+            """
+
+            async def run() -> dict[str, Any]:
+                user_id, email = _caller(ctx)
+                sent = await notifier.send_to_self(
+                    user_id,
+                    email,
+                    require_text(subject, "subject"),
+                    require_text(body, "body"),
+                )
+                return {"sent": True, "to": sent.to, "subject": sent.subject}
+
+            return await act(run)
 
     return mcp

@@ -177,6 +177,16 @@ Unofficial — Edge has no public API; we speak to the portal's own internal end
   invariant is broken. WARNING is reserved for refresh-token reuse and a non-machine client
   denied `client_credentials`. A startup line states the resolved config (presence, never
   values).
+- **`send_email` (0.9.0) — the first and only action tool.** Rules that must not regress:
+  **the recipient is never an argument**, it comes from the validated bearer token via the
+  ASGI scope (`server._caller`). Signup is open, so a `to` parameter would make this an
+  internet-facing mail relay, and disclosure text from PSE Edge is untrusted content a model
+  reads — an address argument is an exfiltration path for prompt injection. Also: registered
+  **only when `auth_required`** (no verified address otherwise, and an always-failing tool
+  makes a model keep choosing it); body is **escaped, never rendered as HTML**; caps 200 /
+  20,000 chars and 20 per user per day; policy lives in `notifications.py`, not `server.py`.
+  Action tools return `{"data": …}` with **no `meta`** via `act()` — `meta` is a *freshness*
+  contract and an action has no `as_of`.
 - **Phase 5 remaining:** flip auth to default-on at deploy.
 - **Phase 6 (done):** `compose.prod.yaml` + `Caddyfile` + `docs/deploy.md`. Rules:
   the HTTP stack is composed **once** in `asgi.py` — `__main__` and production must not

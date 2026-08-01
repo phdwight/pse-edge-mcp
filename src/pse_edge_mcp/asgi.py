@@ -89,7 +89,20 @@ def create_app(settings: Settings | None = None) -> Any:
     calendar = MarketCalendar(
         tz=settings.market_tz, open_time=settings.market_open, close_time=settings.market_close
     )
-    mcp = build_server(settings, calendar=calendar, storage=storage, archive=archive)
+    # One mail sender, shared by signup and the send_email tool. Two would be two places to
+    # misconfigure the provider, and the sender address is already the setting most easily
+    # got wrong (it must be on a domain the provider has verified).
+    from .email import build_email_sender
+    from .notifications import NotificationService
+
+    email_sender = build_email_sender(settings.zeptomail_api_key, settings.email_from)
+    mcp = build_server(
+        settings,
+        calendar=calendar,
+        storage=storage,
+        archive=archive,
+        notifier=NotificationService(email_sender),
+    )
     inner = mcp.streamable_http_app(
         json_response=not settings.sse_responses,
         stateless_http=not settings.stateful_sessions,
@@ -109,7 +122,6 @@ def create_app(settings: Settings | None = None) -> Any:
         from .auth_app import AuthApp
         from .auth_middleware import AuthMiddleware
         from .auth_store import PostgresAuthStore
-        from .email import build_email_sender
         from .oauth import OAuthService
         from .passkeys import PasskeyService
         from .usage import UsageRecorder
@@ -142,7 +154,7 @@ def create_app(settings: Settings | None = None) -> Any:
                 resource=f"{settings.public_url}/mcp",
             ),
             passkeys=PasskeyService(engine, public_url=settings.public_url),
-            email=build_email_sender(settings.zeptomail_api_key, settings.email_from),
+            email=email_sender,
             public_url=settings.public_url,
             engine=engine,
         )
