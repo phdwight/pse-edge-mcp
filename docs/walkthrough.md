@@ -68,7 +68,7 @@ Local development:
 
 ```bash
 uv sync --all-extras          # Python 3.14, uv for everything
-uv run pytest                 # 294 tests, no network access
+uv run pytest                 # 302 tests, no network access
 uv run ruff check .           # line length 100
 uv run mypy src               # strict
 ```
