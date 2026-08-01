@@ -9,3 +9,10 @@ __pycache__/
 .ruff_cache/
 dist/
 *.egg-info/
+
+# Operator-local files that must never enter public history. ugreen.yaml is the
+# operator's personal compose fork and carries a tunnel token inline; a blanket
+# `git add -A` once swept it into pushed commits, forcing a token rotation and a
+# history rewrite of develop. Never commit these.
+ugreen.yaml
+.DS_Store

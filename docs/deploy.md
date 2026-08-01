@@ -243,7 +243,7 @@ restarting in a loop.
 ## Stage 1 — LAN only
 
 ```bash
-PSE_IMAGE_TAG=0.10.0            # pin a version; see the warning below
+PSE_IMAGE_TAG=0.10.1            # pin a version; see the warning below
 POSTGRES_PASSWORD=<long random value>
 ```
 
@@ -258,7 +258,7 @@ is reachable at `http://<nas-ip>:8200`, and nothing is exposed to the internet.
 Check it:
 
 ```bash
-curl http://<nas-ip>:8200/health           # {"status": "ok", "version": "0.10.0", ...}
+curl http://<nas-ip>:8200/health           # {"status": "ok", "version": "0.10.1", ...}
 curl -X POST http://<nas-ip>:8200/mcp      # 401 — auth is on
 ```
 
@@ -377,26 +377,58 @@ protects you from mistakes, not from disk failure.
 
 ## Moving the database onto a NAS share
 
-By default the database lives in a Docker-managed volume, which is durable but invisible
-from the NAS file manager and awkward to snapshot. Point it at a real directory instead:
+By default the database lives in a Docker-managed volume: durable, but invisible from the
+NAS file manager and awkward to snapshot. Create two **empty, sibling** directories through
+the NAS UI, then:
 
 ```bash
-mkdir -p /volume1/docker/pse-edge-mcp/pgdata /volume1/docker/pse-edge-mcp/backups
+PSE_PGDATA_PATH=/volume1/docker/pse-mcp/pgdata
+PSE_BACKUP_PATH=/volume1/docker/pse-mcp/backups
 ```
-```bash
-PSE_PGDATA_PATH=/volume1/docker/pse-edge-mcp/pgdata
-PSE_BACKUP_PATH=/volume1/docker/pse-edge-mcp/backups
+No extra file and no extra flags — the same `up -d` as before.
+
+### Why no `chown` is needed
+
+**Postgres runs as uid 999.** A bind mount hands the container the host directory's own
+ownership, which on a NAS is root — so Postgres cannot write, and the container crash-loops
+on:
+
+```
+mkdir: cannot create directory '/var/lib/postgresql': Permission denied
 ```
 
-Compose decides bind-vs-named from the shape of the value, so unset means exactly the old
-behaviour and no second file is needed. Create the directories first: Docker will not, and
-the mount error it raises does not mention the missing path.
+The usual advice is `chown -R 999:999 <path>`, which is no help at all when the NAS UI gives
+you no shell — and a NAS UI is exactly what this file is for. So a small `pgdata-owner`
+container repairs ownership as root before the database starts, and then **proves it**: it
+attempts a write as uid 999, exactly as postgres will run.
+
+```
+pgdata-owner: running as uid=0, fs=ext4
+pgdata-owner: contents of the mounted directory:   ← the ls -la you have no shell to run
+...
+pgdata-owner: verified uid 999 can write — OK
+```
+
+The repair is unconditional (a top directory can stat as uid 999 while the honest answer is
+no), idempotent on every boot, and it repairs a directory that already crash-looped — so
+recovery is just a restart.
+
+If the probe still fails, the container exits 1 and **the db never starts**: one FATAL line
+naming the cause replaces an unbounded crash loop. On a NAS the usual culprit is **folder
+ACLs layered over classic permissions** — `chown` succeeds, `stat` shows uid 999, and writes
+are still denied. Fix it in the NAS file manager: grant read/write on the `PSE_PGDATA_PATH`
+folder to all users, or recreate it in a plain, non-shared location. No shell needed.
+
+`PSE_BACKUP_PATH` never needed it: that container runs as root.
+
+**Keep the backups directory outside the database directory.** Nesting it inside `pgdata`
+puts your dumps in the tree Postgres manages, so a corrupted or wiped data directory takes
+the backups with it — and a backup stored inside the thing it protects is not a backup.
 
 **`PSE_PGDATA_PATH` must be on the NAS's own internal volume.** Never an SMB/NFS mount or
-external USB — Postgres needs POSIX locking and honest `fsync`, which network filesystems
-do not provide reliably, and it will either refuse to start or corrupt quietly. Dumps are
-just files, so `PSE_BACKUP_PATH` on a network share is fine, and is in fact better: a dump
-beside the database it came from protects you from mistakes but not from disk failure.
+external USB: Postgres needs POSIX locking and honest `fsync`, which network filesystems do
+not provide reliably, and it will refuse to start or corrupt quietly rather than say so.
+Dumps are just files, so a network share is fine — and better — for `PSE_BACKUP_PATH`.
 
 ### ⚠ On an existing deployment, migrate — do not just switch
 
@@ -410,8 +442,8 @@ docker compose -f compose.nas.yaml exec db \
   pg_dump -U pse -d pse_edge --format=custom --file=/backups/premove.dump
 docker compose -f compose.nas.yaml exec db ls -lh /backups/premove.dump
 
-# 2. Copy that dump somewhere outside the old volume, set the two variables, then
-docker compose -f compose.nas.yaml up -d --force-recreate
+# 2. Copy that dump somewhere outside the old volume, set the variables, then
+docker compose -f compose.nas.yaml -f compose.storage.yaml up -d --force-recreate
 
 # 3. Restore into the new, genuinely empty database
 docker compose -f compose.nas.yaml exec db \
