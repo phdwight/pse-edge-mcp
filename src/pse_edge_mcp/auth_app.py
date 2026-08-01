@@ -619,15 +619,22 @@ class AuthApp:
         try:
             created = await create_machine_client(self._engine, name or "machine-client")
         except AdminError as exc:
-            return _html(f"<h1>Could not create client</h1><div class='msg err'>{exc}</div>", 400)
+            return _html(
+                "<h1>Could not create client</h1>"
+                f"<div class='msg err'>{html.escape(str(exc))}</div>",
+                400,
+            )
         logger.info(
             "machine client %s provisioned from the account page by an operator",
             created["client_id"],
         )
         # The secret is rendered here and never again — only its hash is stored. Deliberately
         # the whole response, so it cannot be missed, with the token endpoint spelled out so
-        # the operator can hand the two values straight to an agent.
-        return _html(_machine_client_created_page(created, self._public))
+        # the operator can hand the two values straight to an agent. no-store for the same
+        # reason the token endpoint sets it (RFC 6749 §5.1): a cached copy of this page IS
+        # the credential.
+        status, headers, page = _html(_machine_client_created_page(created, self._public))
+        return status, {**headers, "cache-control": "no-store"}, page
 
     async def _revoke_machine_client(
         self, scope: dict[str, Any], body: bytes
@@ -642,7 +649,12 @@ class AuthApp:
         try:
             await revoke_machine_client(self._engine, client_id)
         except AdminError as exc:
-            return _html(f"<h1>Could not revoke</h1><div class='msg err'>{exc}</div>", 400)
+            # exc can echo the submitted client_id; escape it. CSRF already blocks a
+            # cross-site POST from reaching here, so this is defence in depth, not the gate.
+            return _html(
+                f"<h1>Could not revoke</h1><div class='msg err'>{html.escape(str(exc))}</div>",
+                400,
+            )
         logger.info("machine client %s revoked from the account page", client_id)
         return _redirect(f"{self._public}/account")
 

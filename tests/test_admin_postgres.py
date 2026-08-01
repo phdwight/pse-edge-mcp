@@ -98,3 +98,32 @@ async def test_list_users_reports_state_and_active_token_counts(pg_engine):
     assert rows["frank@example.com"]["disabled_at"] is None
     assert rows["grace@example.com"]["disabled_at"] is not None
     assert rows["grace@example.com"]["active_tokens"] == 0
+
+
+async def test_deleting_a_machine_service_account_is_refused(pg_engine):
+    """Proved broken before fixed: erasing the service user behind a machine client leaves
+    `oauth_clients.service_user_id` dangling — the client keeps its secret and is NOT
+    revoked, so its next token mint hits the auth_tokens FK and the token endpoint 500s.
+    The erasure safety net cannot catch this: it walks columns named `user_id`, and
+    `service_user_id` dodges it by name. So the CLI refuses, pointing at the operation
+    that does the whole job: revoke-machine-client revokes the client, its outstanding
+    tokens, AND disables the account, atomically.
+    """
+    from pse_edge_mcp.admin import create_machine_client, delete_user_by_email
+
+    created = await create_machine_client(pg_engine, "erase-refusal-app")
+
+    with pytest.raises(AdminError, match="revoke-machine-client"):
+        await delete_user_by_email(pg_engine, created["service_user"])
+
+    # And the client still works: the refusal protected it.
+    from pse_edge_mcp.oauth import OAuthService
+
+    minted = await OAuthService(pg_engine).exchange(
+        {
+            "grant_type": "client_credentials",
+            "client_id": created["client_id"],
+            "client_secret": created["client_secret"],
+        }
+    )
+    assert minted["token_type"] == "Bearer"

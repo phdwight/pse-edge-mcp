@@ -142,6 +142,41 @@ async def list_machine_clients(engine: AsyncEngine) -> list[dict[str, Any]]:
     return await OAuthService(engine).list_machine_clients()
 
 
+async def delete_user_by_email(engine: AsyncEngine, email: str) -> dict[str, int]:
+    """Erase an account by email — refusing machine-client service accounts.
+
+    Erasing the service user behind a machine client would leave
+    `oauth_clients.service_user_id` dangling: the client keeps its secret, is NOT revoked,
+    and its next token mint violates the auth_tokens FK — a 500 at the token endpoint.
+    The schema-walking erasure test cannot catch that, because it keys on columns named
+    `user_id` and `service_user_id` dodges it by name. `revoke-machine-client` is the
+    operation that does the whole job (client + tokens + account), so point there.
+    """
+    email = _normalise_email(email)
+    async with engine.connect() as conn:
+        target = (await conn.execute(select(users.c.id).where(users.c.email == email))).first()
+    if target is None:
+        raise AdminError(f"no user with email {email}")
+
+    from .db import oauth_clients
+
+    async with engine.connect() as conn:
+        owning = (
+            await conn.execute(
+                select(oauth_clients.c.client_id).where(
+                    oauth_clients.c.service_user_id == target.id
+                )
+            )
+        ).first()
+    if owning is not None:
+        raise AdminError(
+            f"{email} is the service account of machine client {owning.client_id!r} — "
+            f"use `revoke-machine-client {owning.client_id}` instead, which revokes the "
+            "client, its tokens, and disables this account in one step"
+        )
+    return await erase(engine, target.id)
+
+
 async def issue_token(
     engine: AsyncEngine,
     email: str,
@@ -355,15 +390,9 @@ async def _dispatch(engine: AsyncEngine, args: argparse.Namespace) -> None:
     elif args.command == "delete-user":
         # The same erasure path the user's own account page uses — one implementation, so
         # the operator route cannot drift from the promise made on the privacy page.
-        async with engine.connect() as conn:
-            target = (
-                await conn.execute(select(users.c.id).where(users.c.email == args.email.lower()))
-            ).first()
-        if target is None:
-            raise AdminError(f"no user with email {args.email}")
         if not args.yes:
             raise AdminError("refusing to erase without --yes (this cannot be undone)")
-        erased = await erase(engine, target.id)
+        erased = await delete_user_by_email(engine, args.email)
         print(f"erased {args.email}: " + ", ".join(f"{k}={v}" for k, v in erased.items()))
     elif args.command == "purge-usage":
         from datetime import date as _date

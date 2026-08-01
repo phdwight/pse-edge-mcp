@@ -1075,6 +1075,9 @@ async def test_an_operator_creates_a_machine_client_and_sees_the_secret_once(sta
         )
         assert created.status_code == 200
         assert "client_secret" in created.text
+        assert created.headers["cache-control"] == "no-store", (
+            "a cached copy of this page IS the credential"
+        )
         secret = created.text.split("client_secret:</strong> <code>")[1].split("</code>")[0]
         client_id = created.text.split("client_id:</strong> <code>")[1].split("</code>")[0]
         assert secret and client_id.startswith("mcp-")
