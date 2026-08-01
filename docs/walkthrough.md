@@ -13,7 +13,7 @@ understand it, debug it, or extend it.
 | `docs/deploy.md` | Running it in production |
 | `CLAUDE.md` | The short form of the invariants, kept next to the code |
 
-Version described: **0.10.0**. 36 modules, ~7,900 lines of source, ~5,700 lines of tests.
+Version described: **0.11.0**. 36 modules, ~8,100 lines of source, ~6,150 lines of tests.
 
 ---
 
@@ -68,7 +68,7 @@ Local development:
 
 ```bash
 uv sync --all-extras          # Python 3.14, uv for everything
-uv run pytest                 # 302 tests, no network access
+uv run pytest                 # 309 tests, no network access
 uv run ruff check .           # line length 100
 uv run mypy src               # strict
 ```
@@ -231,13 +231,13 @@ mocking at all**.
 
 | Module | Lines | Responsibility |
 |---|---:|---|
-| `auth_app.py` | 756 | Browser- and client-facing routes: OAuth, signup, login, account, privacy |
+| `auth_app.py` | 930 | Browser- and client-facing routes: OAuth, signup, login, account, privacy |
 | `parsers.py` | 752 | HTML/JSON → dicts. The most PSE-specific code in the repo |
 | `oauth.py` | 721 | OAuth 2.1 server: DCR, PKCE, code exchange, refresh rotation, client_credentials |
 | `repositories.py` | 526 | The domain layer — five repositories |
-| `admin.py` | 431 | `pse-edge-admin` CLI, including machine-client provisioning |
+| `admin.py` | 460 | `pse-edge-admin` CLI, including machine-client provisioning |
 | `passkeys.py` | 424 | WebAuthn ceremonies and browser sessions |
-| `server.py` | 413 | The 12 tool definitions |
+| `server.py` | 491 | The 13 tool definitions |
 | `models.py` | 332 | 24 Pydantic models |
 | `client.py` | 268 | HTTP to PSE Edge; both request dialects |
 | `db.py` | 255 | SQLAlchemy tables, engine, schema check |
@@ -428,20 +428,31 @@ exchanges a client id and secret for a bearer token directly:
         ──POST /mcp + Bearer ─────▶ tools
 ```
 
-Provisioned out of band; this is deliberately not reachable over HTTP:
+Provisioned by an **operator**, never by a registrant. Two routes, one authority:
 
 ```bash
 pse-edge-admin create-machine-client --name langgraph-app   # secret shown ONCE
 pse-edge-admin revoke-machine-client <client_id>
 ```
 
+Since **0.11.0** the same two operations also appear on the `/account` page, for accounts whose
+email is listed in `PSE_ADMIN_EMAILS`. That route exists because the deployment this server was
+built for is a NAS, where there is no shell to run the CLI in. It moved the authority from *has
+a shell* to *is a named operator* — it did not widen it. A non-operator account sees no panel,
+and both routes answer `404` rather than `403`, so there is no signal the surface exists.
+
 **The security property to understand before touching any of this:** `/oauth/register` is
 open to the internet, so the right to use `client_credentials` must not be derivable from
 anything a registrant supplies — not a `grant_types` array it declares, not a requested auth
 method, not the presence of a secret. It is gated on `oauth_clients.client_type == 'machine'`,
-a column **only the admin CLI writes**. A DCR client that registers, declares the grant and
-sends a secret still gets `unauthorized_client`. If that check ever becomes conditional on
-request data, anyone on the internet can mint tokens.
+a column **only operator-authorized paths write** — the CLI and the `PSE_ADMIN_EMAILS`-gated
+web route, never DCR. A client that registers, declares the grant and sends a secret still gets
+`unauthorized_client`. If that check ever becomes conditional on request data, or if
+`admin_emails` is ever populated from something a user can set about themselves, anyone on the
+internet can mint tokens.
+
+A worked client for the app-on-top-of-this case — one machine client, its token lifecycle, and
+the agent instructions to go with it — is in [`examples/langgraph_client.py`](../examples/langgraph_client.py).
 
 Two more decisions worth knowing before changing them:
 

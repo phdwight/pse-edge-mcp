@@ -219,7 +219,7 @@ Scalability decisions made **now**, paid for **later**:
      **real migration** rather than `metadata.create_all`, so migration drift is caught here
      instead of in production. They skip cleanly without Docker.
   Deferred to a later phase: README install polish, PyPI publish.
-- **Phase 5 — Accounts & OAuth 2.1 (staged; stage 1 in progress):**
+- **Phase 5 — Accounts & OAuth 2.1 (delivered — all three stages):**
   Stage 1 — enforcement first: users + hashed-token schema, bearer validation with the
   revocation-budget cache, in-process quotas, admin CLI for manual provisioning
   (create-user / issue-token / revoke / set-limits). Opt-in via `PSE_AUTH_REQUIRED=1`
