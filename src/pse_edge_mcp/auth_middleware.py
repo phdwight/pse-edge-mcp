@@ -19,10 +19,13 @@ Refusals are HTTP-level, not MCP tool errors, because they happen before MCP dis
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any
 
 from .auth import QuotaTracker, TokenService
 from .usage import NullUsageRecorder, UsageRecorder
+
+logger = logging.getLogger(__name__)
 
 _EXEMPT_PREFIXES = ("/.well-known/",)
 
@@ -67,6 +70,10 @@ class AuthMiddleware:
 
         context = await self._tokens.authenticate(token)
         if context is None:
+            # Refusals only — a successful call is already one access-log line, and
+            # logging those again would double the volume of the hot path to say nothing
+            # new. A rejection is the rare event, and the one an operator is looking for.
+            logger.info("auth: rejected a bearer token path=%s", scope.get("path"))
             await _refuse(
                 send,
                 401,
@@ -81,6 +88,11 @@ class AuthMiddleware:
         decision = self._quotas.check(context)
         self._usage.record(context.user_id, rejected=not decision.allowed)
         if not decision.allowed:
+            logger.info(
+                "quota: refused user=%s retry_after=%ds",
+                context.user_id,
+                decision.retry_after_seconds,
+            )
             await _refuse(
                 send,
                 429,

@@ -11,6 +11,8 @@ Decision table for every read (see market_calendar for boundary semantics):
 
 from __future__ import annotations
 
+import logging
+import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any, Protocol
@@ -20,6 +22,8 @@ from .errors import MarketOpenNoCacheError
 from .market_calendar import MarketCalendar
 from .models import Meta
 from .ratelimit import SingleFlight
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -81,6 +85,11 @@ class FreezeService:
                 # Expired during a session: it is still the latest EOD truth.
                 return self._served(entry, from_cache=True, stale=True)
             close = self.calendar.next_close(now)
+            logger.info(
+                "freeze: refusing an uncached read while the market is open key=%s retry_after=%s",
+                key,
+                close.isoformat(),
+            )
             raise MarketOpenNoCacheError(
                 "No cached data for this query and the market is open — upstream "
                 f"fetches are frozen until the market closes at "
@@ -89,9 +98,19 @@ class FreezeService:
             )
 
         async def _fetch_and_store() -> CacheEntry:
+            # THE line to watch. This server exists to keep upstream requests rare, so
+            # every one is worth a log entry: they should be a trickle after each close,
+            # and one appearing during market hours means the freeze invariant is broken.
+            started = time.perf_counter()
+            logger.info("upstream: fetching from PSE Edge key=%s", key)
             value = await fetch()
             fresh = CacheEntry(value=value, fetched_at=self.calendar.now())
             await self.storage.set(key, fresh)
+            logger.info(
+                "upstream: fetched and cached key=%s duration_ms=%d",
+                key,
+                int((time.perf_counter() - started) * 1000),
+            )
             return fresh
 
         # Concurrent misses for the same key collapse into one upstream request.

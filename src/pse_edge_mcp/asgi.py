@@ -154,6 +154,25 @@ def create_app(settings: Settings | None = None) -> Any:
             "every caller is anonymous and unlimited"
         )
 
+    # One line stating what this process actually resolved to. The first question about any
+    # incident is "what config is it running?", and answering it from env vars and compose
+    # files is guesswork — every value here is the value in force, after all the defaults
+    # and overrides. No secrets: only whether each one is present.
+    logger.info(
+        "starting pse-edge-mcp %s public_url=%s auth=%s storage=%s archive=%s "
+        "transport=%s email=%s market=%s-%s %s",
+        _version(),
+        settings.public_url,
+        "on" if settings.auth_required else "OFF",
+        "postgres" if engine is not None else "in-memory",
+        "postgres" if engine is not None else "none",
+        "stateful" if settings.stateful_sessions else "stateless",
+        "zeptomail" if settings.zeptomail_api_key else "console",
+        settings.market_open.strftime("%H:%M"),
+        settings.market_close.strftime("%H:%M"),
+        settings.market_tz,
+    )
+
     app = HealthApp(app, engine=engine, version=_version())
     return _with_lifespan(app, inner, usage)
 
