@@ -1,6 +1,6 @@
 [project]
 name = "pse-edge-mcp"
-version = "0.10.1"
+version = "0.10.2"
 description = "MCP server exposing Philippine Stock Exchange (PSE Edge) data — quotes, price history, disclosures, and more"
 readme = "README.md"
 license = "MIT"

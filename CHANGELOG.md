@@ -5,6 +5,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/) · Versioning: [SemVer](
 
 ## [Unreleased]
 
+## [0.10.2] - 2026-08-01
+
 ### Fixed
 - **WebAuthn failures on the enroll/login pages now explain themselves.** Seen in production on day one: a user tapped the verification link, landed in their email app's built-in browser, and passkey creation failed with the platform's own wording — "The request is not allowed by the user agent or the platform…" — which names neither the cause nor the way out. `NotAllowedError` is now special-cased to say what is actually happening (in-app browsers usually cannot create passkeys; open the site in Safari or Chrome and sign up again — links are single-use; a dismissed fingerprint prompt just needs the button pressed again), and a context with no WebAuthn at all is told so up front, with the button disabled, instead of being allowed to fail mysteriously.
 
