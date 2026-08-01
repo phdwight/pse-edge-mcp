@@ -157,6 +157,26 @@ Unofficial — Edge has no public API; we speak to the portal's own internal end
   `metadata.tables` — a new user-keyed table fails that test rather than silently retaining
   data; the admin `delete-user` reuses the user's own erasure path so the two cannot drift.
   `usage.py` must stay SQLAlchemy-free; the sink lives in `usage_postgres.py`.
+- **Phase 5 stage 3 (done, 0.8.0):** `client_credentials` for headless agents. **The gate is
+  the whole feature:** `/oauth/register` is open, so authorization for this grant must never
+  be derivable from anything a registrant supplies (a self-declared `grant_types`, a
+  requested auth method, a presented secret). It is `oauth_clients.client_type == 'machine'`,
+  written **only** by `pse-edge-admin create-machine-client`; a DCR client gets
+  `unauthorized_client` regardless of what it sends, and the type check runs *before* any
+  secret comparison so the endpoint is not an oracle. Other rules: a machine client is backed
+  by a **service user** (`*@machine.invalid`) so the bearer path stays identical for both
+  grants and quotas/usage/disablement come for free; secrets are 48 bytes, stored SHA-256
+  only, compared in constant time; **no refresh token** for this grant; unknown client and
+  wrong secret answer identically; `POST /oauth/token` is rate-limited per client_id *and*
+  per IP (`FixedWindowLimiter`). Metadata advertises the grant — advertising is not
+  authorization.
+- **Logging (0.8.1):** both formatters timestamp every line (ISO-8601 + offset) and both
+  redact. INFO on the critical paths, **refusals only** — a success is already an access-log
+  line. `upstream: fetching from PSE Edge` is the line that matters: it should be a trickle
+  after each close and **absent during market hours**, where its presence means the freeze
+  invariant is broken. WARNING is reserved for refresh-token reuse and a non-machine client
+  denied `client_credentials`. A startup line states the resolved config (presence, never
+  values).
 - **Phase 5 remaining:** flip auth to default-on at deploy.
 - **Phase 6 (done):** `compose.prod.yaml` + `Caddyfile` + `docs/deploy.md`. Rules:
   the HTTP stack is composed **once** in `asgi.py` — `__main__` and production must not

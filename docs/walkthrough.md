@@ -13,7 +13,7 @@ understand it, debug it, or extend it.
 | `docs/deploy.md` | Running it in production |
 | `CLAUDE.md` | The short form of the invariants, kept next to the code |
 
-Version described: **0.8.1**. 34 modules, ~7,000 lines of source, ~5,100 lines of tests.
+Version described: **0.8.1**. 34 modules, ~7,300 lines of source, ~5,250 lines of tests.
 
 ---
 
@@ -225,17 +225,17 @@ mocking at all**.
 
 | Module | Lines | Responsibility |
 |---|---:|---|
+| `auth_app.py` | 756 | Browser- and client-facing routes: OAuth, signup, login, account, privacy |
 | `parsers.py` | 752 | HTML/JSON → dicts. The most PSE-specific code in the repo |
-| `auth_app.py` | 669 | Browser-facing routes: OAuth, signup, login, account, privacy |
-| `repositories.py` | 511 | The domain layer — five repositories |
+| `oauth.py` | 721 | OAuth 2.1 server: DCR, PKCE, code exchange, refresh rotation, client_credentials |
+| `repositories.py` | 526 | The domain layer — five repositories |
+| `admin.py` | 431 | `pse-edge-admin` CLI, including machine-client provisioning |
 | `passkeys.py` | 424 | WebAuthn ceremonies and browser sessions |
-| `oauth.py` | 417 | OAuth 2.1 server: DCR, PKCE, code exchange, refresh rotation |
-| `server.py` | 412 | The 12 tool definitions |
-| `admin.py` | 323 | `pse-edge-admin` CLI |
-| `models.py` | 318 | 23 Pydantic models |
+| `server.py` | 413 | The 12 tool definitions |
+| `models.py` | 332 | 24 Pydantic models |
 | `client.py` | 268 | HTTP to PSE Edge; both request dialects |
-| `db.py` | 241 | SQLAlchemy tables, engine, schema check |
-| `asgi.py` | 217 | The single composition point |
+| `db.py` | 255 | SQLAlchemy tables, engine, schema check |
+| `asgi.py` | 240 | The single composition point, and the DNS-rebinding allowlist |
 | `auth.py` | 190 | `TokenService`, `QuotaTracker`. Must stay SQLAlchemy-free |
 
 ---
@@ -375,19 +375,60 @@ passwords exist anywhere in the system.
 - `auth.py` must stay **SQLAlchemy-free** so the lean install path works; Postgres code
   lives in `auth_store.py` and imports lazily.
 
-### Headless and agentic access
+### Headless and agentic access — `client_credentials`
 
-There is **no `client_credentials` grant** — both supported grants are browser-bound. A
-headless agent therefore uses an operator-issued token:
+A LangGraph app or the Anthropic Messages API MCP connector cannot open a browser, so it
+exchanges a client id and secret for a bearer token directly:
+
+```
+  agent ──POST /oauth/token───────▶ grant_type=client_credentials
+        │                           HTTP Basic, or client_id/client_secret in the body
+        ◀── access_token (1 h), token_type=Bearer, scope=mcp
+        │                           ↑ NO refresh token
+        ──POST /mcp + Bearer ─────▶ tools
+```
+
+Provisioned out of band; this is deliberately not reachable over HTTP:
+
+```bash
+pse-edge-admin create-machine-client --name langgraph-app   # secret shown ONCE
+pse-edge-admin revoke-machine-client <client_id>
+```
+
+**The security property to understand before touching any of this:** `/oauth/register` is
+open to the internet, so the right to use `client_credentials` must not be derivable from
+anything a registrant supplies — not a `grant_types` array it declares, not a requested auth
+method, not the presence of a secret. It is gated on `oauth_clients.client_type == 'machine'`,
+a column **only the admin CLI writes**. A DCR client that registers, declares the grant and
+sends a secret still gets `unauthorized_client`. If that check ever becomes conditional on
+request data, anyone on the internet can mint tokens.
+
+Two more decisions worth knowing before changing them:
+
+- **A machine client is backed by a service user** (under the reserved, non-routable
+  `machine.invalid` domain). That is what keeps the bearer path identical for both grants:
+  `/mcp` validates by joining `auth_tokens` to `users`, so a token with no user behind it
+  would need a special case in the middleware — and a second path through authentication is
+  where a revocation check goes missing later. It also gives machine clients quotas, usage
+  accounting and disablement for free.
+- **No refresh token for this grant.** The client already holds a long-lived secret it can
+  present again; a refresh token would be a second credential of equal power without the
+  rotation benefit that justifies one.
+
+`POST /oauth/token` is rate-limited (`FixedWindowLimiter` in `ratelimit.py`, 20/minute per
+`client_id` **and** per IP), because it is the one endpoint where a long-lived credential can
+be attacked online. Both keys are always counted, so tripping one cannot keep the other cold.
+
+The older route still exists for clients that speak neither OAuth nor this grant, and is the
+only option on a plain-HTTP deployment since browsers restrict WebAuthn to secure contexts:
 
 ```bash
 pse-edge-admin create-user agent@example.com
 pse-edge-admin issue-token agent@example.com --note nightly-job   # shown once
 ```
 
-Give each agent its **own user**: quotas are per user, so a runaway job throttles itself,
-and revocation is surgical. This is also the only route on a plain-HTTP deployment, since
-browsers restrict WebAuthn to secure contexts.
+Either way, give each agent **its own client or user**: quotas are per user, so a runaway job
+throttles itself, and revocation is surgical.
 
 ### Privacy surface
 
@@ -421,6 +462,12 @@ Postgres is **optional**. `DATABASE_URL` unset gives an in-memory cache and a `N
 Tables: `cache_entries`, `eod_bars`, `disclosures`, `users`, `auth_tokens`,
 `webauthn_credentials`, `web_sessions`, `oauth_clients`, `oauth_flows`,
 `email_verifications`, `usage_events`.
+
+Two columns carry more weight than their size suggests. `oauth_clients.client_type`
+(`'dcr'` | `'machine'`) is the entire authorization boundary for `client_credentials` —
+see §8. `oauth_clients.service_user_id` links a machine client to the account its tokens
+authenticate as, deliberately without a foreign key, matching the `oauth_flows.user_id`
+precedent so erasure ordering stays simple.
 
 **The archive is opportunistic.** Nothing crawls. It fills only from fetches a user already
 caused, so it deepens over time at zero additional cost to PSE Edge — which matters because
@@ -495,6 +542,10 @@ protected. **Merging to `main` publishes a multi-arch image**, and a merge that 
 | App container stopped, **empty log** | A start-time failure, not a crash — a crash always leaves logs. Usually a taken host port, or a bind-mount whose source does not exist |
 | NAS UI shows the project as **"Error"** | `migrate` is a one-shot that exits 0. That is success. Judge health by `curl /health` |
 | `ImportError` on sqlalchemy in a lean install | Something imported Postgres code eagerly. It must be lazy, inside `build_storage()` |
+| `POST /oauth/token` → **`unauthorized_client`** | The client is not a machine client. Only `pse-edge-admin create-machine-client` can authorize this grant — a self-registered client never can, by design |
+| `POST /oauth/token` → **`invalid_client`** (401) | Wrong secret, unknown client, or a revoked one. All answered identically on purpose, so the endpoint is not an oracle for which client ids exist |
+| `POST /oauth/token` → **`slow_down`** (429) | Rate limit: 20/minute per client_id and per IP. Honour `Retry-After` |
+| A machine client's token stops working early | `revoke-machine-client` revokes outstanding tokens too, and revocation lands within `PSE_TOKEN_CACHE_TTL` (60 s) |
 
 ### Useful commands
 
@@ -506,10 +557,31 @@ curl -sS -o /dev/null -w '%{http_code}\n' -X POST https://<host>/mcp   # expect 
 
 docker compose -f compose.nas.yaml logs -f app
 docker compose -f compose.nas.yaml exec app pse-edge-admin list-users
+docker compose -f compose.nas.yaml exec app pse-edge-admin list-machine-clients
 ```
 
-`PSE_LOG_JSON=1` gives one JSON object per log line. Secrets are redacted as a backstop —
-nothing in this codebase logs a credential deliberately.
+### Reading the log
+
+Every line is timestamped (ISO-8601 with an offset) in both formats; `PSE_LOG_JSON=1` gives
+one JSON object per line for a log shipper. Secrets are redacted in both formats as a
+backstop — nothing here logs a credential deliberately.
+
+The lines worth knowing by sight:
+
+| Line | Means |
+|---|---|
+| `starting pse-edge-mcp <version> …` | the config the process **actually** resolved to. First thing to read in an incident |
+| `upstream: fetching from PSE Edge key=…` | a real request left for PSE Edge |
+| `upstream: fetched and cached key=… duration_ms=…` | it came back, and how slow it was |
+| `freeze: refusing an uncached read while the market is open` | the policy working, not a fault |
+| `auth: rejected a bearer token` / `quota: refused` | refusals only — successes are the access log |
+| `oauth: issued a client_credentials access token` | a machine client minted a token |
+| **`oauth: REFRESH TOKEN REUSE detected`** (WARNING) | a rotated token was presented twice, so it **leaked** |
+| **`oauth: DENIED client_credentials to a non-machine client`** (WARNING) | a misconfigured integration, or someone probing the gate |
+
+> **`upstream: fetching` during market hours means the freeze invariant is broken.** Those
+> lines should be a trickle after each 15:00 Manila close and absent between 09:30 and 15:00
+> on a trading day. That is the single most useful thing to grep this log for.
 
 ### Two PSE Edge dialects
 

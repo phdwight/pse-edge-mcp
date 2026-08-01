@@ -5,6 +5,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/) · Versioning: [SemVer](
 
 ## [Unreleased]
 
+### Changed
+- **Docs re-synced against 0.8.x.** The walkthrough had drifted in a way worth naming: it stated *"There is no `client_credentials` grant — both supported grants are browser-bound"*, which stopped being true one release earlier. A doc that is merely incomplete costs a reader time; one that is confidently wrong sends them somewhere else. It now documents the grant, the machine-only gate and why it cannot depend on request data, the service-user design, the token-endpoint rate limiter, the new `oauth_clients` columns, four new token-endpoint entries in the symptom table, and a "reading the log" table naming each critical-path line. Module line counts, model and test counts refreshed against the code.
+- `CLAUDE.md` gains Phase 5 stage 3 and the logging rules; `docs/plan.md` §6 records the `client_credentials` decision and the three that support it (service user, no refresh token, rate-limited token endpoint), since it is the file that explains *why*.
+
 ## [0.8.1] - 2026-08-01
 
 ### Added
