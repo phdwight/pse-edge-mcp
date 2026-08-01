@@ -5,6 +5,13 @@ Format: [Keep a Changelog](https://keepachangelog.com/) · Versioning: [SemVer](
 
 ## [Unreleased]
 
+## [0.10.1] - 2026-08-01
+
+### Fixed
+- **`PSE_PGDATA_PATH` as a plain bind mount crash-looped Postgres**, reported from a real NAS deployment: `mkdir: cannot create directory '/var/lib/postgresql': Permission denied`, repeating forever. Postgres runs as **uid 999**, and a plain bind hands the container the host directory's own ownership — root, on a NAS — so it cannot write. The standard advice is `chown -R 999:999`, which is no help at all when the NAS UI gives you no shell, and that is exactly the situation this feature exists for.
+  The database path now goes through a new **`compose.storage.yaml`** overlay, which declares it as a *named volume backed by a bind*. Docker then applies the image's own ownership to the empty mount point, so it comes up correctly with **no shell involved**. Measured both ways: a plain bind yields `root:root 755`, the overlay yields `postgres:postgres 1777`. `PSE_BACKUP_PATH` keeps working as a direct bind, because that container runs as root.
+  Documented alongside it: keep the backups directory **outside** the database directory. Nesting it inside `pgdata` puts the dumps in the tree Postgres manages, so a wiped data directory takes the backups with it — a backup stored inside the thing it protects is not a backup.
+
 ## [0.10.0] - 2026-08-01
 
 ### Added

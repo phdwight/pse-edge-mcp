@@ -243,7 +243,7 @@ restarting in a loop.
 ## Stage 1 — LAN only
 
 ```bash
-PSE_IMAGE_TAG=0.10.0            # pin a version; see the warning below
+PSE_IMAGE_TAG=0.10.1            # pin a version; see the warning below
 POSTGRES_PASSWORD=<long random value>
 ```
 
@@ -258,7 +258,7 @@ is reachable at `http://<nas-ip>:8200`, and nothing is exposed to the internet.
 Check it:
 
 ```bash
-curl http://<nas-ip>:8200/health           # {"status": "ok", "version": "0.10.0", ...}
+curl http://<nas-ip>:8200/health           # {"status": "ok", "version": "0.10.1", ...}
 curl -X POST http://<nas-ip>:8200/mcp      # 401 — auth is on
 ```
 
@@ -377,26 +377,54 @@ protects you from mistakes, not from disk failure.
 
 ## Moving the database onto a NAS share
 
-By default the database lives in a Docker-managed volume, which is durable but invisible
-from the NAS file manager and awkward to snapshot. Point it at a real directory instead:
+By default the database lives in a Docker-managed volume: durable, but invisible from the
+NAS file manager and awkward to snapshot. Create two **empty, sibling** directories through
+the NAS UI, then:
 
 ```bash
-mkdir -p /volume1/docker/pse-edge-mcp/pgdata /volume1/docker/pse-edge-mcp/backups
+PSE_PGDATA_PATH=/volume1/docker/pse-mcp/pgdata
+PSE_BACKUP_PATH=/volume1/docker/pse-mcp/backups
 ```
 ```bash
-PSE_PGDATA_PATH=/volume1/docker/pse-edge-mcp/pgdata
-PSE_BACKUP_PATH=/volume1/docker/pse-edge-mcp/backups
+docker compose -f compose.nas.yaml -f compose.storage.yaml up -d
+# with a tunnel:
+docker compose -f compose.nas.yaml -f compose.tunnel.yaml -f compose.storage.yaml up -d
 ```
 
-Compose decides bind-vs-named from the shape of the value, so unset means exactly the old
-behaviour and no second file is needed. Create the directories first: Docker will not, and
-the mount error it raises does not mention the missing path.
+### Why the database needs the overlay and the backups do not
+
+**Postgres runs as uid 999.** A plain bind mount hands the container the host directory's
+own ownership, which on a NAS is root — so Postgres cannot write, and the container
+crash-loops on:
+
+```
+mkdir: cannot create directory '/var/lib/postgresql': Permission denied
+```
+
+The usual advice is `chown -R 999:999 <path>`, which is no help at all if your NAS UI gives
+you no shell. `compose.storage.yaml` declares the path as a **named volume backed by a
+bind** instead, and Docker then applies the image's own ownership to the empty mount point.
+Measured both ways:
+
+| mount form | mount point ends up as | Postgres can write? |
+|---|---|---|
+| plain bind `path:/var/lib/postgresql` | `root:root 755` | no |
+| `compose.storage.yaml` (driver_opts) | `postgres:postgres 1777` | **yes** |
+
+That ownership is applied only while the directory is **empty**, which is why the overlay
+insists on a fresh one.
+
+`PSE_BACKUP_PATH` needs none of this: the backup container runs as root, so a plain bind is
+fine, and it works without the overlay.
+
+**Keep the backups directory outside the database directory.** Nesting it inside `pgdata`
+puts your dumps in the tree Postgres manages, so a corrupted or wiped data directory takes
+the backups with it — and a backup stored inside the thing it protects is not a backup.
 
 **`PSE_PGDATA_PATH` must be on the NAS's own internal volume.** Never an SMB/NFS mount or
-external USB — Postgres needs POSIX locking and honest `fsync`, which network filesystems
-do not provide reliably, and it will either refuse to start or corrupt quietly. Dumps are
-just files, so `PSE_BACKUP_PATH` on a network share is fine, and is in fact better: a dump
-beside the database it came from protects you from mistakes but not from disk failure.
+external USB: Postgres needs POSIX locking and honest `fsync`, which network filesystems do
+not provide reliably, and it will refuse to start or corrupt quietly rather than say so.
+Dumps are just files, so a network share is fine — and better — for `PSE_BACKUP_PATH`.
 
 ### ⚠ On an existing deployment, migrate — do not just switch
 
@@ -410,8 +438,8 @@ docker compose -f compose.nas.yaml exec db \
   pg_dump -U pse -d pse_edge --format=custom --file=/backups/premove.dump
 docker compose -f compose.nas.yaml exec db ls -lh /backups/premove.dump
 
-# 2. Copy that dump somewhere outside the old volume, set the two variables, then
-docker compose -f compose.nas.yaml up -d --force-recreate
+# 2. Copy that dump somewhere outside the old volume, set the variables, then
+docker compose -f compose.nas.yaml -f compose.storage.yaml up -d --force-recreate
 
 # 3. Restore into the new, genuinely empty database
 docker compose -f compose.nas.yaml exec db \

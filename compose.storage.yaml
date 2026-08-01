@@ -1,0 +1,45 @@
+# Put the database on a NAS directory you can see, snapshot and back up.
+#
+#   docker compose -f compose.nas.yaml -f compose.storage.yaml up -d
+#   docker compose -f compose.nas.yaml -f compose.tunnel.yaml -f compose.storage.yaml up -d
+#
+# Required in .env:
+#   PSE_PGDATA_PATH   absolute host path, e.g. /volume1/docker/pse-mcp/pgdata
+#
+# CREATE THE DIRECTORY FIRST and leave it EMPTY. Docker will not create it, and the mount
+# error it raises does not mention the missing path.
+#
+# ── Why this is a volume with driver_opts and not simply a bind mount ────────────────
+#
+# Postgres runs as uid 999 inside the container. A plain bind mount (`/path:/var/lib/
+# postgresql`) hands the container the host directory's own ownership, which on a NAS is
+# root — so Postgres cannot write, and the container crash-loops on:
+#
+#     mkdir: cannot create directory '/var/lib/postgresql': Permission denied
+#
+# The usual advice is `chown -R 999:999 <path>`, which is useless if the NAS UI gives you
+# no shell. Declaring it as a *named volume* backed by a bind avoids the problem outright:
+# Docker applies the image's own ownership to the empty mount point, so it comes up as
+# postgres:postgres 1777 with no shell involved. Verified both ways — plain bind yields
+# root:root 755, this yields postgres:postgres 1777.
+#
+# The ownership is applied only while the directory is EMPTY. Pointing this at a directory
+# that already has content leaves that content's ownership as it is.
+#
+# ── Two constraints that fail in ways that do not name their cause ───────────────────
+#
+# It must be on the NAS's OWN internal volume. Never an SMB/NFS mount or external USB:
+# Postgres needs POSIX locking and honest fsync, which network filesystems do not provide
+# reliably, and it will either refuse to start or corrupt quietly rather than say so.
+#
+# Adding this to an EXISTING deployment starts an empty database. The old volume is
+# untouched but no longer read, so accounts, passkeys and machine clients appear to have
+# vanished. Dump first, add this, then restore — docs/deploy.md has the sequence.
+
+volumes:
+  pgdata:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${PSE_PGDATA_PATH:?set PSE_PGDATA_PATH to an absolute host path in .env}
