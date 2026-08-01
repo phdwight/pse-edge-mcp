@@ -29,12 +29,28 @@ from __future__ import annotations
 import asyncio
 import os
 import time
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Generator
+from typing import Any
 
 import httpx
 
-TOKEN_ENDPOINT = f"{os.environ.get('PSE_MCP_BASE', 'https://pse.sakayandgo.com')}/oauth/token"
-MCP_ENDPOINT = f"{os.environ.get('PSE_MCP_BASE', 'https://pse.sakayandgo.com')}/mcp"
+DEFAULT_BASE = "https://pse.sakayandgo.com"
+
+
+# Resolved per call, not at import: apps normally `load_dotenv()` inside main(), after the
+# imports have run. Freezing these at import time silently ignores a PSE_MCP_BASE set that
+# way and points the app at the production default — a misconfiguration that works, which
+# is the hard kind to notice. rstrip, because a trailing slash yields "//oauth/token".
+def _base() -> str:
+    return os.environ.get("PSE_MCP_BASE", DEFAULT_BASE).rstrip("/")
+
+
+def token_url() -> str:
+    return f"{_base()}/oauth/token"
+
+
+def mcp_url() -> str:
+    return f"{_base()}/mcp"
 
 
 class PseEdgeAuth(httpx.Auth):
@@ -46,8 +62,10 @@ class PseEdgeAuth(httpx.Auth):
     nearly expired, and retries once on a 401 (covering the case where the token was
     revoked, or expired between the check and the call).
 
-    One lock, so a burst of concurrent requests on a cold cache mints once rather than
-    once per request — which would otherwise trip the token endpoint's own rate limit.
+    One lock, so a burst of concurrent requests mints once rather than once per request —
+    both on a cold cache and when many in-flight calls 401 together. That matters because
+    the token endpoint allows 20 mints per minute per client_id: a fan-out on the recovery
+    path is how an app locks itself out of recovering.
     """
 
     def __init__(
@@ -55,14 +73,14 @@ class PseEdgeAuth(httpx.Auth):
         client_id: str,
         client_secret: str,
         *,
-        token_endpoint: str = TOKEN_ENDPOINT,
-        resource: str = MCP_ENDPOINT,
+        token_endpoint: str | None = None,
+        resource: str | None = None,
         leeway_seconds: int = 60,
     ) -> None:
         self._client_id = client_id
         self._client_secret = client_secret
-        self._token_endpoint = token_endpoint
-        self._resource = resource
+        self._token_endpoint = token_endpoint or token_url()
+        self._resource = resource or mcp_url()
         self._leeway = leeway_seconds
         self._token: str | None = None
         self._expires_at = 0.0
@@ -90,23 +108,44 @@ class PseEdgeAuth(httpx.Auth):
         self._expires_at = time.monotonic() + payload.get("expires_in", 3600)
         return self._token
 
-    async def _current(self, *, force: bool = False) -> str:
+    async def _current(self, *, stale: str | None = None) -> str:
+        """Return a usable token, minting one only if nobody else already has.
+
+        `stale` is the token a caller just got a 401 for. It is re-minted only if it is
+        still the current one: when many in-flight requests 401 together, the first mints
+        and the rest find their failed token already replaced and reuse the new one. A
+        plain `force` flag instead makes each of them mint, and the token endpoint allows
+        20 per minute per client_id — so the recovery path locks itself out of recovering.
+        """
         async with self._lock:
-            fresh = self._token and time.monotonic() < self._expires_at - self._leeway
-            if force or not fresh:
+            token = self._token
+            if stale is not None and token is not None and token != stale:
+                return token  # a sibling already replaced it
+            expired = time.monotonic() >= self._expires_at - self._leeway
+            if token is None or stale is not None or expired:
                 return await self._mint()
-            assert self._token is not None
-            return self._token
+            return token
+
+    def sync_auth_flow(self, request: httpx.Request) -> Generator[httpx.Request, httpx.Response]:
+        # httpx.Auth's inherited sync path yields the request *unchanged* — a sync client
+        # would send every call with no Authorization header and no error anywhere. Fail
+        # loudly instead; the async path below is the real one.
+        raise RuntimeError(
+            "PseEdgeAuth is async-only — use httpx.AsyncClient. A sync httpx.Client would "
+            "otherwise send unauthenticated requests silently."
+        )
+        yield request  # unreachable; makes this a generator, as httpx.Auth expects
 
     async def async_auth_flow(
         self, request: httpx.Request
     ) -> AsyncGenerator[httpx.Request, httpx.Response]:
-        request.headers["Authorization"] = f"Bearer {await self._current()}"
+        token = await self._current()
+        request.headers["Authorization"] = f"Bearer {token}"
         response = yield request
         if response.status_code == 401:
             # Revoked, or expired inside the leeway window. One retry with a fresh token;
             # a second 401 is a real failure and is allowed to surface.
-            request.headers["Authorization"] = f"Bearer {await self._current(force=True)}"
+            request.headers["Authorization"] = f"Bearer {await self._current(stale=token)}"
             yield request
 
 
@@ -114,7 +153,7 @@ def pse_edge_connection() -> dict[str, object]:
     """The `MultiServerMCPClient` entry for this server."""
     return {
         "transport": "streamable_http",
-        "url": MCP_ENDPOINT,
+        "url": mcp_url(),
         "auth": PseEdgeAuth(
             os.environ["PSE_CLIENT_ID"],
             os.environ["PSE_CLIENT_SECRET"],
@@ -123,12 +162,13 @@ def pse_edge_connection() -> dict[str, object]:
     }
 
 
-async def load_tools() -> list:
+async def load_tools() -> list[Any]:
     """LangChain tools for the graph. Bind these to your model / ToolNode as usual."""
     from langchain_mcp_adapters.client import MultiServerMCPClient
 
     client = MultiServerMCPClient({"pse-edge": pse_edge_connection()})
-    return await client.get_tools()
+    tools: list[Any] = await client.get_tools()
+    return tools
 
 
 # --- what to tell the agent ---------------------------------------------------
