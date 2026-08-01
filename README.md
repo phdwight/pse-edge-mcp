@@ -134,6 +134,13 @@ token it minted, and the backing service account in one step.
 Give each agent **its own machine client**: quotas are per client, so a runaway job
 throttles itself, and revoking one does not touch the others.
 
+**Building an app on top of this?** `examples/langgraph_client.py` is a working client for
+the multi-tenant case — your app authenticates as *itself* with one machine client, your
+users never see this server. It carries an `httpx.Auth` that mints and refreshes the
+1-hour token (verified: concurrent calls mint once; a stale token recovers on 401), plus
+the agent instructions worth pasting into a system prompt. Note it needs `mcp<2` —
+`langchain-mcp-adapters` does not yet import against the 2.x SDK.
+
 ### If your client does not do OAuth yet
 
 The operator issues a token directly, and the user pastes it into a header. Same server, no
