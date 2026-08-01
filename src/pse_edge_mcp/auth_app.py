@@ -69,8 +69,32 @@ const b64ToBuf = s =>
 const bufToB64 = b =>
   btoa(String.fromCharCode(...new Uint8Array(b)))
     .replace(/\\+/g,'-').replace(/\\//g,'_').replace(/=+$/,'');
-function showError(e){ document.getElementById('msg').innerHTML =
-  '<div class="msg err">' + (e && e.message ? e.message : e) + '</div>'; }
+function showError(e){
+  let m = (e && e.message ? e.message : String(e));
+  if (e && e.name === 'NotAllowedError') {
+    // The platform's own wording ("not allowed by the user agent...") is useless to a
+    // person. The overwhelmingly common cause on mobile is an email app's built-in
+    // browser, which cannot create passkeys — seen in production on day one.
+    m = 'Your browser refused the passkey prompt. If you opened this page from an ' +
+        'email app, its built-in browser usually cannot create passkeys: open ' +
+        '<b>' + location.host + '</b> in Safari or Chrome and sign up again ' +
+        '(email links are single-use). If a fingerprint or face prompt appeared ' +
+        'and was dismissed, simply press the button again.';
+  }
+  document.getElementById('msg').innerHTML = '<div class="msg err">' + m + '</div>';
+}
+// Say so up front when this context cannot do WebAuthn at all, instead of letting the
+// button fail with a mystery. #go exists only on the enroll and login pages.
+addEventListener('DOMContentLoaded', () => {
+  const go = document.getElementById('go');
+  if (go && !window.PublicKeyCredential) {
+    go.disabled = true;
+    document.getElementById('msg').innerHTML =
+      '<div class="msg err">This browser cannot create passkeys (no WebAuthn). ' +
+      'Open <b>' + location.host + '</b> in Safari or Chrome and sign up again — ' +
+      'email links are single-use, so you will need a fresh one.</div>';
+  }
+});
 async function postJSON(url, body){
   const r = await fetch(url, {method:'POST', headers:{'content-type':'application/json'},
                              body: JSON.stringify(body)});

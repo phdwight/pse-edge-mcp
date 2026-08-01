@@ -1001,3 +1001,21 @@ async def test_send_email_delivers_only_to_the_authenticated_caller(pg_engine):
         "each caller must be mailed at their own address, resolved from their token"
     )
     assert "mallory@evil.example" not in mailbox.sent
+
+
+@pytest.mark.postgres
+async def test_passkey_pages_explain_webauthn_failures_in_human_terms(stack):
+    """Seen in production on day one: a user tapped the email link, landed in their mail
+    app's built-in browser, and WebAuthn threw "The request is not allowed by the user
+    agent..." — the platform's wording, useless to a person. The pages must carry the
+    translation: name the in-app-browser cause, say links are single-use, and detect a
+    WebAuthn-less context up front rather than letting the button fail mysteriously."""
+    async with serving(stack) as (http, _):
+        enroll = (await http.get("/enroll")).text
+        login = (await http.get("/login")).text
+
+    for page in (enroll, login):
+        assert "NotAllowedError" in page, "the specific failure must be special-cased"
+        assert "built-in browser" in page, "name the actual cause, not the symptom"
+        assert "single-use" in page, "or the user re-taps a dead link and loops"
+        assert "PublicKeyCredential" in page, "no-WebAuthn contexts get told up front"
