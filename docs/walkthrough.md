@@ -13,7 +13,7 @@ understand it, debug it, or extend it.
 | `docs/deploy.md` | Running it in production |
 | `CLAUDE.md` | The short form of the invariants, kept next to the code |
 
-Version described: **0.9.0**. 35 modules, ~7,500 lines of source, ~5,600 lines of tests.
+Version described: **0.10.0**. 36 modules, ~7,900 lines of source, ~5,700 lines of tests.
 
 ---
 
@@ -68,7 +68,7 @@ Local development:
 
 ```bash
 uv sync --all-extras          # Python 3.14, uv for everything
-uv run pytest                 # 287 tests, no network access
+uv run pytest                 # 302 tests, no network access
 uv run ruff check .           # line length 100
 uv run mypy src               # strict
 ```
@@ -164,6 +164,11 @@ Market hours are **09:30–15:00 Asia/Manila on trading days**; weekends and the
 - **Concurrent cache misses collapse into one upstream request** (`SingleFlight` in
   `ratelimit.py`). Ten simultaneous first-time requests for the same symbol produce one HTTP
   call, not ten.
+- **An upstream outage serves the last close, flagged `stale`.** If the fetch fails because
+  PSE Edge is unreachable and an expired entry exists, it is served rather than discarded —
+  holding real data and answering with an error instead is strictly worse, and `stale`
+  already means "real data, past its boundary". With nothing cached there is genuinely no
+  answer, and `EDGE_UNAVAILABLE` is returned.
 - **`immutable=True`** (passed by the disclosure-detail path) marks objects that never change
   upstream — a disclosure identified by `edge_no`. Those are cached forever with
   `valid_until: null` and `data_policy: "immutable"`. The open-market freeze still governs
@@ -239,6 +244,7 @@ mocking at all**.
 | `asgi.py` | 240 | The single composition point, and the DNS-rebinding allowlist |
 | `auth.py` | 190 | `TokenService`, `QuotaTracker`. Must stay SQLAlchemy-free |
 | `notifications.py` | 143 | `send_email` policy: self-only recipient, caps, escaping |
+| `canary.py` | 320 | Nightly schema check: one endpoint per family, validated against its model |
 
 ---
 
@@ -342,7 +348,7 @@ so an LLM can react to them rather than seeing a traceback.
 | `SYMBOL_NOT_FOUND` | No such ticker | Try `search_companies` |
 | `INVALID_ARGUMENT` | Failed validation | Fix the arguments |
 | `ENDPOINT_CHANGED` | PSE Edge's response shape changed | **Alert a human — see §11** |
-| `EDGE_UNAVAILABLE` | Upstream unreachable or erroring | Retry later |
+| `EDGE_UNAVAILABLE` | Upstream unreachable **and nothing cached** | Retry later |
 | `RATE_LIMITED` | An action's own budget is spent (e.g. daily email cap) | Honour `retry_after_seconds` |
 | `ACTION_UNAVAILABLE` | The action cannot run here (no authenticated caller, or no mail provider) | Stop asking — do not retry |
 | `INTERNAL_ERROR` | Anything else | File a bug |
@@ -568,7 +574,8 @@ protected. **Merging to `main` publishes a multi-arch image**, and a merge that 
 | `POST /mcp` → **421 Invalid Host header** | The SDK's DNS-rebinding guard. `PSE_PUBLIC_URL` must match the host clients actually use — `asgi.transport_security_for()` derives the allowlist from it |
 | OAuth completes, then the **first tool call fails** | Same as above. Everything about auth is fine; look at the transport layer |
 | `MARKET_OPEN_NO_CACHE` | Working as designed. Retry after the close |
-| `ENDPOINT_CHANGED` | PSE Edge changed shape. **Re-capture the fixture, compare against `docs/endpoints.md`, fix the parser.** Never paper over it |
+| `ENDPOINT_CHANGED` | PSE Edge changed shape. **Re-capture the fixture, compare against `docs/endpoints.md`, fix the parser.** Never paper over it. The nightly canary should have mailed you first — check why it did not |
+| Canary mail: "PSE Edge canary FAILED" | Exactly the above, caught before a user hit it. Same fix |
 | HTTP **415** from an `.ax` endpoint | Wrong dialect — that endpoint needs a JSON body, not form encoding |
 | Disclosure results in the wrong order | `sortType` must be the literal string `"date"` |
 | Signup → **503** | The mail provider refused. The log names the sender address; ZeptoMail verifies **exact** domains, so a verified `example.com` does not cover `sub.example.com` |

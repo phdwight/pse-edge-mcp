@@ -318,6 +318,16 @@ uv run ruff check .
 
 Tests run entirely against recorded fixtures — CI never touches PSE Edge.
 
+**A nightly canary watches for upstream drift.** PSE Edge can restyle its HTML at any time,
+and without this the first person to notice is a user whose tool call just failed. The
+`canary` service checks one endpoint per family every night, validates each against the
+model the tool would build, and emails `PSE_OPERATOR_EMAIL` **only on failure**. Run one by
+hand with `pse-edge-canary`; it exits non-zero if anything broke.
+
+If PSE Edge is unreachable and cached data exists, tools return that data flagged
+`meta.stale: true` rather than an error — the data is real, it is simply past its boundary.
+`EDGE_UNAVAILABLE` means unreachable *and* nothing cached.
+
 **New to the codebase?** [docs/walkthrough.md](docs/walkthrough.md) is the developer and
 architect walkthrough: the request lifecycle, the freeze policy, the layering, how to add a
 tool or a whole data domain, and a symptom-to-cause debugging table. Also available as

@@ -5,6 +5,16 @@ Format: [Keep a Changelog](https://keepachangelog.com/) · Versioning: [SemVer](
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-08-01
+
+### Added
+- **`tests/test_end_to_end.py`** — eight tests driving JSON-RPC over HTTP down through every layer to a mocked PSE Edge, because the failure modes were only ever tested one layer at a time. A user does not experience `EdgeUnavailableError`; they experience whatever JSON `tools/call` returns, and nothing proved what that was. Covers the full protocol journey (initialize → tools/list → tools/call with the envelope), an unreachable Edge with a cold cache, an outage with a warm one, the market-hours refusal (asserting **zero** upstream requests), a restyled page surfacing as `ENDPOINT_CHANGED` rather than partial data, and the canary CLI's exit codes. The outage test was checked against a deliberately reverted fallback to confirm it fails when the behaviour is absent — a test that passes either way is worse than none.
+- **A nightly schema canary — plan §6a's last outstanding commitment.** PSE Edge can restyle its HTML at any time with no warning; invariant #4 makes that drift loud, but loud *to whichever user calls the affected tool next*. `pse-edge-canary` moves the discovery earlier: one check per endpoint family, every night at 08:00 UTC (an hour after the close), each fetched for real and validated against the Pydantic model the tool would build. It emails `PSE_OPERATOR_EMAIL` **only on failure** — a nightly "all fine" message is filtered within a week, and a filtered alert is worse than none because it feels like coverage — and exits non-zero so cron or CI can notice without parsing output.
+  Three properties are deliberate. It **bypasses the cache**, because `FreezeService` would answer from a warm entry and validate yesterday's HTML. It **still refuses to run during market hours** and makes no request at all then: bypassing the cache is not bypassing invariant #1. And it **validates the model, not the HTTP status**, because a 200 carrying a restyled table is exactly the failure it exists for and is invisible at the HTTP layer. Verified against live PSE Edge: 8/8 families healthy in ~7 s.
+
+### Fixed
+- **An upstream outage no longer discards the data we already hold.** If PSE Edge is unreachable and an expired entry exists, it is now served flagged `stale` instead of raising `EDGE_UNAVAILABLE`. Holding yesterday's close and answering with an error is strictly worse than serving it, and `stale` already means "real data, past its boundary" — so a client that handles the market-open case handles an outage with no change, and `as_of` says exactly how old it is. With nothing cached there is genuinely no answer to give, and `EDGE_UNAVAILABLE` is still returned; its meaning narrows to "unreachable **and** nothing cached".
+
 ## [0.9.0] - 2026-08-01
 
 ### Added

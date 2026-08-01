@@ -53,6 +53,10 @@ class Settings:
     # logged to the console, which is the dev/test mode.
     zeptomail_api_key: str | None = None
     email_from: str = "no-reply@localhost"
+    # Where the schema canary reports failures. Unset means the canary still runs and still
+    # logs, but nobody is told — which is worth a warning, because a canary nobody reads is
+    # indistinguishable from no canary.
+    operator_email: str | None = None
     # Privacy (plan §6a): usage counts are deleted after this many days. The privacy page
     # states 90, so changing it here means changing what users were told.
     usage_retention_days: int = 90
@@ -104,6 +108,7 @@ class Settings:
             ),
             zeptomail_api_key=os.environ.get("ZEPTOMAIL_API_KEY") or None,
             email_from=os.environ.get("PSE_EMAIL_FROM", cls.email_from),
+            operator_email=os.environ.get("PSE_OPERATOR_EMAIL") or None,
             usage_retention_days=int(
                 os.environ.get("PSE_USAGE_RETENTION_DAYS", cls.usage_retention_days)
             ),
