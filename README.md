@@ -255,6 +255,11 @@ uv run ruff check .
 
 Tests run entirely against recorded fixtures — CI never touches PSE Edge.
 
+**New to the codebase?** [docs/walkthrough.md](docs/walkthrough.md) is the developer and
+architect walkthrough: the request lifecycle, the freeze policy, the layering, how to add a
+tool or a whole data domain, and a symptom-to-cause debugging table. Also available as
+[a PDF](docs/walkthrough.pdf).
+
 Work lands on `develop` and reaches `main` by pull request; `main` is protected and
 requires all three CI checks (`test`, `image (amd64)`, `image (arm64)`). Bumping `version` in `pyproject.toml` makes the next merge cut
 a GitHub Release with a matching immutable image tag.

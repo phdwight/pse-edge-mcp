@@ -5,6 +5,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/) · Versioning: [SemVer](
 
 ## [Unreleased]
 
+### Added
+- **`docs/walkthrough.md` — a developer/architect walkthrough**, plus a rendered PDF. Written against the code rather than from memory: the request lifecycle from client to PSE Edge, the freeze decision table, the four-layer architecture and why repositories depend on Protocols, all 11 tools with their arguments and owning repositories, the response envelope and error codes, the OAuth/passkey flow, extension recipes, and a symptom-to-cause debugging table carrying the failures production found (421 Host header, empty logs meaning a start-time failure, ZeptoMail's exact-domain rule). `scripts/render_doc_pdf.py` regenerates the PDF with any Chromium — no pandoc or LaTeX toolchain, and diagrams are ASCII so they survive every renderer and stay readable on GitHub.
+
 ## [0.7.3] - 2026-07-31
 
 ### Fixed
