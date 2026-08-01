@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import os
+import re
 import sys
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -74,6 +75,71 @@ async def create_user(
     except IntegrityError as exc:
         raise AdminError(f"a user with email {email} already exists") from exc
     return user_id
+
+
+# Machine clients get a service account under a reserved, non-routable domain (.invalid is
+# reserved by RFC 2606 and can never resolve), so a service account can never collide with
+# or be mistaken for a person's address, and no mail can ever be sent to one.
+MACHINE_EMAIL_DOMAIN = "machine.invalid"
+
+
+async def create_machine_client(
+    engine: AsyncEngine,
+    name: str,
+    *,
+    quota_per_minute: int | None = None,
+    quota_per_day: int | None = None,
+) -> dict[str, str]:
+    """Provision a headless client_credentials client. Prints its secret ONCE.
+
+    A machine client is backed by a service *user*, which is what lets the whole bearer
+    path stay identical to the browser flow: `/mcp` validates a token by joining
+    `auth_tokens` to `users`, so a token with no user behind it would need a special case
+    in the middleware — and a second code path through authentication is exactly where a
+    revocation check goes missing later. It also means quotas, usage accounting and
+    disablement apply to machine clients with no extra code.
+    """
+    if not name.strip():
+        raise AdminError("--name is required and cannot be blank")
+
+    from .oauth import OAuthService
+
+    slug = re.sub(r"[^a-z0-9]+", "-", name.strip().lower()).strip("-") or "client"
+    email = f"{slug}-{uuid.uuid4().hex[:8]}@{MACHINE_EMAIL_DOMAIN}"
+    user_id = await create_user(
+        engine, email, quota_per_minute=quota_per_minute, quota_per_day=quota_per_day
+    )
+    credentials = await OAuthService(engine).create_machine_client(name.strip(), user_id)
+    return {**credentials, "service_user": email, "service_user_id": user_id}
+
+
+async def revoke_machine_client(engine: AsyncEngine, client_id: str) -> bool:
+    """Revoke the client, its secret, and every token it minted.
+
+    Also disables the service account, so nothing can authenticate as it by any route.
+    """
+    from .oauth import OAuthService
+
+    service = OAuthService(engine)
+    clients = {c["client_id"]: c for c in await service.list_machine_clients()}
+    record = clients.get(client_id)
+    if record is None:
+        raise AdminError(f"no machine client with client_id {client_id!r}")
+    revoked = await service.revoke_machine_client(client_id)
+    if record.get("service_user_id"):
+        async with engine.begin() as conn:
+            await conn.execute(
+                update(users)
+                .where(users.c.id == record["service_user_id"], users.c.disabled_at.is_(None))
+                .values(disabled_at=datetime.now(UTC))
+            )
+    return revoked
+
+
+async def list_machine_clients(engine: AsyncEngine) -> list[dict[str, Any]]:
+    from .oauth import OAuthService
+
+    return await OAuthService(engine).list_machine_clients()
 
 
 async def issue_token(
@@ -232,6 +298,21 @@ def build_parser() -> argparse.ArgumentParser:
         "purge-usage", help="delete usage rows past the retention window (cron this daily)"
     )
     p.add_argument("--retention-days", type=int, default=90)
+
+    p = sub.add_parser(
+        "create-machine-client",
+        help="provision a headless client_credentials client (secret shown once)",
+    )
+    p.add_argument("--name", required=True, help="label, e.g. 'langgraph-app'")
+    p.add_argument("--per-minute", type=int, default=None, help="quota override")
+    p.add_argument("--per-day", type=int, default=None, help="quota override")
+
+    p = sub.add_parser(
+        "revoke-machine-client", help="revoke a machine client, its secret and all its tokens"
+    )
+    p.add_argument("client_id")
+
+    sub.add_parser("list-machine-clients", help="list provisioned machine clients")
     return parser
 
 
@@ -296,6 +377,33 @@ async def _dispatch(engine: AsyncEngine, args: argparse.Namespace) -> None:
             qpm = row["quota_per_minute"] or "default"
             qpd = row["quota_per_day"] or "default"
             print(f"{row['email']:40} {state:9} tokens={row['active_tokens']} qpm={qpm} qpd={qpd}")
+    elif args.command == "create-machine-client":
+        created = await create_machine_client(
+            engine, args.name, quota_per_minute=args.per_minute, quota_per_day=args.per_day
+        )
+        # Printed once and never recoverable — only the SHA-256 is stored. Deliberately on
+        # stdout in a copy-paste shape, with the warning adjacent rather than at the top,
+        # so it is still on screen when the operator looks away and back.
+        print(f"client_id:     {created['client_id']}")
+        print(f"client_secret: {created['client_secret']}")
+        print(f"service_user:  {created['service_user']}")
+        print()
+        print("Store the secret now — it is not recoverable, only revocable.")
+        print(f"Revoke with: pse-edge-admin revoke-machine-client {created['client_id']}")
+    elif args.command == "revoke-machine-client":
+        revoked = await revoke_machine_client(engine, args.client_id)
+        print(
+            f"revoked machine client {args.client_id} (tokens revoked, service account disabled)"
+            if revoked
+            else f"machine client {args.client_id} was already revoked"
+        )
+    elif args.command == "list-machine-clients":
+        rows = await list_machine_clients(engine)
+        if not rows:
+            print("no machine clients provisioned")
+        for row in rows:
+            state = "revoked" if row["revoked_at"] else "active"
+            print(f"{row['client_id']:28} {state:8} {row['client_name']}")
 
 
 def main() -> None:

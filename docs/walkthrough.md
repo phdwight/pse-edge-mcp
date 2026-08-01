@@ -13,7 +13,7 @@ understand it, debug it, or extend it.
 | `docs/deploy.md` | Running it in production |
 | `CLAUDE.md` | The short form of the invariants, kept next to the code |
 
-Version described: **0.7.3**. 34 modules, ~6,600 lines of source, ~4,800 lines of tests.
+Version described: **0.8.0**. 34 modules, ~7,000 lines of source, ~5,100 lines of tests.
 
 ---
 
@@ -21,7 +21,7 @@ Version described: **0.7.3**. 34 modules, ~6,600 lines of source, ~4,800 lines o
 
 An **MCP server** (Model Context Protocol — a standard way to expose tools to an LLM
 client) that serves **Philippine Stock Exchange** data taken from the PSE Edge disclosure
-portal. It exposes 11 read-only tools: quotes, price history, disclosures, financial
+portal. It exposes 12 read-only tools: quotes, price history, disclosures, financial
 reports, dividends, and index/market data.
 
 It is **unofficial**. PSE Edge publishes no API, so this server speaks to the same internal
@@ -67,7 +67,7 @@ Local development:
 
 ```bash
 uv sync --all-extras          # Python 3.14, uv for everything
-uv run pytest                 # 250 tests, no network access
+uv run pytest                 # 266 tests, no network access
 uv run ruff check .           # line length 100
 uv run mypy src               # strict
 ```
@@ -230,7 +230,7 @@ mocking at all**.
 | `repositories.py` | 511 | The domain layer — five repositories |
 | `passkeys.py` | 424 | WebAuthn ceremonies and browser sessions |
 | `oauth.py` | 417 | OAuth 2.1 server: DCR, PKCE, code exchange, refresh rotation |
-| `server.py` | 383 | The 11 tool definitions |
+| `server.py` | 412 | The 12 tool definitions |
 | `admin.py` | 323 | `pse-edge-admin` CLI |
 | `models.py` | 318 | 23 Pydantic models |
 | `client.py` | 268 | HTTP to PSE Edge; both request dialects |
@@ -242,11 +242,12 @@ mocking at all**.
 
 ## 6. The tool surface
 
-All 11 tools are read-only and return the same envelope (§7).
+All 12 tools are read-only and return the same envelope (§7).
 
 | Tool | Arguments | Repository |
 |---|---|---|
 | `search_companies` | `query` | `CompanyRepository.search` |
+| `validate_symbol` | `symbol` | `CompanyRepository.try_resolve` |
 | `get_stock_quote` | `symbol` | `QuoteRepository.quote` |
 | `get_price_history` | `symbol`, `start_date?`, `end_date?` | `QuoteRepository.history` |
 | `search_disclosures` | `symbol?`, `start_date?`, `end_date?`, `template?`, `page` | `DisclosureRepository.search` |
@@ -591,7 +592,7 @@ All settings live in `config.py` as a frozen dataclass; environment variables ov
 
 ### Why HTTP is stateless with plain JSON by default
 
-The server is 11 read-only tools over data the freeze holds still. It uses **none** of the
+The server is 12 read-only tools over data the freeze holds still. It uses **none** of the
 features MCP sessions exist to enable — no notifications, no resource subscriptions, no
 sampling, no elicitation, no progress. Every request is self-contained.
 

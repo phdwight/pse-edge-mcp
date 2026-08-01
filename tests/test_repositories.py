@@ -140,6 +140,25 @@ async def test_company_lookups_are_cached_under_a_normalised_key():
     assert cache.keys == ["autocomplete:SM", "autocomplete:SM"]
 
 
+async def test_try_resolve_answers_unknown_symbols_instead_of_raising():
+    """validate_symbol needs "no" as an answer where every other tool needs a failure."""
+    repo = CompanyRepository(FakeCompanySource(SM_AUTOCOMPLETE), FakeCache())
+
+    served = await repo.try_resolve("NOPE")
+
+    assert served.value is None
+    assert served.meta.as_of is not None, "metadata still travels with a negative answer"
+
+
+async def test_try_resolve_uses_the_same_exact_match_as_resolve():
+    """One matching rule, not two. Two would eventually disagree, and the drifted one
+    would answer about the wrong company rather than failing visibly."""
+    repo = CompanyRepository(FakeCompanySource(SM_AUTOCOMPLETE), FakeCache())
+
+    assert (await repo.try_resolve("  sm ")).value.company_id == "599"
+    assert (await repo.try_resolve("SMP")).value is None, "prefix must not match SMPH"
+
+
 # --- disclosure routing (the decision this layer owns) -----------------------
 
 

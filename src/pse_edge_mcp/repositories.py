@@ -130,6 +130,21 @@ class CompanyRepository:
         Autocomplete is a prefix search: "SM" also returns SMC and SMPH, so accepting
         the first hit would silently answer about the wrong company.
         """
+        served = await self.try_resolve(symbol)
+        if served.value is None:
+            raise SymbolNotFoundError(
+                f"No PSE-listed company found for symbol '{symbol.strip().upper()}'"
+            )
+        return Served(value=served.value, meta=served.meta)
+
+    async def try_resolve(self, symbol: str) -> Served[CompanyHit | None]:
+        """Same exact match, but "no such symbol" is an answer rather than an error.
+
+        `validate_symbol` needs to say `valid: false` where every other tool needs to
+        fail, and the matching rule must not be written twice: two implementations of
+        "is this the right company" would eventually disagree, and the one that drifted
+        would answer about the wrong company rather than failing visibly.
+        """
         wanted = symbol.strip().upper()
         served = await self._raw(wanted)
         for hit in served.value:
@@ -137,7 +152,7 @@ class CompanyRepository:
                 # Built eagerly rather than through `.map`, so nothing closes over the
                 # loop variable.
                 return Served(value=_company_hit(hit), meta=served.meta)
-        raise SymbolNotFoundError(f"No PSE-listed company found for symbol '{wanted}'")
+        return Served(value=None, meta=served.meta)
 
     async def _raw(self, query: str) -> Served[list[dict[str, Any]]]:
         normalised = query.strip().upper()

@@ -33,6 +33,20 @@ class CompanyHit(BaseModel):
     is_etf: bool = False
 
 
+class SymbolValidation(BaseModel):
+    """Answer to "is this a real PSE ticker" — a fact, not an error.
+
+    `valid: false` with null fields rather than a raised SYMBOL_NOT_FOUND: an agent
+    checking a symbol before using it is asking a question, and a failed lookup is a
+    perfectly good answer to it.
+    """
+
+    valid: bool
+    symbol: str = Field(description="The input, normalised to uppercase")
+    company_name: str | None = None
+    company_id: str | None = None
+
+
 class StockQuote(BaseModel):
     symbol: str
     company_name: str

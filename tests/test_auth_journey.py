@@ -96,7 +96,10 @@ def stack(pg_engine):
     email = CapturingEmail()
     surface = AuthApp(
         guarded,
-        oauth=OAuthService(pg_engine),
+        # `resource` mirrors what asgi.create_app passes. A fixture that leaves a setting
+        # at a default production always sets is a blind spot, not a test — that is exactly
+        # how the transport-security 421 survived a green suite.
+        oauth=OAuthService(pg_engine, resource=f"{PUBLIC_URL}/mcp"),
         passkeys=PasskeyService(pg_engine, public_url=PUBLIC_URL),
         email=email,
         public_url=PUBLIC_URL,
@@ -296,7 +299,7 @@ async def test_signup_enroll_authorize_and_call_mcp_with_the_issued_token(stack)
             json={"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}},
         )
         assert called.status_code == 200
-        assert len(called.json()["result"]["tools"]) == 11
+        assert len(called.json()["result"]["tools"]) == 12
 
         # 10. Refresh rotates, and the new access token also works.
         refreshed = (
@@ -632,3 +635,287 @@ async def test_signing_in_without_a_flow_lands_on_the_account_page(stack):
 
     assert root.status_code == 302, "an authenticated visitor at / goes to their account"
     assert root.headers["location"].endswith("/account")
+
+
+# --- client_credentials: headless machine-to-machine -------------------------
+#
+# The security property under test is one sentence: /oauth/register is open to the
+# internet, so being able to register MUST NOT be enough to mint a token. Everything else
+# here is ordinary OAuth plumbing; that one is the reason this grant needed care.
+
+
+async def provision_machine_client(pg_engine, name: str = "langgraph-app") -> dict[str, str]:
+    from pse_edge_mcp.admin import create_machine_client
+
+    return await create_machine_client(pg_engine, name)
+
+
+@pytest.mark.postgres
+async def test_machine_client_mints_a_token_and_calls_mcp(stack, pg_engine):
+    """The whole headless path: no browser, no passkey, no consent — just a secret."""
+    machine = await provision_machine_client(pg_engine)
+
+    async with serving(stack) as (http, _):
+        minted = await http.post(
+            "/oauth/token",
+            data={
+                "grant_type": "client_credentials",
+                "client_id": machine["client_id"],
+                "client_secret": machine["client_secret"],
+                "scope": "mcp",
+            },
+        )
+        assert minted.status_code == 200, minted.text
+        body = minted.json()
+        assert body["token_type"] == "Bearer"
+        assert body["expires_in"] == 3600
+        assert body["scope"] == "mcp"
+        assert minted.headers["cache-control"] == "no-store"
+
+        auth = {"Authorization": f"Bearer {body['access_token']}"}
+        initialized = await http.post(
+            "/mcp",
+            headers=auth,
+            json={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2025-06-18",
+                    "capabilities": {},
+                    "clientInfo": {"name": "langgraph", "version": "1"},
+                },
+            },
+        )
+        assert initialized.status_code == 200, initialized.text
+        assert initialized.json()["result"]["serverInfo"]["name"] == "pse-edge"
+
+        called = await http.post(
+            "/mcp",
+            headers=auth,
+            json={
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": {"name": "validate_symbol", "arguments": {"symbol": "SM"}},
+            },
+        )
+    assert called.status_code == 200, called.text
+    assert "error" not in called.json(), called.text
+
+
+@pytest.mark.postgres
+async def test_machine_client_authenticates_with_http_basic(stack, pg_engine):
+    """RFC 6749 §2.3.1 names Basic as the method a server MUST accept; most SDKs default
+    to it, while curl examples post the fields. Both have to work."""
+    machine = await provision_machine_client(pg_engine, "basic-auth-app")
+    credential = base64.b64encode(
+        f"{machine['client_id']}:{machine['client_secret']}".encode()
+    ).decode()
+
+    async with serving(stack) as (http, _):
+        minted = await http.post(
+            "/oauth/token",
+            data={"grant_type": "client_credentials"},
+            headers={"Authorization": f"Basic {credential}"},
+        )
+
+    assert minted.status_code == 200, minted.text
+    assert minted.json()["access_token"].startswith("pse_")
+
+
+@pytest.mark.postgres
+async def test_a_dcr_registered_client_cannot_use_client_credentials(stack, pg_engine):
+    """THE test. /oauth/register is open by design, so if registering were enough to use
+    this grant, anyone on the internet could mint tokens for themselves.
+
+    The client even self-declares the grant and sends a secret — neither is consulted.
+    Authorization comes from `client_type`, which only the admin CLI writes.
+    """
+    async with serving(stack) as (http, _):
+        registered = (
+            await http.post(
+                "/oauth/register",
+                json={
+                    "redirect_uris": [REDIRECT],
+                    "client_name": "impostor",
+                    # Self-declared and deliberately ignored by the server.
+                    "grant_types": ["client_credentials", "authorization_code"],
+                    "token_endpoint_auth_method": "client_secret_post",
+                },
+            )
+        ).json()
+
+        attempt = await http.post(
+            "/oauth/token",
+            data={
+                "grant_type": "client_credentials",
+                "client_id": registered["client_id"],
+                "client_secret": "anything-at-all",
+                "scope": "mcp",
+            },
+        )
+
+    assert attempt.status_code == 400
+    assert attempt.json()["error"] == "unauthorized_client"
+    assert "access_token" not in attempt.json()
+
+
+@pytest.mark.postgres
+async def test_wrong_secret_and_unknown_client_are_both_invalid_client(stack, pg_engine):
+    """Answered identically on purpose: distinguishing them turns an offline guess into
+    an online oracle for which client ids exist."""
+    machine = await provision_machine_client(pg_engine, "wrong-secret-app")
+
+    async with serving(stack) as (http, _):
+        wrong = await http.post(
+            "/oauth/token",
+            data={
+                "grant_type": "client_credentials",
+                "client_id": machine["client_id"],
+                "client_secret": "not-the-secret",
+            },
+        )
+        unknown = await http.post(
+            "/oauth/token",
+            data={
+                "grant_type": "client_credentials",
+                "client_id": "mcp-does-not-exist",
+                "client_secret": "whatever",
+            },
+        )
+
+    for response in (wrong, unknown):
+        assert response.status_code == 401
+        assert response.json()["error"] == "invalid_client"
+        # RFC 6749 §5.2: a 401 here must say how to authenticate.
+        assert "www-authenticate" in response.headers
+    assert wrong.json() == unknown.json(), "the two must be indistinguishable"
+
+
+@pytest.mark.postgres
+async def test_client_credentials_issues_no_refresh_token(stack, pg_engine):
+    """The client already holds a long-lived secret it can present again. A refresh token
+    would be a second credential of equal power without the rotation benefit."""
+    machine = await provision_machine_client(pg_engine, "no-refresh-app")
+
+    async with serving(stack) as (http, _):
+        minted = await http.post(
+            "/oauth/token",
+            data={
+                "grant_type": "client_credentials",
+                "client_id": machine["client_id"],
+                "client_secret": machine["client_secret"],
+            },
+        )
+
+    assert minted.status_code == 200
+    assert "refresh_token" not in minted.json()
+
+
+@pytest.mark.postgres
+async def test_revoking_a_machine_client_kills_its_outstanding_tokens(stack, pg_engine):
+    """Clearing the secret alone would leave an up-to-an-hour window in which an already
+    issued bearer still works."""
+    from pse_edge_mcp.admin import revoke_machine_client
+
+    machine = await provision_machine_client(pg_engine, "revoke-me-app")
+
+    async with serving(stack) as (http, _):
+        token = (
+            await http.post(
+                "/oauth/token",
+                data={
+                    "grant_type": "client_credentials",
+                    "client_id": machine["client_id"],
+                    "client_secret": machine["client_secret"],
+                },
+            )
+        ).json()["access_token"]
+
+        await revoke_machine_client(pg_engine, machine["client_id"])
+
+        reused = await http.post(
+            "/mcp",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+        )
+        reminted = await http.post(
+            "/oauth/token",
+            data={
+                "grant_type": "client_credentials",
+                "client_id": machine["client_id"],
+                "client_secret": machine["client_secret"],
+            },
+        )
+
+    assert reused.status_code == 401, "an issued token must stop working immediately"
+    assert reminted.status_code == 401
+
+
+@pytest.mark.postgres
+async def test_unsupported_scope_and_wrong_resource_are_refused(stack, pg_engine):
+    """Silently narrowing a scope is how a client comes to believe it holds a permission
+    it does not have, which surfaces much later as a confusing failure."""
+    machine = await provision_machine_client(pg_engine, "scope-app")
+    creds = {
+        "grant_type": "client_credentials",
+        "client_id": machine["client_id"],
+        "client_secret": machine["client_secret"],
+    }
+
+    async with serving(stack) as (http, _):
+        bad_scope = await http.post("/oauth/token", data={**creds, "scope": "mcp admin"})
+        bad_resource = await http.post(
+            "/oauth/token", data={**creds, "resource": "https://elsewhere.example/mcp"}
+        )
+        # The canonical resource, with and without a trailing slash, both work.
+        good = await http.post("/oauth/token", data={**creds, "resource": f"{PUBLIC_URL}/mcp/"})
+
+    assert bad_scope.status_code == 400
+    assert bad_scope.json()["error"] == "invalid_scope"
+    assert bad_resource.json()["error"] == "invalid_target"
+    assert good.status_code == 200, good.text
+
+
+@pytest.mark.postgres
+async def test_unsupported_grant_type_is_rejected(stack):
+    async with serving(stack) as (http, _):
+        response = await http.post("/oauth/token", data={"grant_type": "password"})
+    assert response.status_code == 400
+    assert response.json()["error"] == "unsupported_grant_type"
+
+
+@pytest.mark.postgres
+async def test_the_token_endpoint_is_rate_limited(stack, pg_engine):
+    """The one endpoint where a long-lived credential can be guessed online."""
+    machine = await provision_machine_client(pg_engine, "flood-app")
+    attempt = {
+        "grant_type": "client_credentials",
+        "client_id": machine["client_id"],
+        "client_secret": "wrong",
+    }
+
+    async with serving(stack) as (http, _):
+        statuses = [
+            (await http.post("/oauth/token", data=attempt)).status_code for _ in range(25)
+        ]
+        limited = await http.post("/oauth/token", data=attempt)
+
+    assert 429 in statuses, "guessing must be throttled, not merely refused forever"
+    assert limited.status_code == 429
+    assert limited.json()["error"] == "slow_down"
+    assert int(limited.headers["retry-after"]) > 0
+
+
+@pytest.mark.postgres
+async def test_metadata_advertises_client_credentials_and_secret_auth(stack):
+    async with serving(stack) as (http, _):
+        metadata = (await http.get("/.well-known/oauth-authorization-server")).json()
+
+    assert "client_credentials" in metadata["grant_types_supported"]
+    assert "client_secret_basic" in metadata["token_endpoint_auth_methods_supported"]
+    assert "client_secret_post" in metadata["token_endpoint_auth_methods_supported"]
+    # The interactive flow must keep working exactly as before.
+    assert "authorization_code" in metadata["grant_types_supported"]
+    assert metadata["code_challenge_methods_supported"] == ["S256"]

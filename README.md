@@ -78,6 +78,60 @@ Refresh tokens rotate on every use, and replaying a rotated one revokes that who
 family (RFC 9700 §4.14) — a stolen refresh token gets one use before the theft is detected
 and the session dies.
 
+### Headless agents (`client_credentials`)
+
+For a LangGraph app, the Anthropic Messages API MCP connector, or any agent that cannot
+open a browser. No redirect, no passkey, no consent screen — a client id and secret.
+
+**1. Provision** (admin, out of band — this is not reachable over HTTP):
+
+```bash
+pse-edge-admin create-machine-client --name langgraph-app
+# also runnable as: python -m pse_edge_mcp.admin create-machine-client --name langgraph-app
+```
+
+It prints `client_id` and `client_secret` **once**. Only the secret's SHA-256 is stored, so
+it cannot be recovered — only revoked and reissued.
+
+**2. Mint a token:**
+
+```bash
+curl -s -X POST https://pse.sakayandgo.com/oauth/token \
+  -d grant_type=client_credentials \
+  -d client_id=$CLIENT_ID -d client_secret=$CLIENT_SECRET \
+  -d scope=mcp -d resource=https://pse.sakayandgo.com/mcp
+```
+
+```json
+{"access_token": "pse_…", "token_type": "Bearer", "expires_in": 3600, "scope": "mcp"}
+```
+
+HTTP Basic works too (`curl -u "$CLIENT_ID:$CLIENT_SECRET"`), which is what most SDKs send.
+**No refresh token is issued** — the client already holds a long-lived secret and simply
+re-requests when the hour is up.
+
+**3. Use it:**
+
+```bash
+curl -s -X POST https://pse.sakayandgo.com/mcp \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"curl","version":"1.0"}}}'
+```
+
+Revoke with `pse-edge-admin revoke-machine-client <client_id>`, which kills the secret, every
+token it minted, and the backing service account in one step.
+
+> **Registering does not grant this.** `/oauth/register` is open to the internet, so a
+> client that registers itself — even declaring `grant_types: ["client_credentials"]` and
+> sending a secret — is refused with `unauthorized_client`. Authorization comes from a
+> `client_type` column only the admin CLI writes, never from anything a registrant says
+> about itself.
+
+Give each agent **its own machine client**: quotas are per client, so a runaway job
+throttles itself, and revoking one does not touch the others.
+
 ### If your client does not do OAuth yet
 
 The operator issues a token directly, and the user pastes it into a header. Same server, no
@@ -166,6 +220,7 @@ DATABASE_URL=postgresql+asyncpg://user:pass@host/db uv run alembic upgrade head
 | Tool | Description |
 |---|---|
 | `search_companies(query)` | Find PSE-listed companies by name or ticker |
+| `validate_symbol(symbol)` | Cheap yes/no check that a ticker exists, with its company name and id |
 | `get_stock_quote(symbol)` | Latest EOD quote: price, change, 52-wk range, market cap, full field set |
 | `get_price_history(symbol, start_date?, end_date?)` | Daily OHLC series from Edge's chart endpoint |
 | `search_disclosures(symbol?, start_date?, end_date?, template?, page?)` | Disclosure metadata, market-wide or per company; 50/page with exact totals |

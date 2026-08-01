@@ -37,6 +37,7 @@ from .config import Settings
 from .errors import PseEdgeMcpError
 from .market_calendar import MarketCalendar
 from .memo import ParsedMemo
+from .models import SymbolValidation
 from .repositories import (
     CompanyInfoRepository,
     CompanyRepository,
@@ -182,6 +183,35 @@ def build_server(
         other tools.
         """
         return await reply(lambda: companies.search(require_text(query, "query")))
+
+    @mcp.tool()
+    async def validate_symbol(symbol: str) -> dict[str, Any]:
+        """Check whether a ticker symbol is a real PSE-listed company. Cheap.
+
+        Use this — NOT search_companies — when you only need to know whether a symbol is
+        valid before calling another tool, or to confirm a symbol a user typed. Returns
+        `valid` true/false plus the company name and id when it exists, instead of the
+        ranked list of near-matches search_companies returns.
+
+        Matching is exact and case-insensitive: "areit" and "AREIT" both resolve, while
+        "ARE" does not match "AREIT". An unknown symbol is `valid: false` with null
+        fields, not an error.
+
+        Data is EOD-frozen like every other tool (see meta).
+        """
+        async def run() -> Served[Any]:
+            served = await companies.try_resolve(require_text(symbol, "symbol"))
+            hit = served.value
+            return served.map(
+                lambda _: SymbolValidation(
+                    valid=hit is not None,
+                    symbol=symbol.strip().upper(),
+                    company_name=hit.name if hit else None,
+                    company_id=hit.company_id if hit else None,
+                )
+            )
+
+        return await reply(run)
 
     @mcp.tool()
     async def get_stock_quote(symbol: str) -> dict[str, Any]:

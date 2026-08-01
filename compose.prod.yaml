@@ -26,7 +26,7 @@
 #   POSTGRES_PASSWORD  something long and random
 #   ZEPTOMAIL_API_KEY  for verification emails
 # Strongly recommended:
-#   PSE_IMAGE_TAG      pin a version (e.g. 0.7.3) instead of tracking :latest
+#   PSE_IMAGE_TAG      pin a version (e.g. 0.8.0) instead of tracking :latest
 #
 # PSE_PUBLIC_URL is derived from PSE_DOMAIN below. Getting it wrong breaks passkeys in a way
 # that looks like a browser bug, because WebAuthn binds credentials to the origin.

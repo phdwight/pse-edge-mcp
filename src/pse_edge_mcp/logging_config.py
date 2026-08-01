@@ -29,10 +29,21 @@ from typing import Any
 _SECRET_PATTERNS = (
     (re.compile(r"pse_[A-Za-z0-9_\-]{20,}"), "[redacted]"),
     (
-        re.compile(r"(?i)\b(authorization|api[-_]?key|apikey|token|password|secret)\b\s*[:=]\s*.*"),
+        # The leading `[\w.-]*` is load-bearing: `\bsecret\b` does NOT match inside
+        # `client_secret`, because `_` is a word character and so there is no boundary
+        # before `secret`. That gap shipped, and it meant an OAuth client secret would
+        # have been logged verbatim by anything that echoed a token-endpoint form.
+        # Allowing a prefix catches client_secret, api-key, x_auth_token and friends.
+        re.compile(
+            r"(?i)([\w.-]*(?:authorization|api[-_]?key|apikey|token|password|secret))"
+            r'"?\s*[:=]\s*.*'
+        ),
         r"\1=[redacted]",
     ),
     (re.compile(r"(?i)(Zoho-enczapikey)\s+\S+"), r"\1 [redacted]"),
+    # A Basic credential is base64(client_id:secret) — the secret is right there in the
+    # blob, so the whole header value goes, not just the scheme.
+    (re.compile(r"(?i)\bBasic\s+[A-Za-z0-9+/=]{8,}"), "Basic [redacted]"),
 )
 
 _STANDARD_FIELDS = frozenset(
