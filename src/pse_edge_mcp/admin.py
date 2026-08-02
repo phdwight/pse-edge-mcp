@@ -34,7 +34,7 @@ except ImportError:  # pragma: no cover - exercised only on installs without the
 
 from .accounts import erase, purge_usage
 from .auth import generate_token, hash_token
-from .db import auth_tokens, create_engine, normalise_url, users
+from .db import auth_tokens, create_engine, normalise_url, oauth_clients, usage_events, users
 
 # Interim default for CLI-issued personal tokens: 30 days. Deliberately longer than the
 # ~30-minute OAuth access tokens of stage 2 — there is no refresh flow yet, and a token
@@ -140,6 +140,31 @@ async def list_machine_clients(engine: AsyncEngine) -> list[dict[str, Any]]:
     from .oauth import OAuthService
 
     return await OAuthService(engine).list_machine_clients()
+
+
+async def machine_client_request_totals(engine: AsyncEngine) -> dict[str, int]:
+    """Recorded requests per machine client, keyed by client_id.
+
+    Each machine client is backed by a service user, so its usage is that user's rows in
+    `usage_events`. The window is whatever retention holds — 90 days by policy — with no
+    extra date filter to drift out of sync with it.
+    """
+    stmt = (
+        select(
+            oauth_clients.c.client_id,
+            func.coalesce(func.sum(usage_events.c.requests), 0).label("requests"),
+        )
+        .select_from(
+            oauth_clients.outerjoin(
+                usage_events, usage_events.c.user_id == oauth_clients.c.service_user_id
+            )
+        )
+        .where(oauth_clients.c.service_user_id.is_not(None))
+        .group_by(oauth_clients.c.client_id)
+    )
+    async with engine.connect() as conn:
+        rows = (await conn.execute(stmt)).all()
+    return {row.client_id: int(row.requests) for row in rows}
 
 
 async def delete_user_by_email(engine: AsyncEngine, email: str) -> dict[str, int]:

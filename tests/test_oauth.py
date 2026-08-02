@@ -417,6 +417,49 @@ async def test_reusing_a_rotated_refresh_token_revokes_the_whole_family(pg_engin
         )
 
 
+async def test_a_user_cannot_revoke_another_users_session(pg_engine):
+    """`revoke_session` backs a form whose family_id is attacker-suppliable; the
+    user_id scope must make a foreign family_id a no-op."""
+    from sqlalchemy import select
+
+    from pse_edge_mcp.accounts import revoke_session
+    from pse_edge_mcp.auth import hash_token
+    from pse_edge_mcp.db import auth_tokens
+
+    service = OAuthService(pg_engine)
+    client_id, code, verifier = await complete_authorize(pg_engine, service)
+    tokens = await service.exchange(
+        {
+            "grant_type": "authorization_code",
+            "code": code,
+            "code_verifier": verifier,
+            "client_id": client_id,
+            "redirect_uri": REDIRECT,
+        }
+    )
+    async with pg_engine.connect() as conn:
+        family = (
+            await conn.execute(
+                select(auth_tokens.c.family_id).where(
+                    auth_tokens.c.token_hash == hash_token(tokens["access_token"])
+                )
+            )
+        ).scalar_one()
+    outsider = await make_user(pg_engine, f"{secrets.token_hex(4)}@example.com")
+
+    assert await revoke_session(pg_engine, outsider, family) == 0
+
+    # The victim's session is untouched: its refresh token still rotates.
+    refreshed = await service.exchange(
+        {
+            "grant_type": "refresh_token",
+            "refresh_token": tokens["refresh_token"],
+            "client_id": client_id,
+        }
+    )
+    assert refreshed["access_token"]
+
+
 async def test_unsupported_grant_type_is_refused(pg_engine):
     with pytest.raises(OAuthError) as caught:
         await OAuthService(pg_engine).exchange({"grant_type": "password"})

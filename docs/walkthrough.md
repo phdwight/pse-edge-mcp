@@ -705,6 +705,7 @@ What revokes what:
 | Action | Effect |
 |---|---|
 | `revoke-token <plaintext>` | that one token |
+| Revoke on `/account` (Sessions &amp; tokens) | that token family — self-service sign-out of one client |
 | `disable-user` | the account and all its tokens |
 | `revoke-machine-client` | the client, its outstanding tokens, **and** its service account |
 | refresh reuse detected | every token in that `family_id` |
