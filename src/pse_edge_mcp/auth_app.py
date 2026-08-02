@@ -53,9 +53,10 @@ logger = logging.getLogger(__name__)
 _PAGE_STYLE = """
 <style>
  *{box-sizing:border-box}
+ html{min-height:100%}
  body{font:16px/1.55 system-ui,-apple-system,"Segoe UI",sans-serif;margin:0;color:#1c1b2e;
    min-height:100vh;background:linear-gradient(115deg,#cdc6f2 0%,#e4e0fa 30%,#eef0f7 55%,
-   #cfe9ee 100%) fixed}
+   #cfe9ee 100%)}
  a{color:#4f46e5;text-decoration:none}
  a:hover{text-decoration:underline}
  code{background:#edeaf9;padding:.12rem .4rem;border-radius:.35rem;font-size:.92em}
@@ -117,6 +118,7 @@ _PAGE_STYLE = """
  button.ghost:hover{background:#f6f5fb}
  input{font:inherit;padding:.6rem .8rem;border:1px solid rgba(28,27,46,.18);
    border-radius:.75rem;background:#fff;width:100%;max-width:24rem;margin:.4rem 0 1rem}
+ input:focus{outline:2px solid #8b83f6;outline-offset:1px;border-color:#8b83f6}
  label{font-weight:600}
  .chip{display:inline-block;padding:.15rem .6rem;border-radius:1rem;font-size:.8rem;
    font-weight:600;background:#d9f2df;color:#1a7a3a;vertical-align:middle}
