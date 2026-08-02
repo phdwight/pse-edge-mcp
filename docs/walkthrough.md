@@ -13,7 +13,7 @@ understand it, debug it, or extend it.
 | `docs/deploy.md` | Running it in production |
 | `CLAUDE.md` | The short form of the invariants, kept next to the code |
 
-Version described: **0.11.0**. 36 modules, ~8,100 lines of source, ~6,150 lines of tests.
+Version described: **0.12.0**. 36 modules, ~8,500 lines of source, ~6,400 lines of tests.
 
 ---
 
@@ -231,11 +231,11 @@ mocking at all**.
 
 | Module | Lines | Responsibility |
 |---|---:|---|
-| `auth_app.py` | 930 | Browser- and client-facing routes: OAuth, signup, login, account, privacy |
+| `auth_app.py` | 1220 | Browser- and client-facing routes: OAuth, signup, login, the tabbed account settings UI, privacy |
 | `parsers.py` | 752 | HTML/JSON → dicts. The most PSE-specific code in the repo |
-| `oauth.py` | 721 | OAuth 2.1 server: DCR, PKCE, code exchange, refresh rotation, client_credentials |
+| `oauth.py` | 748 | OAuth 2.1 server: DCR, PKCE, code exchange, refresh rotation, client_credentials |
 | `repositories.py` | 526 | The domain layer — five repositories |
-| `admin.py` | 460 | `pse-edge-admin` CLI, including machine-client provisioning |
+| `admin.py` | 485 | `pse-edge-admin` CLI, including machine-client provisioning |
 | `passkeys.py` | 424 | WebAuthn ceremonies and browser sessions |
 | `server.py` | 491 | The 13 tool definitions |
 | `models.py` | 332 | 24 Pydantic models |
@@ -483,8 +483,10 @@ throttles itself, and revocation is surgical.
 
 ### Privacy surface
 
-`/account` shows a signed-in user everything held about them; `POST /account/delete` erases
-it immediately, in one transaction, with no approval step. Usage is aggregated **per
+`/account` shows a signed-in user everything held about them — since 0.12.0 as a tabbed
+settings page that also lets them sign any connected client out (`POST
+/account/sessions/revoke`, scoped to the caller's own token families); `POST
+/account/delete` erases it all immediately, in one transaction, with no approval step. Usage is aggregated **per
 user-hour, never per request** — minimal collection *and* no write on the hot path — and
 purged after 90 days.
 

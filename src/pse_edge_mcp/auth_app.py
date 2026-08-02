@@ -8,13 +8,21 @@ Routes (all outside `/mcp`, and all exempt from the bearer middleware):
   GET  /oauth/authorize                        starts a flow, renders login/consent
   POST /oauth/token                            code exchange + refresh rotation
   GET|POST /signup, /verify, /login, /consent  the passkey ceremonies and pages
+  GET  /, /enroll, /privacy                    front door, passkey enrollment, policy
+  GET  /account                                the tabbed settings page (subject access)
+  POST /account/delete                         self-service erasure (plan §6a)
+  POST /account/sessions/revoke                sign one connected client out (own
+                                               token families only)
+  POST /account/machine-clients[/revoke]       operator-only provisioning (PSE_ADMIN_EMAILS)
 
 Hand-rolled routing on the same pure-ASGI footing as `auth_middleware`: no new
 dependency, no framework indirection, and the whole surface is enumerable above.
 
-Pages are deliberately plain HTML with a little inline JavaScript — WebAuthn ceremonies
-must run in the browser, but nothing here needs a build step, and a page that is a single
-readable file is a page an operator can audit.
+Pages share one hand-written stylesheet (`_PAGE_STYLE`) and a little inline JavaScript —
+WebAuthn ceremonies must run in the browser, and the account page's tab bar is progressive
+enhancement (no JS: the sections render stacked, every form still works). Nothing needs a
+build step or an external asset, and a page that is a single readable file is a page an
+operator can audit.
 """
 
 from __future__ import annotations
