@@ -277,6 +277,88 @@ async def test_refresh_rotates_and_returns_a_new_pair(pg_engine):
     assert second["access_token"] != first["access_token"]
 
 
+async def test_refresh_revokes_the_previous_access_token(pg_engine):
+    """Rotation retires the whole pair: the access token minted alongside the spent
+    refresh token must not outlive the rotation it belongs to."""
+    from sqlalchemy import select
+
+    from pse_edge_mcp.auth import hash_token
+    from pse_edge_mcp.db import auth_tokens
+
+    service = OAuthService(pg_engine)
+    client_id, code, verifier = await complete_authorize(pg_engine, service)
+    first = await service.exchange(
+        {
+            "grant_type": "authorization_code",
+            "code": code,
+            "code_verifier": verifier,
+            "client_id": client_id,
+            "redirect_uri": REDIRECT,
+        }
+    )
+
+    await service.exchange(
+        {
+            "grant_type": "refresh_token",
+            "refresh_token": first["refresh_token"],
+            "client_id": client_id,
+        }
+    )
+
+    async with pg_engine.connect() as conn:
+        row = (
+            await conn.execute(
+                select(auth_tokens.c.revoked_at).where(
+                    auth_tokens.c.token_hash == hash_token(first["access_token"])
+                )
+            )
+        ).first()
+    assert row.revoked_at is not None, "the old access token must die with its refresh token"
+
+
+async def test_minting_purges_rows_that_have_expired(pg_engine):
+    """Every mint sweeps expired rows — nothing else deletes them, and without the sweep
+    the table only ever grows."""
+    from datetime import UTC, datetime, timedelta
+
+    from sqlalchemy import insert, select
+
+    from pse_edge_mcp.db import auth_tokens
+
+    service = OAuthService(pg_engine)
+    client_id, code, verifier = await complete_authorize(pg_engine, service)
+    stale_user = await make_user(pg_engine, f"{secrets.token_hex(4)}@example.com")
+    stale_hash = secrets.token_hex(32)
+    async with pg_engine.begin() as conn:
+        await conn.execute(
+            insert(auth_tokens).values(
+                token_hash=stale_hash,
+                user_id=stale_user,
+                kind="access",
+                expires_at=datetime.now(UTC) - timedelta(days=1),
+                family_id="stale-family",
+            )
+        )
+
+    await service.exchange(
+        {
+            "grant_type": "authorization_code",
+            "code": code,
+            "code_verifier": verifier,
+            "client_id": client_id,
+            "redirect_uri": REDIRECT,
+        }
+    )
+
+    async with pg_engine.connect() as conn:
+        row = (
+            await conn.execute(
+                select(auth_tokens.c.token_hash).where(auth_tokens.c.token_hash == stale_hash)
+            )
+        ).first()
+    assert row is None, "an expired row must be purged by the next mint"
+
+
 async def test_reusing_a_rotated_refresh_token_revokes_the_whole_family(pg_engine):
     """Rotation means a healthy client never replays an old token — seeing one means it
     leaked, so the entire family dies (RFC 9700 §4.14)."""

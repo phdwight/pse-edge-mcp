@@ -70,11 +70,18 @@ async def summarise(engine: AsyncEngine, user_id: str) -> AccountSummary:
                 .where(webauthn_credentials.c.user_id == user_id)
             )
         ).scalar_one()
+        # "Active" means usable right now: unrevoked *and* unexpired. Expired rows
+        # linger until a mint purges them, and counting those would show a user four
+        # "active tokens" for one connected client.
         tokens = (
             await conn.execute(
                 select(func.count())
                 .select_from(auth_tokens)
-                .where(auth_tokens.c.user_id == user_id, auth_tokens.c.revoked_at.is_(None))
+                .where(
+                    auth_tokens.c.user_id == user_id,
+                    auth_tokens.c.revoked_at.is_(None),
+                    auth_tokens.c.expires_at > func.now(),
+                )
             )
         ).scalar_one()
         usage = (

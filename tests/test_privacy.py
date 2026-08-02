@@ -184,6 +184,31 @@ async def test_summary_shows_what_is_held_without_exposing_secrets(pg_engine):
     assert "token" not in str(summary).lower().replace("active_tokens", "")
 
 
+async def test_expired_tokens_are_not_counted_as_active(pg_engine):
+    """"Active" means usable now. Expired rows linger until a mint purges them, and
+    counting them would show several "active tokens" for one connected client."""
+    import secrets
+
+    from sqlalchemy import insert
+
+    from pse_edge_mcp.db import auth_tokens
+
+    user_id = await create_user(pg_engine, "expired-tokens@example.com")
+    async with pg_engine.begin() as conn:
+        await conn.execute(
+            insert(auth_tokens).values(
+                token_hash=secrets.token_hex(32),
+                user_id=user_id,
+                kind="access",
+                expires_at=datetime.now(UTC) - timedelta(minutes=1),
+            )
+        )
+
+    summary = await summarise(pg_engine, user_id)
+
+    assert summary.active_tokens == 0
+
+
 # --- erasure -----------------------------------------------------------------
 
 

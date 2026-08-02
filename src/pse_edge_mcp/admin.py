@@ -274,7 +274,7 @@ async def list_users(engine: AsyncEngine) -> list[dict[str, Any]]:
             users.c.quota_per_minute,
             users.c.quota_per_day,
             func.count(auth_tokens.c.token_hash)
-            .filter(auth_tokens.c.revoked_at.is_(None))
+            .filter(auth_tokens.c.revoked_at.is_(None), auth_tokens.c.expires_at > func.now())
             .label("active_tokens"),
         )
         .select_from(users.outerjoin(auth_tokens, auth_tokens.c.user_id == users.c.id))
