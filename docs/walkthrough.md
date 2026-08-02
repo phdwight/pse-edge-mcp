@@ -679,12 +679,13 @@ minute. Lower it if you want faster revocation; do not lower it expecting a spee
 
 ### 9.8 Rotation, reuse, and revocation
 
-Every refresh mints a **new** access+refresh pair and revokes the presented one. All tokens
-descended from one authorization share a `family_id`:
+Every refresh mints a **new** access+refresh pair and revokes the pair it replaces — the
+presented refresh token *and* the access token minted alongside it, which nothing
+legitimate still holds. All tokens descended from one authorization share a `family_id`:
 
 ```
    auth code ─▶ [access₁ refresh₁]  family=F
-                     └─ refresh ──▶ [access₂ refresh₂]  family=F   (refresh₁ revoked)
+                     └─ refresh ──▶ [access₂ refresh₂]  family=F   (access₁ refresh₁ revoked)
                                           └─ refresh ─▶ [access₃ refresh₃]  family=F
 
    refresh₁ presented again  ──▶  it was already revoked, so it leaked
@@ -695,11 +696,16 @@ descended from one authorization share a `family_id`:
 Reuse of an already-rotated refresh token is treated as **theft, not a mistake** — the
 legitimate holder gets logged out too, which is the intended trade.
 
+Revocation marks rows; deletion is separate. **Every mint opportunistically purges rows
+past their expiry**, so `auth_tokens` holds only rows that still matter: live credentials,
+plus revoked ones kept for reuse detection until they would have expired anyway.
+
 What revokes what:
 
 | Action | Effect |
 |---|---|
 | `revoke-token <plaintext>` | that one token |
+| Revoke on `/account` (Sessions &amp; tokens) | that token family — self-service sign-out of one client |
 | `disable-user` | the account and all its tokens |
 | `revoke-machine-client` | the client, its outstanding tokens, **and** its service account |
 | refresh reuse detected | every token in that `family_id` |

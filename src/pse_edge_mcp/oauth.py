@@ -21,8 +21,10 @@ The rules that matter, spelled out because getting any of them wrong is a vulner
   `UPDATE … WHERE consumed_at IS NULL RETURNING`, so two racing exchanges cannot both
   succeed even across replicas.
 - **Refresh tokens rotate, and reuse is theft.** Every refresh mints a new pair and
-  revokes the old token within its `family_id`. A revoked family member presented again
-  means the token leaked — the whole family is revoked (RFC 9700 §4.14 guidance).
+  revokes the family's live tokens — the presented refresh token *and* the access token
+  minted alongside it, which nothing legitimate still holds. A revoked family member
+  presented again means the token leaked — the whole family is revoked (RFC 9700 §4.14
+  guidance).
 - **DCR clients are public and hold no secret.** Registration issues no client_secret;
   there is nothing to store, leak, or verify. PKCE binds the code to the client instance.
 - **`client_credentials` is for machine clients only, and machine clients exist only by
@@ -48,8 +50,8 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.parse import unquote_plus, urlencode, urlparse
 
-from sqlalchemy import insert, select, update
-from sqlalchemy.ext.asyncio import AsyncEngine
+from sqlalchemy import delete, insert, select, update
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from .auth import generate_token, hash_token
 from .db import auth_tokens, oauth_clients, oauth_flows
@@ -561,6 +563,7 @@ class OAuthService:
         access = generate_token()
         now = self._now()
         async with self._engine.begin() as conn:
+            await self._purge_expired(conn, now)
             await conn.execute(
                 insert(auth_tokens).values(
                     token_hash=hash_token(access),
@@ -674,14 +677,37 @@ class OAuthService:
         if form.get("client_id", "") != (row.client_id or ""):
             raise OAuthError("invalid_grant", "client_id does not match this refresh token")
 
-        # Rotate: retire the presented token, mint a successor in the same family.
+        # Rotate: retire the whole live family — the presented refresh token and the
+        # access token minted alongside it, which nothing legitimate still holds — then
+        # mint successors in the same family. Revoking only the refresh token would let
+        # the old access token outlive the rotation it belongs to.
         async with self._engine.begin() as conn:
-            await conn.execute(
-                update(auth_tokens)
-                .where(auth_tokens.c.token_hash == presented_hash)
-                .values(revoked_at=now)
-            )
+            if row.family_id:
+                await conn.execute(
+                    update(auth_tokens)
+                    .where(
+                        auth_tokens.c.family_id == row.family_id,
+                        auth_tokens.c.revoked_at.is_(None),
+                    )
+                    .values(revoked_at=now)
+                )
+            else:
+                # Familyless row (shouldn't exist for kind='refresh'): revoke only the
+                # presented token — `family_id IS NULL` would sweep unrelated users.
+                await conn.execute(
+                    update(auth_tokens)
+                    .where(auth_tokens.c.token_hash == presented_hash)
+                    .values(revoked_at=now)
+                )
         return await self._mint(row.user_id, row.client_id, DEFAULT_SCOPE, row.family_id)
+
+    @staticmethod
+    async def _purge_expired(conn: AsyncConnection, now: datetime) -> None:
+        """Opportunistic hygiene, piggybacked on mint transactions: an expired row can
+        never authenticate again, and nothing else ever deletes one — without this the
+        table only grows. Refresh-reuse detection is unaffected: it needs a revoked row
+        only until that row expires, and rotation keeps the original expiry."""
+        await conn.execute(delete(auth_tokens).where(auth_tokens.c.expires_at <= now))
 
     async def _mint(
         self, user_id: str, client_id: str | None, scope: str, family_id: str | None = None
@@ -690,6 +716,7 @@ class OAuthService:
         family = family_id or uuid.uuid4().hex
         now = self._now()
         async with self._engine.begin() as conn:
+            await self._purge_expired(conn, now)
             await conn.execute(
                 insert(auth_tokens).values(
                     [

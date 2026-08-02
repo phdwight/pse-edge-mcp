@@ -518,7 +518,7 @@ async def test_account_page_shows_the_subject_their_own_data(stack):
 
     assert page.status_code == 200
     assert "mydata@example.com" in page.text
-    assert "Passkeys:</strong> 1" in page.text.replace("\n", "")
+    assert "1 passkey" in page.text
 
 
 async def test_account_page_requires_a_session(stack):
@@ -547,6 +547,93 @@ async def test_self_deletion_erases_the_account_through_the_endpoint(stack):
         # Signing up again with the same address must be possible — erasure was complete.
         again = await http.post("/signup", data={"email": "goodbye@example.com"})
         assert again.status_code == 200
+
+
+async def _authorize_tokens(
+    http: httpx.AsyncClient, client_name: str = "Claude"
+) -> tuple[str, dict[str, Any]]:
+    """Register a DCR client and run authorize → consent → exchange, reusing the
+    already-authenticated browser session. Returns (client_id, token response)."""
+    registration = await http.post(
+        "/oauth/register", json={"client_name": client_name, "redirect_uris": [REDIRECT]}
+    )
+    client_id: str = registration.json()["client_id"]
+    verifier, challenge = pkce_pair()
+    consent_page = await http.get(
+        "/oauth/authorize",
+        params={
+            "client_id": client_id,
+            "redirect_uri": REDIRECT,
+            "response_type": "code",
+            "code_challenge": challenge,
+            "code_challenge_method": "S256",
+            "state": "s",
+        },
+    )
+    assert consent_page.status_code == 200, "an authenticated session goes straight to consent"
+    flow_id = flow_id_from_consent(consent_page.text)
+    csrf = consent_page.text.split("name=csrf_token value='")[1].split("'")[0]
+    consent = await http.post("/consent", data={"flow_id": flow_id, "csrf_token": csrf})
+    code = parse_qs(urlparse(consent.headers["location"]).query)["code"][0]
+    tokens = await http.post(
+        "/oauth/token",
+        data={
+            "grant_type": "authorization_code",
+            "code": code,
+            "code_verifier": verifier,
+            "client_id": client_id,
+            "redirect_uri": REDIRECT,
+        },
+    )
+    assert tokens.status_code == 200
+    return client_id, tokens.json()
+
+
+async def test_the_security_tab_lists_sessions_and_revokes_one(stack):
+    """The Sessions & tokens control: one row per connected client, named, and revoking
+    it kills the whole token family — the client's refresh grant dies with it."""
+    async with serving(stack) as (http, email):
+        await enroll_passkey(http, email, "sessions@example.com")
+        client_id, tokens = await _authorize_tokens(http, client_name="Claude Desktop")
+
+        page = await http.get("/account")
+        assert "Claude Desktop" in page.text, "the connected client is listed by name"
+        family = page.text.split("name=family_id value='")[1].split("'")[0]
+        csrf = page.text.split("name=csrf_token value='")[1].split("'")[0]
+
+        revoked = await http.post(
+            "/account/sessions/revoke", data={"csrf_token": csrf, "family_id": family}
+        )
+        assert revoked.status_code == 302
+
+        after = await http.get("/account")
+        assert "Claude Desktop" not in after.text, "the revoked session drops off the page"
+
+        refused = await http.post(
+            "/oauth/token",
+            data={
+                "grant_type": "refresh_token",
+                "refresh_token": tokens["refresh_token"],
+                "client_id": client_id,
+            },
+        )
+        assert refused.status_code == 400
+        assert refused.json()["error"] == "invalid_grant", "the family is genuinely dead"
+
+
+async def test_session_revoke_needs_a_valid_csrf_token(stack):
+    async with serving(stack) as (http, email):
+        await enroll_passkey(http, email, "sessions-csrf@example.com")
+        _, _ = await _authorize_tokens(http, client_name="Claude Desktop")
+        page = await http.get("/account")
+        family = page.text.split("name=family_id value='")[1].split("'")[0]
+
+        forged = await http.post(
+            "/account/sessions/revoke", data={"csrf_token": "nope", "family_id": family}
+        )
+        assert forged.status_code == 403
+        after = await http.get("/account")
+        assert "Claude Desktop" in after.text, "the session survives a forged request"
 
 
 async def test_deletion_without_a_csrf_token_is_refused(stack):
@@ -1062,6 +1149,11 @@ async def test_a_normal_account_cannot_reach_the_machine_client_routes(stack):
     assert revoked.status_code == 404
 
 
+def _created_field(page_text: str, name: str) -> str:
+    """Pull client_id / client_secret out of the created-machine-client page."""
+    return page_text.split(f"{name}</span>")[1].split("<code>")[1].split("</code>")[0]
+
+
 @pytest.mark.postgres
 async def test_an_operator_creates_a_machine_client_and_sees_the_secret_once(stack, pg_engine):
     async with serving(stack) as (http, email):
@@ -1078,8 +1170,8 @@ async def test_an_operator_creates_a_machine_client_and_sees_the_secret_once(sta
         assert created.headers["cache-control"] == "no-store", (
             "a cached copy of this page IS the credential"
         )
-        secret = created.text.split("client_secret:</strong> <code>")[1].split("</code>")[0]
-        client_id = created.text.split("client_id:</strong> <code>")[1].split("</code>")[0]
+        secret = _created_field(created.text, "client_secret")
+        client_id = _created_field(created.text, "client_id")
         assert secret and client_id.startswith("mcp-")
 
         # The secret is shown once and never rendered again — the account page must not leak it.
@@ -1101,7 +1193,7 @@ async def test_an_operator_revokes_a_machine_client_from_the_page(stack, pg_engi
         created = await http.post(
             "/account/machine-clients", data={"csrf_token": csrf, "name": "revoke-me"}
         )
-        client_id = created.text.split("client_id:</strong> <code>")[1].split("</code>")[0]
+        client_id = _created_field(created.text, "client_id")
 
         revoked = await http.post(
             "/account/machine-clients/revoke",

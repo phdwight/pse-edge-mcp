@@ -29,7 +29,7 @@ from urllib.parse import parse_qs, unquote_plus
 
 from sqlalchemy.ext.asyncio import AsyncEngine
 
-from .accounts import AccountSummary, erase, summarise
+from .accounts import AccountSummary, erase, revoke_session, summarise
 from .email import EmailSender
 from .oauth import (
     FatalAuthorizeError,
@@ -52,15 +52,124 @@ logger = logging.getLogger(__name__)
 
 _PAGE_STYLE = """
 <style>
- body{font:16px/1.5 system-ui,sans-serif;max-width:34rem;margin:4rem auto;padding:0 1rem;color:#111}
- button{font:inherit;padding:.6rem 1.1rem;border:0;border-radius:.4rem;
-   background:#1a5fb4;color:#fff;cursor:pointer}
- input{font:inherit;padding:.5rem;width:100%;box-sizing:border-box;margin:.4rem 0 1rem}
- .msg{padding:.75rem 1rem;border-radius:.4rem;background:#f6f5f4;margin:1rem 0}
- .err{background:#f9e0e0}
- code{background:#f6f5f4;padding:.1rem .3rem;border-radius:.2rem}
+ *{box-sizing:border-box}
+ html{min-height:100%}
+ body{font:16px/1.55 system-ui,-apple-system,"Segoe UI",sans-serif;margin:0;color:#1c1b2e;
+   min-height:100vh;background:linear-gradient(115deg,#cdc6f2 0%,#e4e0fa 30%,#eef0f7 55%,
+   #cfe9ee 100%)}
+ a{color:#4f46e5;text-decoration:none}
+ a:hover{text-decoration:underline}
+ code{background:#edeaf9;padding:.12rem .4rem;border-radius:.35rem;font-size:.92em}
+ pre{background:#f4f2fc;padding:1rem;border-radius:.75rem;overflow-x:auto}
+ .topbar{display:flex;align-items:center;gap:.7rem;padding:.7rem 1.5rem;position:sticky;top:0;
+   background:rgba(255,255,255,.72);backdrop-filter:blur(10px);
+   border-bottom:1px solid rgba(28,27,46,.08);z-index:10}
+ .brand{display:flex;align-items:center;gap:.6rem;font-weight:800;font-size:1.1rem;
+   color:#1c1b2e !important;text-decoration:none !important}
+ .brand .mark{width:1.6rem;height:1.6rem;border-radius:.5rem;
+   background:linear-gradient(135deg,#8b83f6,#5b54e8)}
+ .topnav{margin-left:auto;display:flex;align-items:center;gap:1.3rem}
+ .topnav a{color:#4b4a63;font-weight:500}
+ .topnav a.current{background:#fff;padding:.45rem 1rem;border-radius:.7rem;
+   box-shadow:0 1px 5px rgba(28,27,46,.14);color:#1c1b2e;font-weight:600}
+ main{max-width:64rem;margin:0 auto;padding:2.5rem 1.5rem 4rem}
+ main.narrow{max-width:30rem;padding-top:4rem}
+ .eyebrow{letter-spacing:.18em;text-transform:uppercase;font-size:.78rem;font-weight:700;
+   color:#6d66e8;margin:0 0 .3rem}
+ h1{font-size:2.3rem;font-weight:800;margin:.1rem 0 1rem;letter-spacing:-.02em}
+ .pagehead{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;
+   gap:1rem}
+ .pagehead .who{text-align:right;color:#4b4a63;font-size:.95rem}
+ .card{background:rgba(255,255,255,.66);border:1px solid rgba(255,255,255,.85);
+   border-radius:1.1rem;box-shadow:0 8px 24px rgba(60,55,120,.08);padding:1.2rem 1.5rem;
+   margin:1rem 0}
+ .card.dangerzone{background:rgba(252,236,238,.72)}
+ .tabs{display:flex;gap:.3rem;background:rgba(255,255,255,.6);border-radius:1rem;
+   padding:.35rem;box-shadow:0 4px 16px rgba(60,55,120,.08);margin:1.6rem 0 .6rem;
+   flex-wrap:wrap}
+ .tabs a{flex:1;text-align:center;padding:.6rem .9rem;border-radius:.8rem;color:#3b3a52;
+   font-weight:600;white-space:nowrap}
+ .tabs a:hover{text-decoration:none;background:rgba(255,255,255,.7)}
+ .tabs a.active{background:#fff;box-shadow:0 2px 8px rgba(28,27,46,.14);color:#111}
+ .tabs a.tab-danger{color:#c02636}
+ html.js section.tab{display:none}
+ html.js section.tab.active{display:block}
+ .sectionhead{display:flex;align-items:baseline;justify-content:space-between;gap:1rem;
+   border-bottom:1px solid rgba(28,27,46,.12);padding-bottom:.45rem;margin:1.8rem 0 .2rem}
+ .sectionhead h2{margin:0;font-size:1.3rem;font-weight:700}
+ .sectionhead .aside{color:#6a687f;font-size:.9rem}
+ h2{font-size:1.3rem;font-weight:700}
+ table{width:100%;border-collapse:collapse}
+ th{font-size:.76rem;letter-spacing:.08em;text-transform:uppercase;color:#6a687f;
+   text-align:left;padding:.5rem .6rem;border-bottom:1px solid rgba(28,27,46,.1)}
+ td{padding:.75rem .6rem;border-bottom:1px solid rgba(28,27,46,.07)}
+ tr:last-child td{border-bottom:0}
+ .row{display:flex;align-items:center;justify-content:space-between;gap:1rem;
+   padding:.85rem 0;border-bottom:1px solid rgba(28,27,46,.08)}
+ .row:last-child{border-bottom:0}
+ .row .grow{flex:1}
+ button{font:inherit;font-weight:600;padding:.6rem 1.2rem;border:0;border-radius:.75rem;
+   background:#5b54e8;color:#fff;cursor:pointer;box-shadow:0 2px 8px rgba(91,84,232,.35)}
+ button:hover{background:#4f48d6}
+ button.danger{background:#c9333f;box-shadow:0 2px 8px rgba(201,51,63,.3)}
+ button.danger:hover{background:#b32b37}
+ button.ghost{background:#fff;color:#1c1b2e;border:1px solid rgba(28,27,46,.15);
+   box-shadow:0 1px 3px rgba(28,27,46,.08)}
+ button.ghost:hover{background:#f6f5fb}
+ input{font:inherit;padding:.6rem .8rem;border:1px solid rgba(28,27,46,.18);
+   border-radius:.75rem;background:#fff;width:100%;max-width:24rem;margin:.4rem 0 1rem}
+ input:focus{outline:2px solid #8b83f6;outline-offset:1px;border-color:#8b83f6}
+ label{font-weight:600}
+ .chip{display:inline-block;padding:.15rem .6rem;border-radius:1rem;font-size:.8rem;
+   font-weight:600;background:#d9f2df;color:#1a7a3a;vertical-align:middle}
+ .chip.warn{background:#faeed2;color:#946200}
+ .muted{color:#6a687f}
+ .btnlink{display:inline-block;font-weight:600;padding:.6rem 1.2rem;border-radius:.75rem;
+   background:#fff;border:1px solid rgba(28,27,46,.15);color:#1c1b2e !important;
+   box-shadow:0 1px 3px rgba(28,27,46,.08)}
+ .btnlink:hover{background:#f6f5fb;text-decoration:none !important}
+ .msg{padding:.8rem 1.1rem;border-radius:.75rem;background:rgba(255,255,255,.75);
+   border:1px solid rgba(255,255,255,.9);margin:1rem 0}
+ .err{background:#f9e0e0;border-color:#f1c7c7}
 </style>
 """
+
+_TOPBAR = """
+<header class=topbar>
+  <a class=brand href="/"><span class=mark></span>PSE Edge MCP</a>
+  <nav class=topnav>
+    <a href="/privacy">Privacy</a>
+    <a class=current href="/account">Account</a>
+  </nav>
+</header>
+"""
+
+# Tab switching for the account page. Progressive enhancement: without JavaScript the
+# `html.js` CSS never applies and every section simply renders stacked, forms included.
+_TABS_JS = """
+<script>
+function showTab(id){
+  document.querySelectorAll('section.tab').forEach(s =>
+    s.classList.toggle('active', s.id === id));
+  document.querySelectorAll('.tabs a').forEach(a =>
+    a.classList.toggle('active', a.getAttribute('href') === '#' + id));
+}
+function currentTab(){
+  const id = location.hash.slice(1);
+  const first = document.querySelector('section.tab');
+  return document.getElementById(id) ? id : (first ? first.id : '');
+}
+addEventListener('DOMContentLoaded', () => showTab(currentTab()));
+addEventListener('hashchange', () => showTab(currentTab()));
+</script>
+"""
+
+
+def _fmt_date(value: Any) -> str:
+    try:
+        return f"{value:%b} {value.day}, {value:%Y}"
+    except (AttributeError, ValueError, TypeError):
+        return str(value)
 
 # Shared browser helper: WebAuthn speaks ArrayBuffers, JSON speaks base64url.
 _WEBAUTHN_JS = """
@@ -108,7 +217,17 @@ async function postJSON(url, body){
 
 
 def _html(body: str, status: int = 200) -> tuple[int, dict[str, str], bytes]:
-    page = f"<!doctype html><meta charset=utf-8><title>PSE Edge MCP</title>{_PAGE_STYLE}{body}"
+    # Pages that don't lay themselves out (error fragments, simple notices) get the
+    # narrow centered column; full pages start with their own <main>.
+    if not body.lstrip().startswith("<main"):
+        body = f"<main class=narrow>{body}</main>"
+    page = (
+        "<!doctype html><html><head><meta charset=utf-8>"
+        "<meta name=viewport content='width=device-width,initial-scale=1'>"
+        f"<title>PSE Edge MCP</title>{_PAGE_STYLE}"
+        "<script>document.documentElement.classList.add('js')</script>"
+        f"</head><body>{_TOPBAR}{body}</body></html>"
+    )
     return status, {"content-type": "text/html; charset=utf-8"}, page.encode()
 
 
@@ -274,6 +393,7 @@ class AuthApp:
             ("/privacy", "GET"): self._privacy,
             ("/account", "GET"): self._account,
             ("/account/delete", "POST"): self._account_delete,
+            ("/account/sessions/revoke", "POST"): self._revoke_session,
             ("/account/machine-clients", "POST"): self._create_machine_client,
             ("/account/machine-clients/revoke", "POST"): self._revoke_machine_client,
         }
@@ -295,14 +415,21 @@ class AuthApp:
         if session and session.kind == "authenticated" and session.user_id:
             return _redirect(f"{self._public}/account")
         return _html(
+            "<main class=narrow>"
+            "<p class=eyebrow>Unofficial · End of day</p>"
             "<h1>PSE Edge MCP</h1>"
+            "<div class=card>"
             "<p>End-of-day Philippine Stock Exchange data over the Model Context "
             "Protocol.</p>"
             "<p>Point an MCP client at this server and it will bring you back here to "
             "authorize — you do not need to sign up first:</p>"
             f"<pre>{self._public}/mcp</pre>"
-            "<p><a href='/signup'>Create an account</a> · <a href='/login'>Sign in</a> · "
-            "<a href='/privacy'>Privacy</a></p>"
+            "<p style='margin-bottom:0'><a class=btnlink href='/signup'>Create an account</a> "
+            "&nbsp;<a class=btnlink href='/login'>Sign in</a></p>"
+            "</div>"
+            "<p class=muted>See the <a href='/privacy'>privacy page</a> for what this "
+            "server holds about you — deliberately very little.</p>"
+            "</main>"
         )
 
     async def _favicon(
@@ -446,14 +573,20 @@ class AuthApp:
         self, scope: dict[str, Any], body: bytes
     ) -> tuple[int, dict[str, str], bytes]:
         return _html(
-            "<h1>Create an account</h1>"
-            "<p>We email you a link; you then enroll a passkey. No passwords.</p>"
-            "<form method=post action='/signup'>"
+            "<main class=narrow>"
+            "<p class=eyebrow>Sign up</p>"
+            "<h1 style='font-size:1.7rem'>Create an account</h1>"
+            "<div class=card>"
+            "<p style='margin-top:0'>We email you a link; you then enroll a passkey. "
+            "No passwords.</p>"
+            "<form method=post action='/signup' style='margin:0'>"
             "<label>Email<input name=email type=email required autofocus></label>"
             "<button type=submit>Send verification link</button></form>"
-            "<p style='font-size:.9em'>We store your email address and aggregated usage "
-            "counts only — see the <a href='/privacy'>privacy page</a>. You can delete "
-            "your account yourself at any time.</p>"
+            "</div>"
+            "<p class=muted style='font-size:.9em'>We store your email address and "
+            "aggregated usage counts only — see the <a href='/privacy'>privacy page</a>. "
+            "You can delete your account yourself at any time.</p>"
+            "</main>"
         )
 
     async def _signup_submit(
@@ -581,11 +714,35 @@ class AuthApp:
         # as the admin CLI, so it is deliberately not self-service.
         machine_panel = ""
         if self._is_admin(session):
-            from .admin import list_machine_clients
+            from .admin import list_machine_clients, machine_client_request_totals
 
             clients = await list_machine_clients(self._engine)
-            machine_panel = _machine_clients_panel(clients, session.csrf_token)
+            totals = await machine_client_request_totals(self._engine)
+            machine_panel = _machine_clients_panel(clients, session.csrf_token, totals)
         return _html(_account_page(summary, session.csrf_token, machine_panel))
+
+    async def _revoke_session(
+        self, scope: dict[str, Any], body: bytes
+    ) -> tuple[int, dict[str, str], bytes]:
+        """Self-service sign-out of one connected client: revoke its token family.
+
+        `revoke_session` is scoped to the caller's own user_id, so the family_id from the
+        form — attacker-suppliable like any form field — can only ever kill the caller's
+        own session.
+        """
+        session = await self._passkeys.load_session(_cookies(scope).get(SESSION_COOKIE))
+        if not session or session.kind != "authenticated" or not session.user_id:
+            return _redirect(f"{self._public}/login")
+        form = {k: v[0] for k, v in parse_qs(body.decode("utf-8")).items()}
+        if not constant_time_equals(form.get("csrf_token", ""), session.csrf_token):
+            return _html(
+                "<h1>Invalid request</h1><p>Please try again from your account page.</p>", 403
+            )
+        revoked = await revoke_session(
+            self._engine, session.user_id, form.get("family_id", "")
+        )
+        logger.info("web: a user revoked one of their token sessions (%d rows)", revoked)
+        return _redirect(f"{self._public}/account#security")
 
     async def _admin_form(
         self, scope: dict[str, Any], body: bytes
@@ -694,23 +851,33 @@ class AuthApp:
 
 def _consent_page(client_name: str, flow_id: str, email: str, csrf_token: str) -> str:
     return (
-        f"<h1>Authorize {client_name}</h1>"
-        f"<p>Signed in as <code>{email}</code>.</p>"
+        "<main class=narrow>"
+        "<p class=eyebrow>Authorize</p>"
+        f"<h1 style='font-size:1.7rem'>Authorize {client_name}</h1>"
+        "<div class=card>"
+        f"<p style='margin-top:0'>Signed in as <code>{email}</code>.</p>"
         f"<p>{client_name} is requesting access to PSE Edge market data on your behalf. "
         "It will be able to call this server's tools using your account's quota.</p>"
-        f"<form method=post action='/consent'>"
+        f"<form method=post action='/consent' style='margin:0'>"
         f"<input type=hidden name=flow_id value='{flow_id}'>"
         f"<input type=hidden name=csrf_token value='{csrf_token}'>"
         "<button type=submit>Allow</button></form>"
+        "</div></main>"
     )
 
 
 def _enroll_page_html() -> str:
     return """
-<h1>Enroll a passkey</h1>
-<p>Your email is verified. Create a passkey to finish — a fingerprint, face or device PIN.</p>
+<main class=narrow>
+<p class=eyebrow>Sign up</p>
+<h1 style='font-size:1.7rem'>Enroll a passkey</h1>
+<div class=card>
+<p style='margin-top:0'>Create a passkey to finish — a fingerprint, face or device
+PIN.</p>
 <div id=msg></div>
 <button id=go>Create passkey</button>
+</div>
+</main>
 <script>
 document.getElementById('go').onclick = async () => {
   try {
@@ -737,10 +904,16 @@ document.getElementById('go').onclick = async () => {
 
 def _login_page_html(flow_id: str) -> str:
     return f"""
-<h1>Sign in</h1>
-<p>Use the passkey you enrolled.</p>
+<main class=narrow>
+<p class=eyebrow>Welcome back</p>
+<h1 style='font-size:1.7rem'>Sign in</h1>
+<div class=card>
+<p style='margin-top:0'>Use the passkey you enrolled.</p>
 <div id=msg></div>
 <button id=go>Sign in with a passkey</button>
+</div>
+<p class=muted>No account yet? <a href='/signup'>Create one</a>.</p>
+</main>
 <script>
 const flowId = {json.dumps(flow_id)};
 document.getElementById('go').onclick = async () => {{
@@ -839,92 +1012,209 @@ market pages on its own behalf, never yours.</p>
 """
 
 
-def _machine_clients_panel(clients: list[dict[str, Any]], csrf_token: str) -> str:
+def _machine_clients_panel(
+    clients: list[dict[str, Any]], csrf_token: str, totals: dict[str, int] | None = None
+) -> str:
     """Operator-only: list machine clients and provide create/revoke controls."""
+    totals = totals or {}
     active = [c for c in clients if not c["revoked_at"]]
     rows = "".join(
         "<tr><td><code>{cid}</code></td><td>{name}</td>"
-        "<td><form method=post action='/account/machine-clients/revoke' style='margin:0'>"
+        "<td style='text-align:right'>{requests:,}</td>"
+        "<td style='text-align:right'>"
+        "<form method=post action='/account/machine-clients/revoke' style='margin:0'>"
         "<input type=hidden name=csrf_token value='{csrf}'>"
         "<input type=hidden name=client_id value='{cid}'>"
-        "<button type=submit style='background:#c01c28;padding:.3rem .7rem'>Revoke</button>"
+        "<button type=submit class=ghost>Revoke</button>"
         "</form></td></tr>".format(
             cid=html.escape(c["client_id"]),
             name=html.escape(c["client_name"]),
+            requests=totals.get(c["client_id"], 0),
             csrf=csrf_token,
         )
         for c in active
     )
     table = (
-        f"<table><tr><th>client_id</th><th>Name</th><th></th></tr>{rows}</table>"
+        "<table><tr><th>client_id</th><th>Name</th>"
+        "<th style='text-align:right'>Requests, 90d</th><th></th></tr>"
+        f"{rows}</table>"
         if rows
-        else "<p>No machine clients yet.</p>"
+        else "<p class=muted>No machine clients yet.</p>"
     )
     return f"""
-<h2>Machine clients (headless / agent access)</h2>
-<p>Create a <code>client_id</code>/<code>client_secret</code> pair for an agent that cannot
-sign in through a browser — a LangGraph app, a scheduled job. It authenticates with the
-<code>client_credentials</code> grant and gets its own quota. Give each agent its own.</p>
-{table}
+<div class=sectionhead><h2>Machine clients</h2>
+  <span class=aside>headless / agent access</span></div>
+<p class=muted>A <code>client_id</code>/<code>client_secret</code> pair for an agent that
+can't sign in through a browser — a LangGraph app, a scheduled job. It authenticates with
+the <code>client_credentials</code> grant and gets its own quota. Give each agent its
+own.</p>
+<div class=card>{table}</div>
 <form method=post action='/account/machine-clients'>
   <input type=hidden name=csrf_token value='{csrf_token}'>
-  <label>Name <input name=name placeholder="langgraph-app" required></label>
-  <button type=submit>Create machine client</button>
+  <label>Name<br><input name=name placeholder="langgraph-app" required></label><br>
+  <button type=submit>+ Create machine client</button>
 </form>
 """
 
 
 def _machine_client_created_page(created: dict[str, str], public_url: str) -> str:
     """Shown once, with the secret. It is not recoverable — only revocable and reissuable."""
+    cid = html.escape(created["client_id"])
+    secret = html.escape(created["client_secret"])
     return f"""
-<h1>Machine client created</h1>
-<div class='msg err'><strong>Copy the secret now — it is shown only this once.</strong>
-Only its hash is stored, so it cannot be retrieved later, only revoked and reissued from
-your account page.</div>
-<div class=msg>
-  <p><strong>client_id:</strong> <code>{html.escape(created['client_id'])}</code></p>
-  <p><strong>client_secret:</strong> <code>{html.escape(created['client_secret'])}</code></p>
+<main class=narrow>
+<p class=eyebrow>Settings</p>
+<h1 style='font-size:1.7rem'>Machine client created
+  <span class='chip warn'>shown once</span></h1>
+<div class=card>
+<p style='margin-top:0'><strong>Copy the secret now — it is shown only this once.</strong>
+Only its hash is stored, so it cannot be retrieved later. If you lose it, revoke this
+client and create another.</p>
+<div class=row><span class=muted>client_id</span>
+  <span><code>{cid}</code>
+  <button type=button class=ghost data-v="{cid}"
+    onclick="navigator.clipboard.writeText(this.dataset.v)">Copy</button></span></div>
+<div class=row><span class=muted>client_secret</span>
+  <span><code>{secret}</code>
+  <button type=button class=ghost data-v="{secret}"
+    onclick="navigator.clipboard.writeText(this.dataset.v)">Copy</button></span></div>
 </div>
 <h2>Use it</h2>
 <p>Exchange the pair for a 1-hour bearer token (no refresh token — re-request when it
 expires), then call the MCP endpoint with it:</p>
 <pre>curl -X POST {public_url}/oauth/token \\
   -d grant_type=client_credentials \\
-  -d client_id={html.escape(created['client_id'])} \\
+  -d client_id={cid} \\
   -d client_secret=&lt;the secret above&gt; \\
   -d scope=mcp -d resource={public_url}/mcp</pre>
-<p><a href='/account'>Back to your account</a></p>
+<p><a class=btnlink href='/account#machine'>Back to your account</a></p>
+</main>
 """
 
 
+def _plural(n: int, noun: str) -> str:
+    return f"{n} {noun}{'' if n == 1 else 's'}"
+
+
 def _account_page(summary: AccountSummary, csrf_token: str, machine_panel: str = "") -> str:
-    """The subject-access view plus the deletion control, on one page."""
-    rows = "".join(
+    """The subject-access view, session control and the deletion control, as one tabbed
+    page. Every tab is in the DOM (forms included) and a little script shows one at a
+    time — without JavaScript the sections simply stack, nothing is unreachable."""
+    tabs: list[tuple[str, str, str]] = [
+        ("profile", "Profile", ""),
+        ("usage", "Usage", ""),
+        ("security", "Security", ""),
+    ]
+    if machine_panel:
+        tabs.append(("machine", "Machine clients", ""))
+    tabs.append(("danger", "Danger zone", "tab-danger"))
+    tab_bar = "<nav class=tabs>" + "".join(
+        f"<a href='#{tid}' class='{cls}'>{label}</a>" for tid, label, cls in tabs
+    ) + "</nav>"
+
+    usage_rows = "".join(
         f"<tr><td>{day['day']}</td><td>{day['requests']}</td><td>{day['rejected']}</td></tr>"
         for day in summary.usage_days[:30]
     )
     usage_table = (
-        f"<table><tr><th>Day</th><th>Requests</th><th>Refused</th></tr>{rows}</table>"
-        if rows
-        else "<p>No usage recorded yet.</p>"
+        f"<table><tr><th>Day</th><th>Requests</th><th>Refused</th></tr>{usage_rows}</table>"
+        if usage_rows
+        else "<p class=muted>No usage recorded yet.</p>"
     )
+
+    passkey_rows = "".join(
+        "<div class=row><span><strong>Passkey</strong></span>"
+        f"<span class=muted>Added {_fmt_date(pk['created_at'])}</span></div>"
+        for pk in summary.passkey_list
+    ) or "<p class=muted>No passkeys enrolled.</p>"
+
+    session_rows = "".join(
+        "<tr><td>{name}</td><td class=muted>{issued}</td>"
+        "<td style='text-align:right'>"
+        "<form method=post action='/account/sessions/revoke' style='margin:0'>"
+        "<input type=hidden name=csrf_token value='{csrf}'>"
+        "<input type=hidden name=family_id value='{fid}'>"
+        "<button type=submit class=ghost>Revoke</button></form></td></tr>".format(
+            name=html.escape(s["client_name"] or "CLI token"),
+            issued=_fmt_date(s["created_at"]),
+            csrf=csrf_token,
+            fid=html.escape(s["family_id"] or ""),
+        )
+        for s in summary.sessions
+    )
+    sessions_table = (
+        f"<table><tr><th>Client</th><th>Issued</th><th></th></tr>{session_rows}</table>"
+        if session_rows
+        else "<p class=muted>No connected clients right now.</p>"
+    )
+
+    machine_section = (
+        f"<section class=tab id=machine>{machine_panel}</section>" if machine_panel else ""
+    )
+
     return f"""
-<h1>Your account</h1>
-<div class=msg>
-  <p><strong>Email:</strong> <code>{summary.email}</code></p>
-  <p><strong>Member since:</strong> {summary.created_at:%Y-%m-%d}</p>
-  <p><strong>Passkeys:</strong> {summary.passkeys} &nbsp;
-     <strong>Active tokens:</strong> {summary.active_tokens}</p>
-</div>
-<h2>Usage (kept 90 days)</h2>
-{usage_table}
-{machine_panel}
-<h2>Delete your account</h2>
-<p>This removes your account, passkeys, tokens and usage history immediately and
-permanently. It cannot be undone. See the <a href="/privacy">privacy page</a>.</p>
-<form method=post action='/account/delete'
-      onsubmit="return confirm('Permanently delete your account? This cannot be undone.')">
-  <input type=hidden name=csrf_token value='{csrf_token}'>
-  <button type=submit style="background:#c01c28">Delete my account</button>
-</form>
+<main>
+ <div class=pagehead>
+  <div><p class=eyebrow>Settings</p><h1 style='margin-bottom:0'>Your account</h1></div>
+  <div class=who>
+    <div><code>{summary.email}</code></div>
+    <div>Member since {_fmt_date(summary.created_at)} ·
+         {_plural(summary.passkeys, "passkey")} ·
+         {_plural(summary.active_tokens, "active token")}</div>
+  </div>
+ </div>
+ {tab_bar}
+
+ <section class=tab id=profile>
+  <div class=sectionhead><h2>Identity</h2></div>
+  <div class=card>
+   <div class=row><span class=muted>Email</span>
+     <span><code>{summary.email}</code> <span class=chip>&#10003; verified</span></span></div>
+   <div class=row><span class=muted>Member since</span>
+     <span>{_fmt_date(summary.created_at)}</span></div>
+  </div>
+ </section>
+
+ <section class=tab id=usage>
+  <div class=sectionhead><h2>Usage</h2><span class=aside>kept 90 days</span></div>
+  <div class=card>{usage_table}</div>
+ </section>
+
+ <section class=tab id=security>
+  <div class=sectionhead><h2>Passkeys</h2></div>
+  <p class=muted>Passkeys are how you sign in. Keep at least two so losing a device
+  doesn't lock you out.</p>
+  <div class=card>{passkey_rows}</div>
+  <p><a class=btnlink href='/enroll'>+ Add a passkey</a></p>
+  <div class=sectionhead><h2>Sessions &amp; tokens</h2>
+    <span class=aside>{_plural(summary.active_tokens, "active token")}</span></div>
+  <p class=muted>One row per connected client. Revoking signs that client out within a
+  minute. No IP addresses and no per-request activity are recorded — see the
+  <a href='/privacy'>privacy page</a>.</p>
+  <div class=card>{sessions_table}</div>
+ </section>
+
+ {machine_section}
+
+ <section class=tab id=danger>
+  <div class=sectionhead><h2>Danger zone</h2></div>
+  <div class='card dangerzone'>
+   <div class=row>
+    <div class=grow>
+     <strong>Delete your account</strong>
+     <p class=muted style='margin:.3rem 0 0'>This removes your account, passkeys, tokens
+     and usage history immediately and permanently. Any client still holding a token
+     stops working within a minute. It cannot be undone — see the
+     <a href='/privacy'>privacy page</a>.</p>
+    </div>
+    <form method=post action='/account/delete' style='margin:0'
+          onsubmit="return confirm('Permanently delete your account? This cannot be undone.')">
+     <input type=hidden name=csrf_token value='{csrf_token}'>
+     <button type=submit class=danger>Delete account</button>
+    </form>
+   </div>
+  </div>
+ </section>
+</main>
+{_TABS_JS}
 """
