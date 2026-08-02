@@ -3,6 +3,21 @@
 All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/) · Versioning: [SemVer](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+- **Documentation drift from 0.12.0, corrected the same day it shipped.** The walkthrough's
+  version banner, line counts and module map; `auth_app.py`'s module docstring, whose route
+  list claimed "the whole surface is enumerable above" while omitting seven routes (`/`,
+  `/enroll`, `/privacy` and the four `/account/*` actions) — an incomplete enumeration that
+  presents itself as complete is exactly the kind of stale security claim the 0.11.0 doc
+  sweep existed to kill; `docs/deploy.md`'s pinned-tag and health-check examples;
+  `docs/plan.md`, which still said passkeys were "wired into the Authlib authorization
+  server" (dropped in stage 2) and promised passkey "add/remove from an account settings
+  page" — now stated as built: add exists, removal deliberately does not (a sole-passkey
+  delete is a lockout); and the plan's CSRF list, which named two forms when four route
+  families now carry the token.
+
 ## [0.12.0] - 2026-08-02
 
 ### Added
