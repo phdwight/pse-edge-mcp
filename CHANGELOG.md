@@ -27,6 +27,14 @@ Format: [Keep a Changelog](https://keepachangelog.com/) · Versioning: [SemVer](
   `policy=` — an `EOD-frozen` fetch during market hours is the broken-invariant signal.
 
 ### Fixed
+- **A cache miss that raced a concurrent store no longer refetches.** Simultaneous
+  requests for the same key already collapsed into one upstream request (single-flight),
+  but a request whose cache miss landed just as another's fetch completed — or as another
+  worker wrote the shared Postgres cache — would start a fresh flight and query PSE Edge
+  again for data already stored. The flight now re-checks storage immediately before
+  going upstream and serves the stored entry (honestly marked `from_cache: true`)
+  instead. Matters more since the fetch-anytime change above, and across workers it
+  narrows the duplicate window to genuinely overlapping fetches.
 - **Documentation drift from 0.12.0, corrected the same day it shipped.** The walkthrough's
   version banner, line counts and module map; `auth_app.py`'s module docstring, whose route
   list claimed "the whole surface is enumerable above" while omitting seven routes (`/`,

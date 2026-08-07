@@ -132,6 +132,8 @@ async def test_expired_during_open_serves_stale_never_fetches():
 
 
 async def test_single_flight_collapses_concurrent_misses():
+    """Near-simultaneous requests for the same key: the first fetches, the rest merge
+    into that in-flight request and receive its result — one upstream hit total."""
     _, svc = make(mnl(2026, 7, 27, 8, 0))
     calls = 0
 
@@ -144,6 +146,46 @@ async def test_single_flight_collapses_concurrent_misses():
     results = await asyncio.gather(*(svc.get("k", fetch) for _ in range(10)))
     assert calls == 1
     assert all(r.value == {"v": 1} for r in results)
+
+
+async def test_a_miss_that_lost_a_race_to_a_concurrent_store_does_not_refetch():
+    """The gap single-flight alone cannot close: request B misses the cache, and while
+    it waits its turn, request A's flight completes, stores, and is popped — so B would
+    start a NEW flight and fetch the same data again (likewise a second worker writing
+    to the shared Postgres cache). The flight re-checks storage before going upstream,
+    turning that duplicate PSE Edge query into a cache hit."""
+    cal, svc = make(mnl(2026, 7, 27, 8, 0))
+
+    class StaleFirstRead:
+        """Simulates the race: the first read reports a miss even though a concurrent
+        request has just stored a fresh entry."""
+
+        def __init__(self, inner):
+            self._inner = inner
+            self._first = True
+
+        async def get(self, key):
+            if self._first:
+                self._first = False
+                return None
+            return await self._inner.get(key)
+
+        async def set(self, key, entry):
+            await self._inner.set(key, entry)
+
+    from pse_edge_mcp.cache import CacheEntry
+
+    await svc.storage.set(
+        "k", CacheEntry(value={"v": "already-stored"}, fetched_at=mnl(2026, 7, 27, 7, 59))
+    )
+    svc.storage = StaleFirstRead(svc.storage)
+
+    async def fetch():
+        raise AssertionError("the answer was already stored — fetching again is the duplicate")
+
+    served = await svc.get("k", fetch)
+    assert served.value == {"v": "already-stored"}
+    assert served.meta.from_cache is True and served.meta.stale is False
 
 
 async def test_immutable_entry_never_refetches_across_boundaries():

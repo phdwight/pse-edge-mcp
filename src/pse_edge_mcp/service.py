@@ -114,7 +114,20 @@ class FreezeService:
                 retry_after=close,
             )
 
-        async def _fetch_and_store() -> CacheEntry:
+        async def _fetch_and_store() -> tuple[CacheEntry, bool]:
+            # Re-check storage now that we hold the flight. Between this request's cache
+            # miss and its turn here, a concurrent request may already have fetched and
+            # stored the answer — either one whose flight completed in the gap (its
+            # future is popped once done, so we would start a NEW flight), or another
+            # worker process writing to the shared Postgres cache. Fetching again would
+            # be exactly the duplicate upstream query this path exists to prevent.
+            current = await self.storage.get(key)
+            if current is not None and (
+                policy == "immutable"
+                or self.calendar.is_fresh(current.fetched_at, self.calendar.now())
+            ):
+                return current, False
+
             # THE line to watch. This server exists to keep upstream requests rare, so
             # every one is worth a log entry. A policy=EOD-frozen fetch appearing during
             # market hours means the freeze invariant is broken; other policies fetch at
@@ -129,11 +142,13 @@ class FreezeService:
                 key,
                 int((time.perf_counter() - started) * 1000),
             )
-            return fresh
+            return fresh, True
 
-        # Concurrent misses for the same key collapse into one upstream request.
+        # Concurrent misses for the same key collapse into one upstream request: the
+        # first caller runs the fetch, every simultaneous caller awaits the same future
+        # and receives the same result (see SingleFlight).
         try:
-            stored = await self._flight.do(key, _fetch_and_store)
+            stored, fetched = await self._flight.do(key, _fetch_and_store)
         except EdgeUnavailableError:
             if entry is None:
                 raise  # Nothing cached and nothing upstream: there is no answer to give.
@@ -149,7 +164,7 @@ class FreezeService:
                 entry.fetched_at.isoformat(),
             )
             return self._served(entry, from_cache=True, stale=True, policy=policy)
-        return self._served(stored, from_cache=False, stale=False, policy=policy)
+        return self._served(stored, from_cache=not fetched, stale=False, policy=policy)
 
     def _served(
         self,
