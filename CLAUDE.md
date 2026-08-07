@@ -15,8 +15,10 @@ Unofficial — Edge has no public API; we speak to the portal's own internal end
    is open (09:30–15:00 Asia/Manila, trading days). The one exception (same day): a
    price key with **nothing cached at all** is fetched once during the session and
    served flagged `stale: true` with a `meta.note` saying it is not a realtime value —
-   the label derives from `fetched_at`, so it sticks for the whole session and drops at
-   the post-close refetch. `MARKET_OPEN_NO_CACHE` is no longer raised (the class stays
+   and the quote tool then surfaces **only `previous_close`** (identity plus the last
+   settled price; every session-moving field including `raw_fields` is withheld — see
+   `_previous_close_only`). The label derives from `fetched_at`, so it sticks for the
+   whole session and drops at the post-close refetch. `MARKET_OPEN_NO_CACHE` is no longer raised (the class stays
    for client compat). Every other domain is fetch-once-then-persist: a miss may hit
    PSE Edge at *any* hour — once, single-flighted — and repeats of the same query are
    served from storage until the next close (`data_policy: "daily-refresh"`). All reads

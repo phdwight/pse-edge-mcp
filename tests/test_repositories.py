@@ -338,6 +338,34 @@ async def test_only_price_reads_keep_the_market_freeze(stock_data_html, chart_js
     assert by_key[ohlc_key] == "EOD-frozen"
 
 
+async def test_a_session_quote_surfaces_only_previous_close(stock_data_html, chart_json):
+    """When the freeze layer hands back a mid-session snapshot (meta.note set), the
+    quote tool must not surface the delayed moving fields — identity plus
+    previous_close is the whole answer, and the note says so."""
+
+    class SessionCache(FakeCache):
+        async def get(self, key: str, fetch: Any, *, policy: str = "EOD-frozen") -> Served[Any]:
+            served = await super().get(key, fetch, policy=policy)
+            if policy == "EOD-frozen":
+                meta = served.meta.model_copy(update={"stale": True, "note": "session snapshot"})
+                return Served(value=served.value, meta=meta)
+            return served
+
+    cache = SessionCache()
+    companies = CompanyRepository(FakeCompanySource(SM_AUTOCOMPLETE), cache)
+    repo = QuoteRepository(FakeQuoteSource(stock_data_html, chart_json), companies, cache)
+
+    served = await repo.quote("SM")
+
+    quote = served.value
+    assert quote.previous_close == 845.5
+    assert quote.symbol == "SM" and quote.company_id == "599" and quote.security_id
+    assert quote.last_traded_price is None and quote.open is None and quote.high is None
+    assert quote.volume is None and quote.market_cap is None
+    assert quote.raw_fields == {}, "raw_fields carries the whole page — it must not leak"
+    assert served.meta.note and "previous_close" in served.meta.note
+
+
 async def test_quote_falls_back_to_autocomplete_identity(stock_data_html, chart_json):
     """The quote page header is the weakest part of the parse, so identity is backfilled
     from autocomplete's clean JSON rather than left blank."""

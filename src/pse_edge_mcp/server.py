@@ -60,7 +60,8 @@ from .validation import (
 INSTRUCTIONS = """Data source: PSE Edge (Philippine Stock Exchange disclosure portal, unofficial).
 Stock PRICES are end-of-day by design: quote and price-history values are frozen
 between market sessions (Asia/Manila). During the session a cached price serves the
-last close; a price nobody has ever asked for is fetched once and served flagged
+last close; a price nobody has ever asked for is fetched once and served with ONLY
+previous_close populated (the last settled price before the session), flagged
 stale=true with a meta.note explaining it is NOT a realtime value — relay that note
 to the user. The settled figures arrive after the 15:00 Manila close. Everything
 else (disclosures, profiles, financials, dividends, indices) is fetched from PSE
@@ -264,9 +265,10 @@ def build_server(
 
         Includes price, change, 52-week range, market cap, shares, and the full
         set of fields PSE Edge publishes. Data is EOD-frozen (see meta). If the market
-        is open and this symbol has never been cached, a one-time fetch returns PSE
-        Edge's delayed session values flagged stale=true with a meta.note saying the
-        value is not realtime — relay that caveat when presenting the price.
+        is open and this symbol has never been cached, a one-time fetch serves identity
+        plus previous_close ONLY (the last settled price before the session — every
+        other field is null), flagged stale=true with a meta.note saying the value is
+        not realtime — relay that caveat when presenting the price.
         """
         return await reply(lambda: quotes.quote(require_text(symbol, "symbol")))
 

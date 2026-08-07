@@ -30,9 +30,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/) · Versioning: [SemVer](
   *cached* price is still never refetched during the session. But when nothing was ever
   cached for a symbol, the server previously had nothing to offer except
   `MARKET_OPEN_NO_CACHE`; it now fetches once (single-flighted, throttled) and serves
-  PSE Edge's delayed session values flagged `stale: true` with a new `meta.note` field
-  spelling out that the price is **not a realtime value** and will refresh after the
-  15:00 Manila close. The label derives from the entry's fetch time, so every repeat
+  **identity plus `previous_close` only** — the last settled price before the session;
+  every session-moving field, `raw_fields` included, is withheld — flagged
+  `stale: true` with a new `meta.note` field spelling out that the price is **not a
+  realtime value** and will refresh after the 15:00 Manila close. The label derives from the entry's fetch time, so every repeat
   that session carries it, and the post-close refetch replaces the snapshot with the
   settled figures. `MARKET_OPEN_NO_CACHE` is no longer raised (the error class remains
   for clients that handle the code); `meta.stale` now reads as "not a settled

@@ -223,6 +223,10 @@ async def test_market_hours_serve_an_uncached_price_once_flagged_not_realtime():
     assert "error" not in price, "an uncached session price is served, not refused"
     assert price["meta"]["stale"] is True, "flagged: not the settled EOD value"
     assert "realtime" in price["meta"]["note"], "the caveat is spelled out for the user"
+    assert price["data"]["previous_close"] == 845.5, "the last settled price is the answer"
+    assert price["data"]["last_traded_price"] is None, "no delayed session value surfaces"
+    assert price["data"]["raw_fields"] == {}, "the raw page fields must not leak either"
+    assert "previous_close" in price["meta"]["note"], "the note names the one field served"
     assert again["meta"]["from_cache"] is True and again["meta"]["note"], (
         "repeats reuse the snapshot and keep the label"
     )
