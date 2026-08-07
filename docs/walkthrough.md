@@ -267,8 +267,10 @@ mocking at all**.
 
 ## 6. The tool surface
 
-Twelve tools are read-only and return the same envelope (§7). The thirteenth, `send_email`,
-is an **action** — see below.
+Thirteen tools are read-only: twelve return PSE Edge data in the same envelope (§7), and
+`get_server_version` (0.14.0) reports the server's own deployed release with **no `meta`** —
+meta is a data-freshness contract, and a version has no `as_of`. The fourteenth,
+`send_email`, is an **action** — see below.
 
 | Tool | Arguments | Repository |
 |---|---|---|
