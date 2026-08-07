@@ -339,7 +339,9 @@ If PSE Edge is unreachable and cached data exists, tools return that data flagge
 **New to the codebase?** [docs/walkthrough.md](docs/walkthrough.md) is the developer and
 architect walkthrough: the request lifecycle, the freeze policy, the layering, how to add a
 tool or a whole data domain, and a symptom-to-cause debugging table. Also available as
-[a PDF](docs/walkthrough.pdf).
+[a PDF](docs/walkthrough.pdf). For a one-page visual map — classes, protocols, the data
+path, the config matrix — open [docs/reference-card.html](docs/reference-card.html) in any
+browser; it is fully self-contained and works offline.
 
 Work lands on `develop` and reaches `main` by pull request; `main` is protected and
 requires all three CI checks (`test`, `image (amd64)`, `image (arm64)`). Bumping `version` in `pyproject.toml` makes the next merge cut
