@@ -5,6 +5,14 @@ Format: [Keep a Changelog](https://keepachangelog.com/) · Versioning: [SemVer](
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-08-08
+
+### Added
+- **`get_server_version`** — returns the deployed version of the MCP server itself
+  (`{"data": {"name": "pse-edge", "version": ...}}`), read from the installed
+  distribution so it always matches `serverInfo` and `/health`. No `meta` block:
+  meta is a data-freshness contract, and a version has no `as_of`/`valid_until`.
+
 ## [0.13.0] - 2026-08-07
 
 ### Changed
