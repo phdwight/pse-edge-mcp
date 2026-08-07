@@ -12,6 +12,7 @@ Tools (Phase 1): search_companies, get_stock_quote, get_price_history.
 Tools (Phase 2): search_disclosures, search_disclosure_fulltext, get_disclosure.
 Tools (Phase 3): get_company_profile, get_financial_highlights, get_dividends_and_rights,
                  get_indices, get_market_summary.
+Utility: get_server_version (the deployed release, no meta).
 """
 
 from __future__ import annotations
@@ -463,6 +464,17 @@ def build_server(
         cannot include them — say so rather than implying the data is missing or stale.
         """
         return await reply(market.summary)
+
+    @mcp.tool()
+    async def get_server_version() -> dict[str, Any]:
+        """Get the deployed version of this MCP server (pse-edge-mcp).
+
+        Reports the running server's own release version — the same value the
+        /health endpoint and serverInfo carry — not PSE Edge data. There is no
+        `meta` block: meta is a data-freshness contract, and a version has no
+        as_of or valid_until.
+        """
+        return {"data": {"name": "pse-edge", "version": _version}}
 
     # The one tool that acts rather than reads, and the only one that is conditional.
     # Registered only where it can work and be safe: it needs an authenticated caller to

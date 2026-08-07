@@ -13,7 +13,7 @@ understand it, debug it, or extend it.
 | `docs/deploy.md` | Running it in production |
 | `CLAUDE.md` | The short form of the invariants, kept next to the code |
 
-Version described: **0.13.0**. 36 modules, ~8,700 lines of source, ~6,600 lines of tests.
+Version described: **0.14.0**. 36 modules, ~8,700 lines of source, ~6,600 lines of tests.
 
 ---
 
@@ -284,6 +284,7 @@ is an **action** — see below.
 | `get_dividends_and_rights` | `symbol` | `CompanyInfoRepository.dividends_and_rights` |
 | `get_indices` | — | `MarketRepository.indices` |
 | `get_market_summary` | — | `MarketRepository.summary` |
+| `get_server_version` | — | none — reads the installed distribution's version in `server.py` |
 | `send_email` *(auth only)* | `subject`, `body` | `NotificationService.send_to_self` |
 
 Dates are `YYYY-MM-DD` on the tool surface; the client converts to PSE Edge's `MM-dd-yyyy`

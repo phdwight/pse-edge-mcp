@@ -246,10 +246,23 @@ async def test_tool_surface_is_stable():
         "get_dividends_and_rights": ["symbol"],
         "get_indices": [],
         "get_market_summary": [],
+        "get_server_version": [],
     }
     # Descriptions come from the docstrings and are how the model picks a tool.
     assert all(t.description for t in tools)
     assert "EOD-frozen" in dict((t.name, t.description) for t in tools)["get_stock_quote"]
+
+
+async def test_get_server_version_reports_the_installed_release():
+    """The deployed version, from the installed distribution — the same value
+    serverInfo and /health carry, so the three can never disagree."""
+    import importlib.metadata
+
+    result = await call(build_test_server(), "get_server_version")
+
+    assert result["data"]["name"] == "pse-edge"
+    assert result["data"]["version"] == importlib.metadata.version("pse-edge-mcp")
+    assert "meta" not in result, "a version has no freshness contract to report"
 
 
 # --- validate_symbol ---------------------------------------------------------

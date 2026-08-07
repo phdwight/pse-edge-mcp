@@ -303,7 +303,7 @@ async def test_signup_enroll_authorize_and_call_mcp_with_the_issued_token(stack)
             json={"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}},
         )
         assert called.status_code == 200
-        assert len(called.json()["result"]["tools"]) == 12
+        assert len(called.json()["result"]["tools"]) == 13
 
         # 10. Refresh rotates, and the new access token also works.
         refreshed = (

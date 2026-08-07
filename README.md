@@ -239,6 +239,7 @@ DATABASE_URL=postgresql+asyncpg://user:pass@host/db uv run alembic upgrade head
 | `get_dividends_and_rights(symbol)` | Declared dividends and stock rights, linked to their disclosures |
 | `get_indices()` | PSEi and the 7 sector indices, with signed daily change |
 | `get_market_summary()` | Index levels plus PSE Edge's homepage disclosure feeds |
+| `get_server_version()` | The deployed version of this MCP server itself (matches `/health`) |
 | `send_email(subject, body)` | Email **yourself** a note (auth-enabled deployments only) |
 
 `send_email` is the only tool that acts rather than reads. **It has no recipient argument**:
