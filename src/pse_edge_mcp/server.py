@@ -59,13 +59,15 @@ from .validation import (
 
 INSTRUCTIONS = """Data source: PSE Edge (Philippine Stock Exchange disclosure portal, unofficial).
 Stock PRICES are end-of-day by design: quote and price-history values are frozen
-between market sessions and never fetched while the market is open (Asia/Manila) —
-a MARKET_OPEN_NO_CACHE error means retry after the 15:00 Manila close. Everything
+between market sessions (Asia/Manila). During the session a cached price serves the
+last close; a price nobody has ever asked for is fetched once and served flagged
+stale=true with a meta.note explaining it is NOT a realtime value — relay that note
+to the user. The settled figures arrive after the 15:00 Manila close. Everything
 else (disclosures, profiles, financials, dividends, indices) is fetched from PSE
 Edge at most once per query and then served from storage until the next market
 close — check meta.as_of for when it was actually fetched. Every result carries
-meta.as_of / meta.valid_until; meta.stale=true means real data past its boundary
-(the market is open on price data, or PSE Edge was unreachable)."""
+meta.as_of / meta.valid_until; meta.stale=true means the value is not a settled
+end-of-day figure (session-time price, or PSE Edge was unreachable)."""
 
 # ~6 months, the default span for a price-history request.
 DEFAULT_HISTORY_DAYS = 182
@@ -261,7 +263,10 @@ def build_server(
         """Get the latest end-of-day quote for a PSE stock symbol (e.g. SM, AREIT, BDO).
 
         Includes price, change, 52-week range, market cap, shares, and the full
-        set of fields PSE Edge publishes. Data is EOD-frozen (see meta).
+        set of fields PSE Edge publishes. Data is EOD-frozen (see meta). If the market
+        is open and this symbol has never been cached, a one-time fetch returns PSE
+        Edge's delayed session values flagged stale=true with a meta.note saying the
+        value is not realtime — relay that caveat when presenting the price.
         """
         return await reply(lambda: quotes.quote(require_text(symbol, "symbol")))
 
@@ -272,7 +277,9 @@ def build_server(
         """Get daily OHLC price history for a PSE stock symbol.
 
         Dates are ISO format (YYYY-MM-DD). Defaults to the last ~6 months.
-        Data comes from PSE Edge's own chart endpoint and is EOD-frozen.
+        Data comes from PSE Edge's own chart endpoint and is EOD-frozen. If the market
+        is open and this exact range has never been cached, a one-time fetch may include
+        today's still-moving bar, flagged stale=true with an explanatory meta.note.
         """
 
         async def run() -> Served[Any]:

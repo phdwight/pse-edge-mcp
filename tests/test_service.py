@@ -6,9 +6,6 @@ import asyncio
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-import pytest
-
-from pse_edge_mcp.errors import MarketOpenNoCacheError
 from pse_edge_mcp.market_calendar import MarketCalendar
 from pse_edge_mcp.service import FreezeService
 
@@ -54,17 +51,35 @@ async def test_closed_miss_fetches_then_serves_cached():
     assert calls == 1  # no second upstream hit
 
 
-async def test_open_miss_refuses_with_retry_after():
-    """EOD-frozen (price data) — and deliberately also the DEFAULT, so a caller that
-    forgets to name a policy gets the freeze, never an accidental intraday fetch."""
-    _, svc = make(mnl(2026, 7, 27, 11, 0))  # Monday, session running
+async def test_open_price_miss_fetches_once_and_is_labelled_not_realtime():
+    """EOD-frozen with nothing cached during a session: there is no previous value to
+    serve, so the freeze makes its one exception — a single fetch, honestly labelled.
+    The label rides on the ENTRY (derived from fetched_at), so every hit for the rest
+    of the session carries it, and the first ask after the close refetches the settled
+    figures and drops it."""
+    cal, svc = make(mnl(2026, 7, 27, 11, 0))  # Monday, session running
+    calls = 0
 
     async def fetch():
-        raise AssertionError("price data must never fetch while market is open")
+        nonlocal calls
+        calls += 1
+        return {"price": 100 + calls}
 
-    with pytest.raises(MarketOpenNoCacheError) as exc:
-        await svc.get("k", fetch)
-    assert exc.value.retry_after == mnl(2026, 7, 27, 15, 0)
+    first = await svc.get("k", fetch)
+    assert calls == 1 and first.meta.from_cache is False
+    assert first.meta.stale is True, "a mid-session snapshot is never a settled value"
+    assert first.meta.note and "realtime" in first.meta.note
+    assert first.meta.valid_until == mnl(2026, 7, 27, 15, 0)
+
+    second = await svc.get("k", fetch)
+    assert calls == 1, "the session fetch happens exactly once per key"
+    assert second.meta.from_cache is True
+    assert second.meta.stale is True and second.meta.note, "the label outlives the fetch"
+
+    cal.set(mnl(2026, 7, 27, 15, 1))
+    settled = await svc.get("k", fetch)
+    assert calls == 2, "the first ask after the close replaces the snapshot"
+    assert settled.meta.stale is False and settled.meta.note is None
 
 
 async def test_daily_refresh_miss_fetches_during_open_market_then_serves_from_cache():

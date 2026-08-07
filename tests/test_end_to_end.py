@@ -204,23 +204,30 @@ async def test_an_outage_serves_the_last_close_flagged_stale_through_the_whole_s
 
 
 @respx.mock
-async def test_market_hours_gate_prices_only_and_serve_everything_else():
+async def test_market_hours_serve_an_uncached_price_once_flagged_not_realtime():
     """The policy split as an agent experiences it: during a session, non-price tools
-    answer (fetching upstream at most once), while an uncached price read is a
-    structured refusal it can schedule against, not a failure to retry immediately."""
+    answer normally, and a price nobody ever asked for is served from a ONE-TIME fetch
+    that says out loud it is not a realtime value — repeats reuse it without another
+    upstream hit."""
     mock_edge_ok()
+    respx.get(f"{BASE}/companyPage/stockData.do").mock(
+        return_value=httpx.Response(200, text=(FIXTURES / "stock_data.html").read_text())
+    )
     async with serving(at=OPEN) as http:
         lookup = await call_tool(http, "search_companies", query="sm")
         price = await call_tool(http, "get_stock_quote", symbol="SM")
+        again = await call_tool(http, "get_stock_quote", symbol="SM")
 
     assert "error" not in lookup, "non-price data is served during the session"
     assert lookup["meta"]["data_policy"] == "daily-refresh"
-    assert price["error"] == "MARKET_OPEN_NO_CACHE"
-    assert price["retry_after"], "an agent needs to know when to come back"
-    urls = [str(c.request.url) for c in respx.calls]
-    assert urls and all("autoComplete" in u for u in urls), (
-        "invariant #1: the only upstream requests during a session are non-price fetches"
+    assert "error" not in price, "an uncached session price is served, not refused"
+    assert price["meta"]["stale"] is True, "flagged: not the settled EOD value"
+    assert "realtime" in price["meta"]["note"], "the caveat is spelled out for the user"
+    assert again["meta"]["from_cache"] is True and again["meta"]["note"], (
+        "repeats reuse the snapshot and keep the label"
     )
+    stock_calls = [c for c in respx.calls if "stockData" in str(c.request.url)]
+    assert len(stock_calls) == 1, "the session price fetch happens exactly once per symbol"
 
 
 @respx.mock

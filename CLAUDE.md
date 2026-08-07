@@ -11,14 +11,18 @@ Unofficial — Edge has no public API; we speak to the portal's own internal end
 ## Non-negotiable invariants
 
 1. **Market-boundary freeze — prices only (narrowed 2026-08-07, 0.13.0).** Stock quote
-   and price history are EOD-only: zero upstream **price** requests while the market is
-   open (09:30–15:00 Asia/Manila, trading days); a price cache miss during open hours
-   raises `MARKET_OPEN_NO_CACHE`. Every other domain is fetch-once-then-persist: a miss
-   may hit PSE Edge at *any* hour — once, single-flighted — and repeats of the same query
-   are served from storage until the next close (`data_policy: "daily-refresh"`). All
-   reads still go through `FreezeService.get(..., policy=...)` — never call
-   `PseEdgeClient` directly from a tool. The default policy is the strictest
-   (`EOD-frozen`), so an unlabelled read can only over-protect PSE Edge.
+   and price history are EOD-only: a *cached* price is never refetched while the market
+   is open (09:30–15:00 Asia/Manila, trading days). The one exception (same day): a
+   price key with **nothing cached at all** is fetched once during the session and
+   served flagged `stale: true` with a `meta.note` saying it is not a realtime value —
+   the label derives from `fetched_at`, so it sticks for the whole session and drops at
+   the post-close refetch. `MARKET_OPEN_NO_CACHE` is no longer raised (the class stays
+   for client compat). Every other domain is fetch-once-then-persist: a miss may hit
+   PSE Edge at *any* hour — once, single-flighted — and repeats of the same query are
+   served from storage until the next close (`data_policy: "daily-refresh"`). All reads
+   still go through `FreezeService.get(..., policy=...)` — never call `PseEdgeClient`
+   directly from a tool. The default policy is the strictest (`EOD-frozen`), so an
+   unlabelled read can only over-protect PSE Edge.
 2. **Tests never touch PSE Edge.** All HTTP is mocked with respx against fixtures in
    `tests/fixtures/` (recorded from real captures). New endpoints need new fixtures.
 3. **Two request dialects** (see docs/endpoints.md §0): JSON-body POST for chart-style
@@ -70,8 +74,10 @@ Unofficial — Edge has no public API; we speak to the portal's own internal end
   `data_policy` (a per-read `policy=` on `FreezeService.get`) is `"EOD-frozen"` for price
   data (market-gated), `"daily-refresh"` for every other domain (fetched at any hour, at
   most once per boundary window), or `"immutable"` with `valid_until: null` for objects
-  that never change upstream (disclosures by `edge_no`). `stale` means real data past its
-  boundary: the market is open (price data) or PSE Edge was unreachable (anything).
+  that never change upstream (disclosures by `edge_no`). `stale` means "not a settled
+  end-of-day value": past the boundary (market open on price data, or PSE Edge
+  unreachable), or a price fetched mid-session with nothing cached — that last case also
+  carries a human-readable `meta.note` (relay it; the price is not realtime).
 - Timestamps ISO-8601 in Asia/Manila. Accounting negatives `(1,234)` → `-1234`.
 - **Layering (revised — a domain layer was added; keep it that way):**
 
@@ -179,9 +185,11 @@ Unofficial — Edge has no public API; we speak to the portal's own internal end
 - **Logging (0.8.1):** both formatters timestamp every line (ISO-8601 + offset) and both
   redact. INFO on the critical paths, **refusals only** — a success is already an access-log
   line. `upstream: fetching from PSE Edge key=... policy=...` is the line that matters:
-  since 0.13.0 it carries the read's policy, and a **`policy=EOD-frozen` fetch during
-  market hours means the freeze invariant is broken** (other policies legitimately fetch
-  at any hour, at most once per key per boundary window).
+  since 0.13.0 it carries the read's policy. Every policy fetches at most once per key
+  per boundary window; a `policy=EOD-frozen` fetch during market hours is legitimate
+  only for a never-cached key (it is preceded by the `fetching once, serving as
+  non-realtime` line) — **repeats of the same price key within one session mean the
+  freeze is broken**.
   WARNING is reserved for refresh-token reuse and a non-machine client
   denied `client_credentials`. A startup line states the resolved config (presence, never
   values).

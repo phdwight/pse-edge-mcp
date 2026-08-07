@@ -26,9 +26,14 @@ class Meta(BaseModel):
     data_policy: DataPolicy = "EOD-frozen"
     stale: bool = Field(
         default=False,
-        description="True when served past valid_until — for EOD-frozen price data "
-        "because the market is open (no price fetches during trading hours by design), "
-        "for anything else because PSE Edge was unreachable",
+        description="True when this is not a settled end-of-day value: served past "
+        "valid_until (the market is open on price data, or PSE Edge was unreachable), "
+        "or a price fetched mid-session because nothing was cached (see note)",
+    )
+    note: str | None = Field(
+        default=None,
+        description="Human-readable freshness caveat — e.g. a price fetched during the "
+        "trading session that is not a realtime value. Null when there is nothing to flag.",
     )
 
 

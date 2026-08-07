@@ -410,8 +410,9 @@ async def test_every_upstream_fetch_is_logged(caplog):
     assert any("duration_ms" in r.message for r in caplog.records)
 
 
-async def test_refusing_an_uncached_read_during_market_hours_is_logged(caplog):
-    from pse_edge_mcp.errors import MarketOpenNoCacheError
+async def test_an_uncached_session_price_fetch_is_logged_and_flagged(caplog):
+    """The freeze's one exception must be visible per occurrence: an operator watching
+    the logs should see exactly why an EOD-frozen fetch happened during market hours."""
     from pse_edge_mcp.market_calendar import MarketCalendar
     from pse_edge_mcp.service import FreezeService
 
@@ -421,10 +422,10 @@ async def test_refusing_an_uncached_read_during_market_hours_is_logged(caplog):
 
     service = FreezeService(calendar=Open())
     with caplog.at_level(logging.INFO, logger="pse_edge_mcp.service"):
-        with pytest.raises(MarketOpenNoCacheError):
-            await service.get("quote:SM", lambda: _answer("never"))
+        served = await service.get("quote:SM", lambda: _answer("session-value"))
 
-    assert any("refusing an uncached read" in r.message for r in caplog.records)
+    assert any("fetching once" in r.message for r in caplog.records)
+    assert served.meta.stale is True and served.meta.note, "served, but labelled non-realtime"
 
 
 async def _answer(value):

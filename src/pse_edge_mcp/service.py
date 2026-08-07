@@ -5,10 +5,15 @@ Each read names its policy (the repository chooses it per domain):
 - **EOD-frozen** — price data only. The market-boundary freeze applies in full:
 
     cache state | market closed          | market open
-    ------------+------------------------+---------------------------------
+    ------------+------------------------+----------------------------------------
     fresh       | serve                  | serve
     expired     | fetch anew, cache      | serve STALE (flagged; never fetch)
-    missing     | fetch anew, cache      | raise MARKET_OPEN_NO_CACHE
+    missing     | fetch anew, cache      | fetch ONCE, serve flagged NOT REALTIME
+
+  A price snapshot taken mid-session is never presented as settled: it serves with
+  `stale: true` and an explanatory `note` for the rest of the session (the label is
+  derived from `fetched_at`, so it outlives the request that fetched it), and the
+  first ask after the close replaces it with the real end-of-day figures.
 
 - **daily-refresh** — everything else (disclosures, profiles, financials, indices…).
   A miss or expiry fetches at ANY hour, so PSE Edge is hit once per unique query per
@@ -31,7 +36,7 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 
 from .cache import CacheEntry, InMemoryStorage, Storage
-from .errors import EdgeUnavailableError, MarketOpenNoCacheError
+from .errors import EdgeUnavailableError
 from .market_calendar import MarketCalendar
 from .models import DataPolicy, Meta
 from .ratelimit import SingleFlight
@@ -74,6 +79,12 @@ class FrozenCache(Protocol):
 
 
 class FreezeService:
+    INTRADAY_NOTE = (
+        "Not a realtime value: this price was fetched during the trading session because "
+        "nothing was cached. PSE Edge session data is delayed and is not the settled "
+        "end-of-day figure; it refreshes after the 15:00 Manila close."
+    )
+
     def __init__(self, calendar: MarketCalendar | None = None, storage: Storage | None = None):
         self.calendar = calendar or MarketCalendar()
         self.storage = storage or InMemoryStorage()
@@ -99,19 +110,18 @@ class FreezeService:
         # any hour — once — and then answers from storage until the next close boundary.
         if policy == "EOD-frozen" and self.calendar.is_market_open(now):
             if entry is not None:
-                # Expired during a session: it is still the latest EOD truth.
+                # Expired during a session: it is still the latest EOD truth, and
+                # strictly better than a mid-session snapshot — never refetched.
                 return self._served(entry, from_cache=True, stale=True)
-            close = self.calendar.next_close(now)
+            # Nothing cached at all: there is no previous value to serve, so the one
+            # exception to the freeze (decided 2026-08-07) — fetch once, single-flighted,
+            # and label the result as not realtime. _served derives that label from
+            # fetched_at, so every repeat this session carries it too, and the first ask
+            # after the close replaces the snapshot with the settled EOD figures.
             logger.info(
-                "freeze: refusing an uncached read while the market is open key=%s retry_after=%s",
+                "freeze: uncached price read during the session — fetching once, "
+                "serving as non-realtime key=%s",
                 key,
-                close.isoformat(),
-            )
-            raise MarketOpenNoCacheError(
-                "No cached data for this query and the market is open — upstream "
-                f"fetches are frozen until the market closes at "
-                f"{close.strftime('%H:%M %Z on %b %d')}. Try again after that.",
-                retry_after=close,
             )
 
         async def _fetch_and_store() -> tuple[CacheEntry, bool]:
@@ -129,9 +139,10 @@ class FreezeService:
                 return current, False
 
             # THE line to watch. This server exists to keep upstream requests rare, so
-            # every one is worth a log entry. A policy=EOD-frozen fetch appearing during
-            # market hours means the freeze invariant is broken; other policies fetch at
-            # any hour but at most once per key per boundary window.
+            # every one is worth a log entry. Every policy fetches at most once per key
+            # per boundary window; a policy=EOD-frozen fetch during market hours is
+            # legitimate only for a key with nothing cached (the non-realtime fallback) —
+            # repeats of the same key within one session mean the freeze is broken.
             started = time.perf_counter()
             logger.info("upstream: fetching from PSE Edge key=%s policy=%s", key, policy)
             value = await fetch()
@@ -175,6 +186,15 @@ class FreezeService:
         policy: DataPolicy = "EOD-frozen",
     ) -> Served[Any]:
         immutable = policy == "immutable"
+        note = None
+        if policy == "EOD-frozen" and self.calendar.is_market_open(entry.fetched_at):
+            # A price snapshot taken mid-session is never a settled EOD value, no matter
+            # when or from where it is served. Deriving the label from fetched_at makes
+            # it outlive the request that fetched it: cache hits for the rest of the
+            # session carry the same flag, and it disappears only when the post-close
+            # refetch replaces the entry.
+            stale = True
+            note = self.INTRADAY_NOTE
         return Served(
             value=entry.value,
             meta=Meta(
@@ -183,5 +203,6 @@ class FreezeService:
                 from_cache=from_cache,
                 data_policy=policy,
                 stale=stale,
+                note=note,
             ),
         )

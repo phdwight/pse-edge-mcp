@@ -36,7 +36,13 @@ class EdgeUnavailableError(PseEdgeMcpError):
 
 
 class MarketOpenNoCacheError(PseEdgeMcpError):
-    """Strict freeze policy: no upstream fetches while the market is open."""
+    """Strict freeze policy: no upstream fetches while the market is open.
+
+    Not raised since 0.13.0 — an uncached price read during the session now falls back
+    to a one-time fetch served with `stale: true` and an explanatory `meta.note`. The
+    class stays so existing clients that handle the code keep compiling; removing it is
+    an API decision, not a refactor.
+    """
 
     code = "MARKET_OPEN_NO_CACHE"
 

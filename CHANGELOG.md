@@ -24,7 +24,19 @@ Format: [Keep a Changelog](https://keepachangelog.com/) · Versioning: [SemVer](
 - `FreezeService.get()` takes `policy="EOD-frozen" | "daily-refresh" | "immutable"`
   (replacing `immutable=True`); the default stays the strictest, so an unlabelled read
   can only over-protect PSE Edge. The `upstream: fetching` log line now carries
-  `policy=` — an `EOD-frozen` fetch during market hours is the broken-invariant signal.
+  `policy=` — a repeated `EOD-frozen` fetch for one key within a session is the
+  broken-invariant signal.
+- **An uncached price during market hours is now served, labelled — not refused.** A
+  *cached* price is still never refetched during the session. But when nothing was ever
+  cached for a symbol, the server previously had nothing to offer except
+  `MARKET_OPEN_NO_CACHE`; it now fetches once (single-flighted, throttled) and serves
+  PSE Edge's delayed session values flagged `stale: true` with a new `meta.note` field
+  spelling out that the price is **not a realtime value** and will refresh after the
+  15:00 Manila close. The label derives from the entry's fetch time, so every repeat
+  that session carries it, and the post-close refetch replaces the snapshot with the
+  settled figures. `MARKET_OPEN_NO_CACHE` is no longer raised (the error class remains
+  for clients that handle the code); `meta.stale` now reads as "not a settled
+  end-of-day value".
 
 ### Fixed
 - **A cache miss that raced a concurrent store no longer refetches.** Simultaneous
