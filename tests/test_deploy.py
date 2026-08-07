@@ -357,8 +357,13 @@ def test_plain_log_lines_carry_an_iso_timestamp():
     developer reads in a terminal, and the one a deployment without PSE_LOG_JSON writes,
     produced lines that could not be correlated with anything."""
     record = logging.LogRecord(
-        name="pse", level=logging.INFO, pathname=__file__, lineno=1,
-        msg="upstream: fetching", args=(), exc_info=None,
+        name="pse",
+        level=logging.INFO,
+        pathname=__file__,
+        lineno=1,
+        msg="upstream: fetching",
+        args=(),
+        exc_info=None,
     )
     line = PlainFormatter(_PLAIN_FORMAT, datefmt=_TIME_FORMAT).format(record)
 
@@ -371,8 +376,13 @@ def test_plain_log_lines_carry_an_iso_timestamp():
 def test_the_plain_formatter_redacts_too():
     """Otherwise the safer-looking format is the leakier one."""
     record = logging.LogRecord(
-        name="pse", level=logging.INFO, pathname=__file__, lineno=1,
-        msg="client_secret=hunter2hunter2", args=(), exc_info=None,
+        name="pse",
+        level=logging.INFO,
+        pathname=__file__,
+        lineno=1,
+        msg="client_secret=hunter2hunter2",
+        args=(),
+        exc_info=None,
     )
     line = PlainFormatter(_PLAIN_FORMAT, datefmt=_TIME_FORMAT).format(record)
     assert "hunter2" not in line
@@ -422,7 +432,7 @@ async def _answer(value):
 
 
 def test_startup_logs_the_resolved_configuration(caplog):
-    """"What config is this actually running?" is the first question in any incident, and
+    """ "What config is this actually running?" is the first question in any incident, and
     answering it from env vars and compose files is guesswork."""
     from pse_edge_mcp.asgi import create_app
 

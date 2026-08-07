@@ -151,7 +151,7 @@ async def test_the_full_protocol_journey_a_client_actually_performs():
         "company_name": "SM Investments Corporation",
     }
     meta = payload["meta"]
-    assert meta["data_policy"] == "EOD-frozen"
+    assert meta["data_policy"] == "daily-refresh"
     assert meta["stale"] is False and meta["from_cache"] is False
     assert meta["as_of"] and meta["valid_until"], "freshness must travel with every result"
 
@@ -204,16 +204,23 @@ async def test_an_outage_serves_the_last_close_flagged_stale_through_the_whole_s
 
 
 @respx.mock
-async def test_market_hours_refuse_an_uncached_read_with_a_retry_timestamp():
-    """The freeze policy as an agent experiences it: a structured refusal it can schedule
-    against, not a failure it should retry immediately."""
+async def test_market_hours_gate_prices_only_and_serve_everything_else():
+    """The policy split as an agent experiences it: during a session, non-price tools
+    answer (fetching upstream at most once), while an uncached price read is a
+    structured refusal it can schedule against, not a failure to retry immediately."""
     mock_edge_ok()
     async with serving(at=OPEN) as http:
-        payload = await call_tool(http, "search_companies", query="sm")
+        lookup = await call_tool(http, "search_companies", query="sm")
+        price = await call_tool(http, "get_stock_quote", symbol="SM")
 
-    assert payload["error"] == "MARKET_OPEN_NO_CACHE"
-    assert payload["retry_after"], "an agent needs to know when to come back"
-    assert not respx.calls, "invariant #1: not one upstream request during a session"
+    assert "error" not in lookup, "non-price data is served during the session"
+    assert lookup["meta"]["data_policy"] == "daily-refresh"
+    assert price["error"] == "MARKET_OPEN_NO_CACHE"
+    assert price["retry_after"], "an agent needs to know when to come back"
+    urls = [str(c.request.url) for c in respx.calls]
+    assert urls and all("autoComplete" in u for u in urls), (
+        "invariant #1: the only upstream requests during a session are non-price fetches"
+    )
 
 
 @respx.mock
@@ -249,9 +256,7 @@ def test_the_canary_cli_exits_zero_when_every_family_is_healthy(monkeypatch):
     """Exit status is what lets cron or CI notice without parsing output."""
     from pse_edge_mcp import canary
 
-    monkeypatch.setattr(
-        canary, "run_and_notify", _fake_report(ok=True), raising=True
-    )
+    monkeypatch.setattr(canary, "run_and_notify", _fake_report(ok=True), raising=True)
     with pytest.raises(SystemExit) as exit_info:
         canary.main()
     assert exit_info.value.code == 0

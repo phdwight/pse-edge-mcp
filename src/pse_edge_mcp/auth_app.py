@@ -176,8 +176,9 @@ addEventListener('hashchange', () => showTab(currentTab()));
 def _fmt_date(value: Any) -> str:
     try:
         return f"{value:%b} {value.day}, {value:%Y}"
-    except (AttributeError, ValueError, TypeError):
+    except AttributeError, ValueError, TypeError:
         return str(value)
+
 
 # Shared browser helper: WebAuthn speaks ArrayBuffers, JSON speaks base64url.
 _WEBAUTHN_JS = """
@@ -292,7 +293,7 @@ def _basic_auth_client_id(authorization: str | None) -> str | None:
         return None
     try:
         raw = base64.b64decode(authorization[6:].strip(), validate=True).decode("utf-8")
-    except (ValueError, UnicodeDecodeError):
+    except ValueError, UnicodeDecodeError:
         return None
     return unquote_plus(raw.partition(":")[0])[:200] or None
 
@@ -409,9 +410,7 @@ class AuthApp:
 
     # --- front door ----------------------------------------------------------
 
-    async def _index(
-        self, scope: dict[str, Any], body: bytes
-    ) -> tuple[int, dict[str, str], bytes]:
+    async def _index(self, scope: dict[str, Any], body: bytes) -> tuple[int, dict[str, str], bytes]:
         """A page for people at `/`.
 
         Everything not in this table falls through to the MCP endpoint, which answers a
@@ -546,9 +545,7 @@ class AuthApp:
         # that from "keep trying" into "come back later". Keyed on client_id AND the peer
         # address, so one noisy client cannot exhaust another's budget and a single host
         # cannot spray attempts across many client ids.
-        client_id = form.get("client_id") or _basic_auth_client_id(
-            _header(scope, b"authorization")
-        )
+        client_id = form.get("client_id") or _basic_auth_client_id(_header(scope, b"authorization"))
         retry_after = self._token_limiter.check(client_id, _peer_ip(scope))
         if retry_after is not None:
             return _json_response(
@@ -612,7 +609,7 @@ class AuthApp:
                 to=email.strip().lower(),
                 subject="Verify your PSE Edge MCP account",
                 html=(
-                    f'<p>Confirm this address to finish signing up:</p>'
+                    f"<p>Confirm this address to finish signing up:</p>"
                     f'<p><a href="{link}">{link}</a>'
                     "</p><p>The link expires in 30 minutes. If you did not request it, ignore "
                     "this email.</p>"
@@ -746,9 +743,7 @@ class AuthApp:
             return _html(
                 "<h1>Invalid request</h1><p>Please try again from your account page.</p>", 403
             )
-        revoked = await revoke_session(
-            self._engine, session.user_id, form.get("family_id", "")
-        )
+        revoked = await revoke_session(self._engine, session.user_id, form.get("family_id", ""))
         logger.info("web: a user revoked one of their token sessions (%d rows)", revoked)
         return _redirect(f"{self._public}/account#security")
 
@@ -1116,9 +1111,11 @@ def _account_page(summary: AccountSummary, csrf_token: str, machine_panel: str =
     if machine_panel:
         tabs.append(("machine", "Machine clients", ""))
     tabs.append(("danger", "Danger zone", "tab-danger"))
-    tab_bar = "<nav class=tabs>" + "".join(
-        f"<a href='#{tid}' class='{cls}'>{label}</a>" for tid, label, cls in tabs
-    ) + "</nav>"
+    tab_bar = (
+        "<nav class=tabs>"
+        + "".join(f"<a href='#{tid}' class='{cls}'>{label}</a>" for tid, label, cls in tabs)
+        + "</nav>"
+    )
 
     usage_rows = "".join(
         f"<tr><td>{day['day']}</td><td>{day['requests']}</td><td>{day['rejected']}</td></tr>"
@@ -1130,11 +1127,14 @@ def _account_page(summary: AccountSummary, csrf_token: str, machine_panel: str =
         else "<p class=muted>No usage recorded yet.</p>"
     )
 
-    passkey_rows = "".join(
-        "<div class=row><span><strong>Passkey</strong></span>"
-        f"<span class=muted>Added {_fmt_date(pk['created_at'])}</span></div>"
-        for pk in summary.passkey_list
-    ) or "<p class=muted>No passkeys enrolled.</p>"
+    passkey_rows = (
+        "".join(
+            "<div class=row><span><strong>Passkey</strong></span>"
+            f"<span class=muted>Added {_fmt_date(pk['created_at'])}</span></div>"
+            for pk in summary.passkey_list
+        )
+        or "<p class=muted>No passkeys enrolled.</p>"
+    )
 
     session_rows = "".join(
         "<tr><td>{name}</td><td class=muted>{issued}</td>"

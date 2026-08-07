@@ -137,7 +137,7 @@ def _client_auth(
     if authorization and authorization.lower().startswith("basic "):
         try:
             raw = base64.b64decode(authorization[6:].strip(), validate=True).decode("utf-8")
-        except (ValueError, UnicodeDecodeError):
+        except ValueError, UnicodeDecodeError:
             return None, None
         client_id, separator, secret = raw.partition(":")
         if not separator:
@@ -211,7 +211,9 @@ class OAuthService:
             )
         logger.info(
             "oauth: registered a dynamic client client_id=%s name=%r redirect_uris=%d",
-            client_id, client_name, len(redirect_uris),
+            client_id,
+            client_name,
+            len(redirect_uris),
         )
         # Public client: no secret is issued, PKCE binds the code instead.
         return {
@@ -255,7 +257,9 @@ class OAuthService:
             )
         logger.info(
             "oauth: provisioned MACHINE client client_id=%s name=%r service_user=%s",
-            client_id, name, service_user_id,
+            client_id,
+            name,
+            service_user_id,
         )
         return {"client_id": client_id, "client_secret": secret}
 
@@ -487,7 +491,8 @@ class OAuthService:
             logger.warning(
                 "oauth: DENIED client_credentials to a non-machine client client_id=%s "
                 "type=%s — only admin-provisioned machine clients may use this grant",
-                client_id, client.client_type,
+                client_id,
+                client.client_type,
             )
             raise OAuthError(
                 "unauthorized_client",
@@ -577,7 +582,10 @@ class OAuthService:
         logger.info(
             "oauth: issued a client_credentials access token client_id=%s user=%s scope=%s "
             "expires_in=%ds",
-            client_id, user_id, scope, int(MACHINE_ACCESS_TTL.total_seconds()),
+            client_id,
+            user_id,
+            scope,
+            int(MACHINE_ACCESS_TTL.total_seconds()),
         )
         return {
             "access_token": access,
@@ -669,7 +677,9 @@ class OAuthService:
                 "oauth: REFRESH TOKEN REUSE detected — revoking the whole family "
                 "client_id=%s family=%s user=%s. A rotated token was presented twice, "
                 "which means it leaked (RFC 9700 §4.14).",
-                row.client_id, row.family_id, row.user_id,
+                row.client_id,
+                row.family_id,
+                row.user_id,
             )
             raise OAuthError("invalid_grant", "refresh token reuse detected; session revoked")
         if row.expires_at <= now:

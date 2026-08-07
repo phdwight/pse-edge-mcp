@@ -159,6 +159,7 @@ class CompanyRepository:
         return await self._cache.get(
             f"autocomplete:{normalised}",
             lambda: self._source.search_companies(query.strip()),
+            policy="daily-refresh",
         )
 
 
@@ -191,9 +192,11 @@ class QuoteRepository:
         security_id = parsed.value["security_id"]
 
         key = f"ohlc:{company_id}:{security_id}:{start.isoformat()}:{end.isoformat()}"
+        # Price data: the one domain that keeps the full market-boundary freeze.
         served = await self._cache.get(
             key,
             lambda: self._source.fetch_price_history(company_id, security_id, start, end),
+            policy="EOD-frozen",
         )
 
         def build(data: dict[str, Any]) -> PriceHistory:
@@ -242,9 +245,11 @@ class QuoteRepository:
         """
         company = await self._companies.resolve(symbol)
         company_id = company.value.company_id
+        # Price data: the one domain that keeps the full market-boundary freeze.
         served = await self._cache.get(
             f"stock_data:{company_id}",
             lambda: self._source.fetch_stock_data_page(company_id),
+            policy="EOD-frozen",
         )
         return self._memo.resolve(
             f"stock_data:{company_id}#fields",
@@ -300,6 +305,7 @@ class DisclosureRepository:
                 lambda: self._source.search_company_disclosures(
                     company_id, template=template, page=page
                 ),
+                policy="daily-refresh",
             )
             source_name = "company_disclosures"
         elif window is not None:
@@ -317,6 +323,7 @@ class DisclosureRepository:
                     template=template,
                     page=page,
                 ),
+                policy="daily-refresh",
             )
             source_name = "announcements"
         else:
@@ -363,6 +370,7 @@ class DisclosureRepository:
                 subject_title=subject_title,
                 page=page,
             ),
+            policy="daily-refresh",
         )
 
         def build(html: str) -> KeywordSearchResult:
@@ -383,7 +391,7 @@ class DisclosureRepository:
         served = await self._cache.get(
             f"disclosure:{edge_no}",
             lambda: self._source.fetch_disclosure_viewer(edge_no),
-            immutable=True,
+            policy="immutable",
         )
 
         def build(html: str) -> DisclosureDetail:
@@ -422,7 +430,7 @@ class CompanyInfoRepository:
         company_id = company.value.company_id
         key = f"company_info:{company_id}"
         served = await self._cache.get(
-            key, lambda: self._source.fetch_company_information(company_id)
+            key, lambda: self._source.fetch_company_information(company_id), policy="daily-refresh"
         )
 
         def build(html: str) -> CompanyProfile:
@@ -439,7 +447,7 @@ class CompanyInfoRepository:
         company_id = company.value.company_id
         key = f"financials:{company_id}"
         served = await self._cache.get(
-            key, lambda: self._source.fetch_financial_reports(company_id)
+            key, lambda: self._source.fetch_financial_reports(company_id), policy="daily-refresh"
         )
 
         def build(html: str) -> FinancialHighlights:
@@ -465,10 +473,12 @@ class CompanyInfoRepository:
         dividends = await self._cache.get(
             f"dividends:{company_id}",
             lambda: self._source.fetch_dividends_or_rights(company_id, "Dividends"),
+            policy="daily-refresh",
         )
         rights = await self._cache.get(
             f"rights:{company_id}",
             lambda: self._source.fetch_dividends_or_rights(company_id, "Rights"),
+            policy="daily-refresh",
         )
 
         combined = DividendsAndRights(
@@ -498,7 +508,11 @@ class MarketRepository:
         self._memo = memo or ParsedMemo()
 
     async def _homepage(self) -> Served[str]:
-        return await self._cache.get(self.HOMEPAGE_KEY, lambda: self._source.fetch_homepage())
+        # Fetched intraday on a miss like every non-price domain: index levels here are a
+        # point-in-time snapshot, reused until the next close (see meta.as_of).
+        return await self._cache.get(
+            self.HOMEPAGE_KEY, lambda: self._source.fetch_homepage(), policy="daily-refresh"
+        )
 
     async def indices(self) -> Served[MarketIndices]:
         served = await self._homepage()

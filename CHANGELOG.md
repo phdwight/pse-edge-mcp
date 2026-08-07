@@ -5,6 +5,27 @@ Format: [Keep a Changelog](https://keepachangelog.com/) · Versioning: [SemVer](
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-08-07
+
+### Changed
+- **The market-hours freeze now applies to prices only.** `get_stock_quote` and
+  `get_price_history` keep the full EOD contract: never fetched while the market is open,
+  `MARKET_OPEN_NO_CACHE` on an uncached intraday read. Every other domain — company
+  lookup, disclosures, profiles, financials, dividends, indices, market summary — is now
+  **fetch-once-then-persist**: a cache miss may hit PSE Edge at any hour (once,
+  single-flighted), and every repeat of the same query is served from storage until the
+  next 15:00 Manila close. PSE Edge still sees at most one request per unique query per
+  boundary window; a disclosure filed at 10 AM is now visible the first time someone asks
+  instead of after the close.
+- `meta.data_policy` gains a third value: `"daily-refresh"` (non-price domains), joining
+  `"EOD-frozen"` (prices) and `"immutable"` (disclosure detail — whose *first* fetch is
+  also no longer gated on the trading session). `meta.stale` now means: past the boundary
+  because the market is open (price data) or because PSE Edge was unreachable (anything).
+- `FreezeService.get()` takes `policy="EOD-frozen" | "daily-refresh" | "immutable"`
+  (replacing `immutable=True`); the default stays the strictest, so an unlabelled read
+  can only over-protect PSE Edge. The `upstream: fetching` log line now carries
+  `policy=` — an `EOD-frozen` fetch during market hours is the broken-invariant signal.
+
 ### Fixed
 - **Documentation drift from 0.12.0, corrected the same day it shipped.** The walkthrough's
   version banner, line counts and module map; `auth_app.py`'s module docstring, whose route

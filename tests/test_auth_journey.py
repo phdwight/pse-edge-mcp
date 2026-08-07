@@ -988,9 +988,7 @@ async def test_the_token_endpoint_is_rate_limited(stack, pg_engine):
     }
 
     async with serving(stack) as (http, _):
-        statuses = [
-            (await http.post("/oauth/token", data=attempt)).status_code for _ in range(25)
-        ]
+        statuses = [(await http.post("/oauth/token", data=attempt)).status_code for _ in range(25)]
         limited = await http.post("/oauth/token", data=attempt)
 
     assert 429 in statuses, "guessing must be throttled, not merely refused forever"
@@ -1036,9 +1034,7 @@ async def test_send_email_delivers_only_to_the_authenticated_caller(pg_engine):
 
     mailbox = Capturing()
     settings = Settings(throttle_rate_per_sec=1000, public_url=PUBLIC_URL, auth_required=True)
-    mcp = build_server(
-        settings, calendar=ClosedMarket(), notifier=NotificationService(mailbox)
-    )
+    mcp = build_server(settings, calendar=ClosedMarket(), notifier=NotificationService(mailbox))
     app = mcp.streamable_http_app(
         json_response=True,
         stateless_http=True,

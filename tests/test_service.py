@@ -55,14 +55,51 @@ async def test_closed_miss_fetches_then_serves_cached():
 
 
 async def test_open_miss_refuses_with_retry_after():
+    """EOD-frozen (price data) — and deliberately also the DEFAULT, so a caller that
+    forgets to name a policy gets the freeze, never an accidental intraday fetch."""
     _, svc = make(mnl(2026, 7, 27, 11, 0))  # Monday, session running
 
     async def fetch():
-        raise AssertionError("must never fetch while market is open")
+        raise AssertionError("price data must never fetch while market is open")
 
     with pytest.raises(MarketOpenNoCacheError) as exc:
         await svc.get("k", fetch)
     assert exc.value.retry_after == mnl(2026, 7, 27, 15, 0)
+
+
+async def test_daily_refresh_miss_fetches_during_open_market_then_serves_from_cache():
+    """Non-price data: the first ask may hit PSE Edge at any hour; every repeat of the
+    same query is answered from storage until the next close boundary."""
+    _, svc = make(mnl(2026, 7, 27, 11, 0))  # session running
+    calls = 0
+
+    async def fetch():
+        nonlocal calls
+        calls += 1
+        return {"v": "intraday"}
+
+    first = await svc.get("k", fetch, policy="daily-refresh")
+    assert first.meta.from_cache is False and first.meta.data_policy == "daily-refresh"
+    assert first.meta.valid_until == mnl(2026, 7, 27, 15, 0)
+
+    second = await svc.get("k", fetch, policy="daily-refresh")
+    assert second.meta.from_cache is True and second.meta.stale is False
+    assert calls == 1, "PSE Edge is hit once; the repeat is served from storage"
+
+
+async def test_daily_refresh_expired_entry_refetches_even_during_open_market():
+    """Unlike EOD-frozen, expiry during a session refreshes instead of serving stale."""
+    cal, svc = make(mnl(2026, 7, 27, 10, 0))
+    from pse_edge_mcp.cache import CacheEntry
+
+    await svc.storage.set("k", CacheEntry(value={"v": "friday"}, fetched_at=mnl(2026, 7, 24, 8, 0)))
+
+    served = await svc.get("k", lambda: _value({"v": "monday"}), policy="daily-refresh")
+    assert served.value == {"v": "monday"} and served.meta.from_cache is False
+
+
+async def _value(v):
+    return v
 
 
 async def test_post_close_query_refetches():
@@ -120,23 +157,29 @@ async def test_immutable_entry_never_refetches_across_boundaries():
         calls += 1
         return {"edge_no": "abc"}
 
-    first = await svc.get("disclosure:abc", fetch, immutable=True)
+    first = await svc.get("disclosure:abc", fetch, policy="immutable")
     assert first.meta.data_policy == "immutable"
     assert first.meta.valid_until is None  # no expiry to report
 
     cal.set(mnl(2026, 8, 14, 16, 0))  # many boundaries later
-    again = await svc.get("disclosure:abc", fetch, immutable=True)
+    again = await svc.get("disclosure:abc", fetch, policy="immutable")
     assert again.meta.from_cache is True and again.meta.stale is False
     assert calls == 1
 
 
-async def test_immutable_miss_still_respects_the_open_market_freeze():
-    """Protecting PSE Edge outranks serving a cache miss: even a never-changing
-    object is not fetched during a session."""
+async def test_immutable_miss_fetches_even_during_open_market():
+    """Only price data is gated on the trading session: a never-changing object is
+    fetched on first ask at any hour, then never again."""
     _, svc = make(mnl(2026, 7, 27, 11, 0))
+    calls = 0
 
     async def fetch():
-        raise AssertionError("must never fetch while market is open")
+        nonlocal calls
+        calls += 1
+        return {"edge_no": "abc"}
 
-    with pytest.raises(MarketOpenNoCacheError):
-        await svc.get("disclosure:abc", fetch, immutable=True)
+    served = await svc.get("disclosure:abc", fetch, policy="immutable")
+    assert served.meta.from_cache is False and calls == 1
+
+    again = await svc.get("disclosure:abc", fetch, policy="immutable")
+    assert again.meta.from_cache is True and calls == 1

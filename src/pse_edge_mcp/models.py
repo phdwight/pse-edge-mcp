@@ -8,21 +8,27 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+DataPolicy = Literal["EOD-frozen", "daily-refresh", "immutable"]
+"""How a cached value relates to upstream: price data is EOD-frozen (never fetched while
+the market is open), everything else is daily-refresh (fetched at any hour, then reused
+until the next close), and objects with an immutable natural key are fetched once ever."""
+
 
 class Meta(BaseModel):
     """Attached to every tool result: honesty about freshness."""
 
     as_of: datetime = Field(description="When this data was fetched from PSE Edge")
     valid_until: datetime | None = Field(
-        description="Next market-close boundary; data frozen until then. "
+        description="Next market-close boundary; the cached value is reused until then. "
         "Null when data_policy is 'immutable' (the object never changes upstream)."
     )
     from_cache: bool
-    data_policy: Literal["EOD-frozen", "immutable"] = "EOD-frozen"
+    data_policy: DataPolicy = "EOD-frozen"
     stale: bool = Field(
         default=False,
-        description="True when served past valid_until because the market is open "
-        "(no upstream fetches during trading hours by design)",
+        description="True when served past valid_until — for EOD-frozen price data "
+        "because the market is open (no price fetches during trading hours by design), "
+        "for anything else because PSE Edge was unreachable",
     )
 
 

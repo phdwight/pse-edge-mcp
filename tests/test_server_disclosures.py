@@ -70,7 +70,7 @@ async def test_symbol_without_dates_uses_full_history_endpoint(company_disclosur
     assert result["data"]["total"] == 343
     assert result["data"]["has_more"] is True
     assert len(result["data"]["hits"]) == 50
-    assert result["meta"]["data_policy"] == "EOD-frozen"
+    assert result["meta"]["data_policy"] == "daily-refresh"
 
 
 @respx.mock
@@ -275,7 +275,7 @@ async def test_validate_symbol_confirms_a_known_ticker():
         "company_id": "700",
     }
     # The freshness contract applies here like everywhere else.
-    assert result["meta"]["data_policy"] == "EOD-frozen"
+    assert result["meta"]["data_policy"] == "daily-refresh"
     assert result["meta"]["as_of"] and result["meta"]["valid_until"]
 
 

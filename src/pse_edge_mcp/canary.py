@@ -191,9 +191,7 @@ async def run_canary(
 
         async def disclosures() -> Any:
             end = date.today()
-            html = await client.search_announcements(
-                from_date=end - timedelta(days=7), to_date=end
-            )
+            html = await client.search_announcements(from_date=end - timedelta(days=7), to_date=end)
             return parsers.parse_disclosure_table(html)
 
         await check("search_disclosures (announcements/search.ax → HTML)", disclosures)
@@ -293,9 +291,7 @@ async def run_and_notify(
         "the parser. Do not relax the validation to make this pass.</p>"
     )
     try:
-        await sender.send(
-            to=to, subject=f"PSE Edge canary FAILED — {report.summary()}", html=body
-        )
+        await sender.send(to=to, subject=f"PSE Edge canary FAILED — {report.summary()}", html=body)
     except Exception:  # noqa: BLE001 - a broken mailer must not hide the finding
         logger.exception("canary: could not email the failure report; the log is the record")
     return report

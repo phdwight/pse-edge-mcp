@@ -130,7 +130,7 @@ class RecordingCache:
         self.store: dict[str, Any] = {}
         self.fetches = 0
 
-    async def get(self, key: str, fetch: Any, *, immutable: bool = False) -> Served[Any]:
+    async def get(self, key: str, fetch: Any, *, policy: str = "EOD-frozen") -> Served[Any]:
         if key in self.store:
             return served(self.store[key], from_cache=True)
         self.fetches += 1

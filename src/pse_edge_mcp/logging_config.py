@@ -125,9 +125,7 @@ def configure_logging(*, json_output: bool, level: str = "INFO") -> None:
     """Install the root handler. Idempotent, so repeated calls do not duplicate output."""
     handler = logging.StreamHandler(sys.stdout)
     handler.setFormatter(
-        JsonFormatter()
-        if json_output
-        else PlainFormatter(_PLAIN_FORMAT, datefmt=_TIME_FORMAT)
+        JsonFormatter() if json_output else PlainFormatter(_PLAIN_FORMAT, datefmt=_TIME_FORMAT)
     )
     handler.set_name(_HANDLER_NAME)
     root = logging.getLogger()
