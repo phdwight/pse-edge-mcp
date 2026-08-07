@@ -357,8 +357,13 @@ def test_plain_log_lines_carry_an_iso_timestamp():
     developer reads in a terminal, and the one a deployment without PSE_LOG_JSON writes,
     produced lines that could not be correlated with anything."""
     record = logging.LogRecord(
-        name="pse", level=logging.INFO, pathname=__file__, lineno=1,
-        msg="upstream: fetching", args=(), exc_info=None,
+        name="pse",
+        level=logging.INFO,
+        pathname=__file__,
+        lineno=1,
+        msg="upstream: fetching",
+        args=(),
+        exc_info=None,
     )
     line = PlainFormatter(_PLAIN_FORMAT, datefmt=_TIME_FORMAT).format(record)
 
@@ -371,8 +376,13 @@ def test_plain_log_lines_carry_an_iso_timestamp():
 def test_the_plain_formatter_redacts_too():
     """Otherwise the safer-looking format is the leakier one."""
     record = logging.LogRecord(
-        name="pse", level=logging.INFO, pathname=__file__, lineno=1,
-        msg="client_secret=hunter2hunter2", args=(), exc_info=None,
+        name="pse",
+        level=logging.INFO,
+        pathname=__file__,
+        lineno=1,
+        msg="client_secret=hunter2hunter2",
+        args=(),
+        exc_info=None,
     )
     line = PlainFormatter(_PLAIN_FORMAT, datefmt=_TIME_FORMAT).format(record)
     assert "hunter2" not in line
@@ -400,8 +410,9 @@ async def test_every_upstream_fetch_is_logged(caplog):
     assert any("duration_ms" in r.message for r in caplog.records)
 
 
-async def test_refusing_an_uncached_read_during_market_hours_is_logged(caplog):
-    from pse_edge_mcp.errors import MarketOpenNoCacheError
+async def test_an_uncached_session_price_fetch_is_logged_and_flagged(caplog):
+    """The freeze's one exception must be visible per occurrence: an operator watching
+    the logs should see exactly why an EOD-frozen fetch happened during market hours."""
     from pse_edge_mcp.market_calendar import MarketCalendar
     from pse_edge_mcp.service import FreezeService
 
@@ -411,10 +422,10 @@ async def test_refusing_an_uncached_read_during_market_hours_is_logged(caplog):
 
     service = FreezeService(calendar=Open())
     with caplog.at_level(logging.INFO, logger="pse_edge_mcp.service"):
-        with pytest.raises(MarketOpenNoCacheError):
-            await service.get("quote:SM", lambda: _answer("never"))
+        served = await service.get("quote:SM", lambda: _answer("session-value"))
 
-    assert any("refusing an uncached read" in r.message for r in caplog.records)
+    assert any("fetching once" in r.message for r in caplog.records)
+    assert served.meta.stale is True and served.meta.note, "served, but labelled non-realtime"
 
 
 async def _answer(value):
@@ -422,7 +433,7 @@ async def _answer(value):
 
 
 def test_startup_logs_the_resolved_configuration(caplog):
-    """"What config is this actually running?" is the first question in any incident, and
+    """ "What config is this actually running?" is the first question in any incident, and
     answering it from env vars and compose files is guesswork."""
     from pse_edge_mcp.asgi import create_app
 

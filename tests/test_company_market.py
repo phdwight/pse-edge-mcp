@@ -33,7 +33,7 @@ class FakeCache:
     def __init__(self) -> None:
         self.keys: list[str] = []
 
-    async def get(self, key: str, fetch: Any, *, immutable: bool = False) -> Served[Any]:
+    async def get(self, key: str, fetch: Any, *, policy: str = "EOD-frozen") -> Served[Any]:
         self.keys.append(key)
         return Served(
             value=await fetch(),

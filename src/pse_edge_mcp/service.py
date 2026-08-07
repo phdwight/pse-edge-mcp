@@ -1,12 +1,26 @@
-"""Service layer: cache policy orchestration (market-boundary freeze).
+"""Service layer: cache policy orchestration.
 
-Decision table for every read (see market_calendar for boundary semantics):
+Each read names its policy (the repository chooses it per domain):
 
-  cache state | market closed          | market open
-  ------------+------------------------+---------------------------------
-  fresh       | serve                  | serve
-  expired     | fetch anew, cache      | serve STALE (flagged; never fetch)
-  missing     | fetch anew, cache      | raise MARKET_OPEN_NO_CACHE
+- **EOD-frozen** — price data only. The market-boundary freeze applies in full:
+
+    cache state | market closed          | market open
+    ------------+------------------------+----------------------------------------
+    fresh       | serve                  | serve
+    expired     | fetch anew, cache      | serve STALE (flagged; never fetch)
+    missing     | fetch anew, cache      | fetch ONCE, serve flagged NOT REALTIME
+
+  A price snapshot taken mid-session is never presented as settled: it serves with
+  `stale: true` and an explanatory `note` for the rest of the session (the label is
+  derived from `fetched_at`, so it outlives the request that fetched it), and the
+  first ask after the close replaces it with the real end-of-day figures.
+
+- **daily-refresh** — everything else (disclosures, profiles, financials, indices…).
+  A miss or expiry fetches at ANY hour, so PSE Edge is hit once per unique query per
+  boundary window; every repeat is served from storage until the next market close.
+
+- **immutable** — objects that never change upstream (a disclosure by edge_no).
+  Fetched once, at any hour, never refetched.
 
 If the fetch itself fails because PSE Edge is unreachable, an expired entry is served
 STALE rather than discarded: holding the last close and answering with an error instead
@@ -22,9 +36,9 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 
 from .cache import CacheEntry, InMemoryStorage, Storage
-from .errors import EdgeUnavailableError, MarketOpenNoCacheError
+from .errors import EdgeUnavailableError
 from .market_calendar import MarketCalendar
-from .models import Meta
+from .models import DataPolicy, Meta
 from .ratelimit import SingleFlight
 
 logger = logging.getLogger(__name__)
@@ -60,53 +74,77 @@ class FrozenCache(Protocol):
     """
 
     async def get(
-        self, key: str, fetch: Callable[[], Awaitable[Any]], *, immutable: bool = False
+        self, key: str, fetch: Callable[[], Awaitable[Any]], *, policy: DataPolicy = "EOD-frozen"
     ) -> Served[Any]: ...
 
 
 class FreezeService:
+    INTRADAY_NOTE = (
+        "Not a realtime value: this price was fetched during the trading session because "
+        "nothing was cached. PSE Edge session data is delayed and is not the settled "
+        "end-of-day figure; it refreshes after the 15:00 Manila close."
+    )
+
     def __init__(self, calendar: MarketCalendar | None = None, storage: Storage | None = None):
         self.calendar = calendar or MarketCalendar()
         self.storage = storage or InMemoryStorage()
         self._flight = SingleFlight()
 
     async def get(
-        self, key: str, fetch: Callable[[], Awaitable[Any]], *, immutable: bool = False
+        self, key: str, fetch: Callable[[], Awaitable[Any]], *, policy: DataPolicy = "EOD-frozen"
     ) -> Served[Any]:
-        """`immutable=True` marks objects that never change upstream (plan §5a) — a
-        disclosure keyed by edge_no, for instance. Once cached they are never refetched
-        at any boundary. The open-market freeze still applies to the *first* fetch:
-        protecting PSE Edge outranks serving a cache miss promptly.
+        """The default is the strictest policy on purpose: a caller that forgets to name
+        one gets the full market-boundary freeze, never an accidental intraday fetch.
+        `immutable` marks objects that never change upstream (plan §5a) — a disclosure
+        keyed by edge_no, for instance. Once cached they are never refetched.
         """
         now = self.calendar.now()
         entry = await self.storage.get(key)
 
-        if entry is not None and (immutable or self.calendar.is_fresh(entry.fetched_at, now)):
-            return self._served(entry, from_cache=True, stale=False, immutable=immutable)
+        if entry is not None and (
+            policy == "immutable" or self.calendar.is_fresh(entry.fetched_at, now)
+        ):
+            return self._served(entry, from_cache=True, stale=False, policy=policy)
 
-        if self.calendar.is_market_open(now):
+        # Only price data is gated on the trading session. Everything else may fetch at
+        # any hour — once — and then answers from storage until the next close boundary.
+        if policy == "EOD-frozen" and self.calendar.is_market_open(now):
             if entry is not None:
-                # Expired during a session: it is still the latest EOD truth.
+                # Expired during a session: it is still the latest EOD truth, and
+                # strictly better than a mid-session snapshot — never refetched.
                 return self._served(entry, from_cache=True, stale=True)
-            close = self.calendar.next_close(now)
+            # Nothing cached at all: there is no previous value to serve, so the one
+            # exception to the freeze (decided 2026-08-07) — fetch once, single-flighted,
+            # and label the result as not realtime. _served derives that label from
+            # fetched_at, so every repeat this session carries it too, and the first ask
+            # after the close replaces the snapshot with the settled EOD figures.
             logger.info(
-                "freeze: refusing an uncached read while the market is open key=%s retry_after=%s",
+                "freeze: uncached price read during the session — fetching once, "
+                "serving as non-realtime key=%s",
                 key,
-                close.isoformat(),
-            )
-            raise MarketOpenNoCacheError(
-                "No cached data for this query and the market is open — upstream "
-                f"fetches are frozen until the market closes at "
-                f"{close.strftime('%H:%M %Z on %b %d')}. Try again after that.",
-                retry_after=close,
             )
 
-        async def _fetch_and_store() -> CacheEntry:
+        async def _fetch_and_store() -> tuple[CacheEntry, bool]:
+            # Re-check storage now that we hold the flight. Between this request's cache
+            # miss and its turn here, a concurrent request may already have fetched and
+            # stored the answer — either one whose flight completed in the gap (its
+            # future is popped once done, so we would start a NEW flight), or another
+            # worker process writing to the shared Postgres cache. Fetching again would
+            # be exactly the duplicate upstream query this path exists to prevent.
+            current = await self.storage.get(key)
+            if current is not None and (
+                policy == "immutable"
+                or self.calendar.is_fresh(current.fetched_at, self.calendar.now())
+            ):
+                return current, False
+
             # THE line to watch. This server exists to keep upstream requests rare, so
-            # every one is worth a log entry: they should be a trickle after each close,
-            # and one appearing during market hours means the freeze invariant is broken.
+            # every one is worth a log entry. Every policy fetches at most once per key
+            # per boundary window; a policy=EOD-frozen fetch during market hours is
+            # legitimate only for a key with nothing cached (the non-realtime fallback) —
+            # repeats of the same key within one session mean the freeze is broken.
             started = time.perf_counter()
-            logger.info("upstream: fetching from PSE Edge key=%s", key)
+            logger.info("upstream: fetching from PSE Edge key=%s policy=%s", key, policy)
             value = await fetch()
             fresh = CacheEntry(value=value, fetched_at=self.calendar.now())
             await self.storage.set(key, fresh)
@@ -115,11 +153,13 @@ class FreezeService:
                 key,
                 int((time.perf_counter() - started) * 1000),
             )
-            return fresh
+            return fresh, True
 
-        # Concurrent misses for the same key collapse into one upstream request.
+        # Concurrent misses for the same key collapse into one upstream request: the
+        # first caller runs the fetch, every simultaneous caller awaits the same future
+        # and receives the same result (see SingleFlight).
         try:
-            stored = await self._flight.do(key, _fetch_and_store)
+            stored, fetched = await self._flight.do(key, _fetch_and_store)
         except EdgeUnavailableError:
             if entry is None:
                 raise  # Nothing cached and nothing upstream: there is no answer to give.
@@ -134,19 +174,35 @@ class FreezeService:
                 key,
                 entry.fetched_at.isoformat(),
             )
-            return self._served(entry, from_cache=True, stale=True, immutable=immutable)
-        return self._served(stored, from_cache=False, stale=False, immutable=immutable)
+            return self._served(entry, from_cache=True, stale=True, policy=policy)
+        return self._served(stored, from_cache=not fetched, stale=False, policy=policy)
 
     def _served(
-        self, entry: CacheEntry, *, from_cache: bool, stale: bool, immutable: bool = False
+        self,
+        entry: CacheEntry,
+        *,
+        from_cache: bool,
+        stale: bool,
+        policy: DataPolicy = "EOD-frozen",
     ) -> Served[Any]:
+        immutable = policy == "immutable"
+        note = None
+        if policy == "EOD-frozen" and self.calendar.is_market_open(entry.fetched_at):
+            # A price snapshot taken mid-session is never a settled EOD value, no matter
+            # when or from where it is served. Deriving the label from fetched_at makes
+            # it outlive the request that fetched it: cache hits for the rest of the
+            # session carry the same flag, and it disappears only when the post-close
+            # refetch replaces the entry.
+            stale = True
+            note = self.INTRADAY_NOTE
         return Served(
             value=entry.value,
             meta=Meta(
                 as_of=entry.fetched_at,
                 valid_until=None if immutable else self.calendar.valid_until(entry.fetched_at),
                 from_cache=from_cache,
-                data_policy="immutable" if immutable else "EOD-frozen",
+                data_policy=policy,
                 stale=stale,
+                note=note,
             ),
         )

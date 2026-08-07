@@ -185,7 +185,7 @@ async def test_summary_shows_what_is_held_without_exposing_secrets(pg_engine):
 
 
 async def test_expired_tokens_are_not_counted_as_active(pg_engine):
-    """"Active" means usable now. Expired rows linger until a mint purges them, and
+    """ "Active" means usable now. Expired rows linger until a mint purges them, and
     counting them would show several "active tokens" for one connected client."""
     import secrets
 

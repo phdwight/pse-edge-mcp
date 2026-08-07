@@ -5,7 +5,49 @@ Format: [Keep a Changelog](https://keepachangelog.com/) · Versioning: [SemVer](
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-08-07
+
+### Changed
+- **The market-hours freeze now applies to prices only.** `get_stock_quote` and
+  `get_price_history` keep the full EOD contract: never fetched while the market is open,
+  `MARKET_OPEN_NO_CACHE` on an uncached intraday read. Every other domain — company
+  lookup, disclosures, profiles, financials, dividends, indices, market summary — is now
+  **fetch-once-then-persist**: a cache miss may hit PSE Edge at any hour (once,
+  single-flighted), and every repeat of the same query is served from storage until the
+  next 15:00 Manila close. PSE Edge still sees at most one request per unique query per
+  boundary window; a disclosure filed at 10 AM is now visible the first time someone asks
+  instead of after the close.
+- `meta.data_policy` gains a third value: `"daily-refresh"` (non-price domains), joining
+  `"EOD-frozen"` (prices) and `"immutable"` (disclosure detail — whose *first* fetch is
+  also no longer gated on the trading session). `meta.stale` now means: past the boundary
+  because the market is open (price data) or because PSE Edge was unreachable (anything).
+- `FreezeService.get()` takes `policy="EOD-frozen" | "daily-refresh" | "immutable"`
+  (replacing `immutable=True`); the default stays the strictest, so an unlabelled read
+  can only over-protect PSE Edge. The `upstream: fetching` log line now carries
+  `policy=` — a repeated `EOD-frozen` fetch for one key within a session is the
+  broken-invariant signal.
+- **An uncached price during market hours is now served, labelled — not refused.** A
+  *cached* price is still never refetched during the session. But when nothing was ever
+  cached for a symbol, the server previously had nothing to offer except
+  `MARKET_OPEN_NO_CACHE`; it now fetches once (single-flighted, throttled) and serves
+  **identity plus `previous_close` only** — the last settled price before the session;
+  every session-moving field, `raw_fields` included, is withheld — flagged
+  `stale: true` with a new `meta.note` field spelling out that the price is **not a
+  realtime value** and will refresh after the 15:00 Manila close. The label derives from the entry's fetch time, so every repeat
+  that session carries it, and the post-close refetch replaces the snapshot with the
+  settled figures. `MARKET_OPEN_NO_CACHE` is no longer raised (the error class remains
+  for clients that handle the code); `meta.stale` now reads as "not a settled
+  end-of-day value".
+
 ### Fixed
+- **A cache miss that raced a concurrent store no longer refetches.** Simultaneous
+  requests for the same key already collapsed into one upstream request (single-flight),
+  but a request whose cache miss landed just as another's fetch completed — or as another
+  worker wrote the shared Postgres cache — would start a fresh flight and query PSE Edge
+  again for data already stored. The flight now re-checks storage immediately before
+  going upstream and serves the stored entry (honestly marked `from_cache: true`)
+  instead. Matters more since the fetch-anytime change above, and across workers it
+  narrows the duplicate window to genuinely overlapping fetches.
 - **Documentation drift from 0.12.0, corrected the same day it shipped.** The walkthrough's
   version banner, line counts and module map; `auth_app.py`'s module docstring, whose route
   list claimed "the whole surface is enumerable above" while omitting seven routes (`/`,

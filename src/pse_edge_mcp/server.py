@@ -58,11 +58,17 @@ from .validation import (
 )
 
 INSTRUCTIONS = """Data source: PSE Edge (Philippine Stock Exchange disclosure portal, unofficial).
-This server serves END-OF-DAY data by design: values are frozen between market
-sessions to avoid loading PSE Edge during trading hours (Asia/Manila). Every
-result carries meta.as_of / meta.valid_until; meta.stale=true means the market
-is open and you are seeing the latest end-of-day values. If you get a
-MARKET_OPEN_NO_CACHE error, retry after the market closes (15:00 Manila)."""
+Stock PRICES are end-of-day by design: quote and price-history values are frozen
+between market sessions (Asia/Manila). During the session a cached price serves the
+last close; a price nobody has ever asked for is fetched once and served with ONLY
+previous_close populated (the last settled price before the session), flagged
+stale=true with a meta.note explaining it is NOT a realtime value — relay that note
+to the user. The settled figures arrive after the 15:00 Manila close. Everything
+else (disclosures, profiles, financials, dividends, indices) is fetched from PSE
+Edge at most once per query and then served from storage until the next market
+close — check meta.as_of for when it was actually fetched. Every result carries
+meta.as_of / meta.valid_until; meta.stale=true means the value is not a settled
+end-of-day figure (session-time price, or PSE Edge was unreachable)."""
 
 # ~6 months, the default span for a price-history request.
 DEFAULT_HISTORY_DAYS = 182
@@ -236,8 +242,9 @@ def build_server(
         "ARE" does not match "AREIT". An unknown symbol is `valid: false` with null
         fields, not an error.
 
-        Data is EOD-frozen like every other tool (see meta).
+        Cached after the first lookup and refreshed daily (see meta).
         """
+
         async def run() -> Served[Any]:
             served = await companies.try_resolve(require_text(symbol, "symbol"))
             hit = served.value
@@ -257,7 +264,11 @@ def build_server(
         """Get the latest end-of-day quote for a PSE stock symbol (e.g. SM, AREIT, BDO).
 
         Includes price, change, 52-week range, market cap, shares, and the full
-        set of fields PSE Edge publishes. Data is EOD-frozen (see meta).
+        set of fields PSE Edge publishes. Data is EOD-frozen (see meta). If the market
+        is open and this symbol has never been cached, a one-time fetch serves identity
+        plus previous_close ONLY (the last settled price before the session — every
+        other field is null), flagged stale=true with a meta.note saying the value is
+        not realtime — relay that caveat when presenting the price.
         """
         return await reply(lambda: quotes.quote(require_text(symbol, "symbol")))
 
@@ -268,7 +279,9 @@ def build_server(
         """Get daily OHLC price history for a PSE stock symbol.
 
         Dates are ISO format (YYYY-MM-DD). Defaults to the last ~6 months.
-        Data comes from PSE Edge's own chart endpoint and is EOD-frozen.
+        Data comes from PSE Edge's own chart endpoint and is EOD-frozen. If the market
+        is open and this exact range has never been cached, a one-time fetch may include
+        today's still-moving bar, flagged stale=true with an explanatory meta.note.
         """
 
         async def run() -> Served[Any]:
@@ -298,8 +311,9 @@ def build_server(
         - template: filter by disclosure type as free text, e.g. "Press Release",
           "Cash Dividend", "Material Information".
 
-        Data is EOD-frozen: a disclosure filed during today's session appears after
-        the 15:00 Manila close (see meta).
+        A given search hits PSE Edge once and is then served from storage until the
+        next 15:00 Manila close, so a disclosure filed today appears when its query
+        is first asked — or after the close if that query was already cached (see meta).
         """
 
         async def run() -> Served[Any]:
@@ -430,8 +444,9 @@ def build_server(
         Covers PSEi, All Shares, Financials, Industrial, Holding Firms, Property, Services
         and Mining and Oil. `change` and `change_percent` are signed, and `direction` is
         "up"/"down"/"flat" — PSE Edge prints these unsigned and shows direction only as a
-        colour and an arrow, so the signs here are derived from that. EOD-frozen: during a
-        session you get the previous close's figures (see meta.stale).
+        colour and an arrow, so the signs here are derived from that. Fetched at most once
+        per boundary window and served from storage until the next 15:00 Manila close —
+        meta.as_of says when the snapshot was taken.
         """
         return await reply(market.indices)
 

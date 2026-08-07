@@ -65,9 +65,7 @@ class NotificationService:
         limiter: FixedWindowLimiter | None = None,
     ) -> None:
         self._sender = sender
-        self._limiter = limiter or FixedWindowLimiter(
-            limit=daily_limit, window_sec=_DAY_SECONDS
-        )
+        self._limiter = limiter or FixedWindowLimiter(limit=daily_limit, window_sec=_DAY_SECONDS)
         self._daily_limit = daily_limit
 
     async def send_to_self(

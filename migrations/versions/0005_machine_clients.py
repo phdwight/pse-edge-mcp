@@ -29,9 +29,7 @@ def upgrade() -> None:
     op.add_column("oauth_clients", sa.Column("client_secret_hash", sa.String()))
     op.add_column("oauth_clients", sa.Column("service_user_id", sa.String()))
     op.add_column("oauth_clients", sa.Column("revoked_at", sa.DateTime(timezone=True)))
-    op.create_index(
-        "ix_oauth_clients_service_user_id", "oauth_clients", ["service_user_id"]
-    )
+    op.create_index("ix_oauth_clients_service_user_id", "oauth_clients", ["service_user_id"])
 
 
 def downgrade() -> None:

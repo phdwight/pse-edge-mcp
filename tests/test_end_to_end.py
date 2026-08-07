@@ -151,7 +151,7 @@ async def test_the_full_protocol_journey_a_client_actually_performs():
         "company_name": "SM Investments Corporation",
     }
     meta = payload["meta"]
-    assert meta["data_policy"] == "EOD-frozen"
+    assert meta["data_policy"] == "daily-refresh"
     assert meta["stale"] is False and meta["from_cache"] is False
     assert meta["as_of"] and meta["valid_until"], "freshness must travel with every result"
 
@@ -204,16 +204,34 @@ async def test_an_outage_serves_the_last_close_flagged_stale_through_the_whole_s
 
 
 @respx.mock
-async def test_market_hours_refuse_an_uncached_read_with_a_retry_timestamp():
-    """The freeze policy as an agent experiences it: a structured refusal it can schedule
-    against, not a failure it should retry immediately."""
+async def test_market_hours_serve_an_uncached_price_once_flagged_not_realtime():
+    """The policy split as an agent experiences it: during a session, non-price tools
+    answer normally, and a price nobody ever asked for is served from a ONE-TIME fetch
+    that says out loud it is not a realtime value — repeats reuse it without another
+    upstream hit."""
     mock_edge_ok()
+    respx.get(f"{BASE}/companyPage/stockData.do").mock(
+        return_value=httpx.Response(200, text=(FIXTURES / "stock_data.html").read_text())
+    )
     async with serving(at=OPEN) as http:
-        payload = await call_tool(http, "search_companies", query="sm")
+        lookup = await call_tool(http, "search_companies", query="sm")
+        price = await call_tool(http, "get_stock_quote", symbol="SM")
+        again = await call_tool(http, "get_stock_quote", symbol="SM")
 
-    assert payload["error"] == "MARKET_OPEN_NO_CACHE"
-    assert payload["retry_after"], "an agent needs to know when to come back"
-    assert not respx.calls, "invariant #1: not one upstream request during a session"
+    assert "error" not in lookup, "non-price data is served during the session"
+    assert lookup["meta"]["data_policy"] == "daily-refresh"
+    assert "error" not in price, "an uncached session price is served, not refused"
+    assert price["meta"]["stale"] is True, "flagged: not the settled EOD value"
+    assert "realtime" in price["meta"]["note"], "the caveat is spelled out for the user"
+    assert price["data"]["previous_close"] == 845.5, "the last settled price is the answer"
+    assert price["data"]["last_traded_price"] is None, "no delayed session value surfaces"
+    assert price["data"]["raw_fields"] == {}, "the raw page fields must not leak either"
+    assert "previous_close" in price["meta"]["note"], "the note names the one field served"
+    assert again["meta"]["from_cache"] is True and again["meta"]["note"], (
+        "repeats reuse the snapshot and keep the label"
+    )
+    stock_calls = [c for c in respx.calls if "stockData" in str(c.request.url)]
+    assert len(stock_calls) == 1, "the session price fetch happens exactly once per symbol"
 
 
 @respx.mock
@@ -249,9 +267,7 @@ def test_the_canary_cli_exits_zero_when_every_family_is_healthy(monkeypatch):
     """Exit status is what lets cron or CI notice without parsing output."""
     from pse_edge_mcp import canary
 
-    monkeypatch.setattr(
-        canary, "run_and_notify", _fake_report(ok=True), raising=True
-    )
+    monkeypatch.setattr(canary, "run_and_notify", _fake_report(ok=True), raising=True)
     with pytest.raises(SystemExit) as exit_info:
         canary.main()
     assert exit_info.value.code == 0

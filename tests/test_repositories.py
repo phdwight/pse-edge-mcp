@@ -33,17 +33,23 @@ class FakeCache:
 
     def __init__(self) -> None:
         self.keys: list[str] = []
-        self.immutable_flags: list[bool] = []
+        self.policies: list[str] = []
         self.fetches = 0
 
-    async def get(self, key: str, fetch: Any, *, immutable: bool = False) -> Served[Any]:
+    async def get(self, key: str, fetch: Any, *, policy: str = "EOD-frozen") -> Served[Any]:
         self.keys.append(key)
-        self.immutable_flags.append(immutable)
+        self.policies.append(policy)
         self.fetches += 1
         value = await fetch()
+        immutable = policy == "immutable"
         return Served(
             value=value,
-            meta=Meta(as_of=AS_OF, valid_until=None if immutable else AS_OF, from_cache=False),
+            meta=Meta(
+                as_of=AS_OF,
+                valid_until=None if immutable else AS_OF,
+                from_cache=False,
+                data_policy=policy,  # type: ignore[arg-type]
+            ),
         )
 
 
@@ -242,7 +248,7 @@ async def test_detail_is_cached_immutably_and_returns_absolute_urls(disclosure_v
 
     served = await repo.detail("ff4c7557aee1d72b64d70b69f0a3140b")
 
-    assert cache.immutable_flags == [True]
+    assert cache.policies == ["immutable"]
     assert served.meta.data_policy == "immutable" or served.meta.valid_until is None
     assert (
         served.value.attachments[0].download_url
@@ -314,6 +320,50 @@ async def test_history_uses_ids_resolved_from_the_quote_page(stock_data_html, ch
     assert served.value.symbol == "SM"
     assert len(served.value.bars) == len(chart_json["chartData"])
     assert served.value.bars[0].trade_date == date(2026, 7, 28)  # first bar in the fixture
+
+
+async def test_only_price_reads_keep_the_market_freeze(stock_data_html, chart_json):
+    """The policy split (decided 2026-08-07): quote page and OHLC stay EOD-frozen; the
+    company lookup they depend on refreshes daily like every other non-price domain."""
+    cache = FakeCache()
+    companies = CompanyRepository(FakeCompanySource(SM_AUTOCOMPLETE), cache)
+    repo = QuoteRepository(FakeQuoteSource(stock_data_html, chart_json), companies, cache)
+
+    await repo.history("SM", date(2026, 6, 1), date(2026, 7, 30))
+
+    by_key = dict(zip(cache.keys, cache.policies, strict=True))
+    assert by_key["autocomplete:SM"] == "daily-refresh"
+    assert by_key["stock_data:599"] == "EOD-frozen"
+    [ohlc_key] = [k for k in by_key if k.startswith("ohlc:")]
+    assert by_key[ohlc_key] == "EOD-frozen"
+
+
+async def test_a_session_quote_surfaces_only_previous_close(stock_data_html, chart_json):
+    """When the freeze layer hands back a mid-session snapshot (meta.note set), the
+    quote tool must not surface the delayed moving fields — identity plus
+    previous_close is the whole answer, and the note says so."""
+
+    class SessionCache(FakeCache):
+        async def get(self, key: str, fetch: Any, *, policy: str = "EOD-frozen") -> Served[Any]:
+            served = await super().get(key, fetch, policy=policy)
+            if policy == "EOD-frozen":
+                meta = served.meta.model_copy(update={"stale": True, "note": "session snapshot"})
+                return Served(value=served.value, meta=meta)
+            return served
+
+    cache = SessionCache()
+    companies = CompanyRepository(FakeCompanySource(SM_AUTOCOMPLETE), cache)
+    repo = QuoteRepository(FakeQuoteSource(stock_data_html, chart_json), companies, cache)
+
+    served = await repo.quote("SM")
+
+    quote = served.value
+    assert quote.previous_close == 845.5
+    assert quote.symbol == "SM" and quote.company_id == "599" and quote.security_id
+    assert quote.last_traded_price is None and quote.open is None and quote.high is None
+    assert quote.volume is None and quote.market_cap is None
+    assert quote.raw_fields == {}, "raw_fields carries the whole page — it must not leak"
+    assert served.meta.note and "previous_close" in served.meta.note
 
 
 async def test_quote_falls_back_to_autocomplete_identity(stock_data_html, chart_json):
