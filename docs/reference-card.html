@@ -1,0 +1,733 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>*, *::before, *::after { box-sizing: border-box; }</style>
+<title>PSE Edge MCP — Architecture Reference</title>
+<style>
+  :root {
+    --paper: #fafaf9;
+    --panel: #f2f2ef;
+    --box: #ffffff;
+    --ink: #1d2129;
+    --muted: #6d7480;
+    --line: #dcdcd6;
+    --line-strong: #b9b9b1;
+    --accent: #3b5a86;
+    --accent-ink: #2e4a72;
+    --accent-soft: #e5ecf5;
+    --warn: #9a6a1f;
+    --warn-soft: #f6ecd9;
+    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper: #14161b;
+      --panel: #1a1d24;
+      --box: #1f232c;
+      --ink: #e6e6e1;
+      --muted: #9aa1ad;
+      --line: #2d323c;
+      --line-strong: #454c59;
+      --accent: #8aa7d0;
+      --accent-ink: #a5bddd;
+      --accent-soft: #24334a;
+      --warn: #d3a45a;
+      --warn-soft: #362b18;
+    }
+  }
+  :root[data-theme="light"] {
+    --paper: #fafaf9; --panel: #f2f2ef; --box: #ffffff; --ink: #1d2129; --muted: #6d7480;
+    --line: #dcdcd6; --line-strong: #b9b9b1; --accent: #3b5a86; --accent-ink: #2e4a72;
+    --accent-soft: #e5ecf5; --warn: #9a6a1f; --warn-soft: #f6ecd9;
+  }
+  :root[data-theme="dark"] {
+    --paper: #14161b; --panel: #1a1d24; --box: #1f232c; --ink: #e6e6e1; --muted: #9aa1ad;
+    --line: #2d323c; --line-strong: #454c59; --accent: #8aa7d0; --accent-ink: #a5bddd;
+    --accent-soft: #24334a; --warn: #d3a45a; --warn-soft: #362b18;
+  }
+
+  html { background: var(--paper); }
+  body {
+    font-family: var(--sans);
+    color: var(--ink);
+    background: var(--paper);
+    line-height: 1.55;
+    margin: 0;
+  }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 40px 28px 90px; }
+
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0 0 10px;
+  }
+  header.masthead { display: flex; justify-content: space-between; align-items: flex-start; gap: 24px; flex-wrap: wrap; }
+  h1 {
+    font-size: clamp(34px, 5vw, 52px);
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    margin: 0 0 10px;
+    text-wrap: balance;
+  }
+  .subtitle { max-width: 58ch; color: var(--ink); margin: 0; font-size: 16px; }
+  .versionblock { text-align: right; min-width: 180px; }
+  .versionblock .v {
+    font-family: var(--mono);
+    font-size: 30px;
+    font-weight: 700;
+    color: var(--accent);
+  }
+  .versionblock .v span { font-size: 15px; font-weight: 400; margin-right: 4px; color: var(--muted); }
+  .versionblock p { font-size: 11.5px; color: var(--muted); margin: 6px 0 0; line-height: 1.45; }
+  .versionblock code { font-family: var(--mono); font-size: 11px; }
+
+  nav.toc {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+    border-top: 1px solid var(--line-strong);
+    border-bottom: 1px solid var(--line-strong);
+    margin: 34px 0 0;
+  }
+  nav.toc a {
+    display: flex; align-items: baseline; gap: 10px;
+    padding: 16px 14px;
+    text-decoration: none;
+    color: var(--ink);
+    font-weight: 600;
+    font-size: 15px;
+    border-left: 1px solid var(--line);
+  }
+  nav.toc a:first-child { border-left: none; }
+  nav.toc a .n { font-family: var(--mono); font-size: 11px; color: var(--accent); }
+  nav.toc a:hover { background: var(--panel); }
+  @media (max-width: 720px) { nav.toc a { border-left: none; border-top: 1px solid var(--line); } nav.toc a:first-child { border-top: none; } }
+
+  section { margin-top: 72px; }
+  .sechead { display: flex; align-items: baseline; gap: 14px; margin-bottom: 10px; }
+  .sechead .n { font-family: var(--mono); font-size: 13px; color: var(--accent); }
+  h2 { font-size: clamp(24px, 3vw, 32px); font-weight: 800; letter-spacing: -0.015em; margin: 0; text-wrap: balance; }
+  .lede { max-width: 68ch; color: var(--ink); margin: 0 0 26px; font-size: 15.5px; }
+  .lede code, p code, li code, td code { font-family: var(--mono); font-size: 0.86em; background: var(--panel); border: 1px solid var(--line); border-radius: 3px; padding: 1px 4px; }
+
+  /* ---------- figure / flow diagram ---------- */
+  figure.flowfig {
+    margin: 0 0 34px;
+    border: 1px solid var(--line);
+    background: var(--panel);
+    padding: 34px 22px 18px;
+  }
+  .flowscroll { overflow-x: auto; padding-bottom: 6px; }
+  .flow { display: flex; align-items: center; justify-content: center; min-width: 860px; }
+  .fnode {
+    background: var(--box);
+    border: 1px solid var(--line-strong);
+    padding: 16px 20px;
+    text-align: center;
+    min-width: 128px;
+    flex: 0 0 auto;
+  }
+  .fnode .name { font-family: var(--mono); font-weight: 700; font-size: 14.5px; white-space: nowrap; }
+  .fnode .role { font-family: var(--mono); font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); margin-top: 6px; white-space: nowrap; }
+  .fnode.hot { border: 2px solid var(--accent); position: relative; }
+  .fnode.edge { background: var(--panel); }
+  .farrow { display: flex; flex-direction: column; align-items: center; gap: 4px; flex: 1 0 76px; padding: 0 6px; }
+  .farrow .lbl { font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--accent); white-space: nowrap; }
+  .farrow .shaft { width: 100%; height: 1px; background: var(--accent); position: relative; }
+  .farrow .shaft::after {
+    content: ""; position: absolute; right: -1px; top: -3.5px;
+    border-left: 7px solid var(--accent); border-top: 4px solid transparent; border-bottom: 4px solid transparent;
+  }
+  .hang { display: flex; justify-content: center; margin-top: 0; min-width: 860px; }
+  .hangcol { display: flex; flex-direction: column; align-items: center; }
+  .hangline { width: 1px; height: 22px; border-left: 1px dashed var(--line-strong); }
+  .hangbox {
+    border: 1px dashed var(--line-strong);
+    background: var(--paper);
+    padding: 8px 14px;
+    font-family: var(--mono); font-size: 11px; color: var(--muted);
+    text-align: center;
+  }
+  .hangbox b { color: var(--warn); font-weight: 700; }
+  figcaption {
+    text-align: center; font-family: var(--mono); font-size: 10.5px;
+    letter-spacing: 0.16em; text-transform: uppercase; color: var(--muted); margin-top: 24px;
+  }
+
+  /* ---------- invariant callout ---------- */
+  .invariant {
+    border: 1px solid var(--warn);
+    background: var(--warn-soft);
+    padding: 16px 20px;
+    display: flex; gap: 14px; align-items: baseline;
+    margin: 0 0 34px;
+  }
+  .invariant .star { color: var(--warn); font-size: 18px; flex: 0 0 auto; }
+  .invariant p { margin: 0; font-size: 14.5px; }
+  .invariant strong { color: var(--warn); }
+
+  /* ---------- layer ladder ---------- */
+  .ladder { border: 1px solid var(--line-strong); }
+  .rung { display: grid; grid-template-columns: 240px 1fr; border-top: 1px solid var(--line); background: var(--box); }
+  .rung:first-child { border-top: none; }
+  .rung .mod { padding: 18px 20px; border-right: 1px solid var(--line); background: var(--panel); }
+  .rung .mod .file { font-family: var(--mono); font-weight: 700; font-size: 14px; }
+  .rung .mod .tag { font-family: var(--mono); font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--accent); margin-top: 5px; }
+  .rung .desc { padding: 18px 20px; font-size: 14px; }
+  .rung .desc p { margin: 0 0 6px; }
+  .rung .desc p:last-child { margin-bottom: 0; }
+  .rung .desc .no { color: var(--muted); font-size: 13px; }
+  @media (max-width: 720px) { .rung { grid-template-columns: 1fr; } .rung .mod { border-right: none; border-bottom: 1px solid var(--line); } }
+
+  /* ---------- chips ---------- */
+  .chip {
+    display: inline-block; font-family: var(--mono); font-size: 10px; font-weight: 700;
+    letter-spacing: 0.12em; text-transform: uppercase;
+    background: var(--accent-soft); color: var(--accent-ink);
+    padding: 4px 9px;
+  }
+  .chip.warnchip { background: var(--warn-soft); color: var(--warn); }
+  .cardtag { font-family: var(--mono); font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--muted); }
+
+  /* ---------- repo cards ---------- */
+  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 20px; }
+  .card { border: 1px solid var(--line-strong); background: var(--box); display: flex; flex-direction: column; }
+  .card .cardhead { display: flex; justify-content: space-between; align-items: center; padding: 14px 18px 0; }
+  .card .inner { margin: 14px 18px; border: 1px solid var(--line); background: var(--panel); padding: 14px 16px; flex: 1; }
+  .card .inner .cls { font-family: var(--mono); font-weight: 700; font-size: 15px; }
+  .card .inner ul { list-style: none; margin: 10px 0 0; padding: 0; font-family: var(--mono); font-size: 12.5px; }
+  .card .inner li { padding: 3px 0; white-space: nowrap; overflow-x: auto; }
+  .card .inner li .ret { color: var(--muted); }
+  .card .inner li .ret b { color: var(--accent-ink); font-weight: 600; }
+  .card .foot { border-top: 1px solid var(--line); margin: 0 18px; padding: 12px 0 14px; font-family: var(--mono); font-size: 11.5px; color: var(--muted); }
+  .card .foot b { color: var(--ink); font-weight: 700; }
+  .card .foot .proto { border: 1px dashed var(--line-strong); padding: 1px 6px; color: var(--accent-ink); }
+
+  /* ---------- two-col panels ---------- */
+  .duo { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 26px; }
+  @media (max-width: 860px) { .duo { grid-template-columns: 1fr; } }
+  .panelbox { border: 1px solid var(--line-strong); background: var(--box); padding: 18px 20px; }
+  .panelbox h3 { font-family: var(--mono); font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--muted); margin: 0 0 14px; font-weight: 700; }
+
+  table.swap { width: 100%; border-collapse: collapse; font-size: 13px; }
+  table.swap td { padding: 8px 6px; border-top: 1px solid var(--line); vertical-align: baseline; }
+  table.swap tr:first-child td { border-top: none; }
+  table.swap .p { font-family: var(--mono); font-weight: 700; white-space: nowrap; }
+  table.swap .p span { border: 1px dashed var(--line-strong); padding: 1px 6px; }
+  table.swap .impls { font-family: var(--mono); font-size: 12px; }
+  table.swap .impls .or { color: var(--muted); font-family: var(--sans); font-style: italic; padding: 0 4px; }
+
+  .onion { display: flex; flex-direction: column; gap: 0; align-items: stretch; font-family: var(--mono); font-size: 12.5px; }
+  .onion .shell { border: 1px solid var(--line-strong); padding: 12px 14px; background: var(--panel); }
+  .onion .shell .who { font-weight: 700; }
+  .onion .shell .what { color: var(--muted); font-size: 11px; margin-top: 2px; font-family: var(--sans); }
+  .onion .shell + .shell { border-top: none; }
+  .onion .core { background: var(--accent-soft); }
+  .onion .indent1 { margin-left: 22px; }
+  .onion .indent2 { margin-left: 44px; }
+
+  .errtree { font-family: var(--mono); font-size: 12.5px; line-height: 1.9; }
+  .errtree .root { font-weight: 700; }
+  .errtree .leaf { padding-left: 26px; position: relative; white-space: nowrap; }
+  .errtree .leaf::before { content: "└─"; position: absolute; left: 4px; color: var(--line-strong); }
+  .errtree .leaf .code { color: var(--muted); font-size: 11px; }
+  .errtree .leaf .code em { color: var(--warn); font-style: normal; }
+
+  .toolgrid { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+  .toolgrid .tool {
+    font-family: var(--mono); font-size: 12px;
+    border: 1px solid var(--line-strong); background: var(--box);
+    padding: 5px 10px;
+  }
+  .toolgrid .tool.action { border-color: var(--warn); color: var(--warn); }
+
+  /* ---------- config matrix ---------- */
+  .cfgwrap { overflow-x: auto; border: 1px solid var(--line-strong); }
+  table.cfg { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 720px; background: var(--box); }
+  table.cfg th {
+    text-align: left; font-family: var(--mono); font-size: 10px; letter-spacing: 0.16em;
+    text-transform: uppercase; color: var(--muted); font-weight: 700;
+    padding: 12px 16px; border-bottom: 1px solid var(--line-strong); background: var(--panel);
+  }
+  table.cfg td { padding: 9px 16px; border-top: 1px solid var(--line); vertical-align: baseline; }
+  table.cfg .grp td {
+    font-family: var(--mono); font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase;
+    color: var(--accent); background: var(--panel); font-weight: 700; padding: 7px 16px;
+    border-top: 1px solid var(--line-strong);
+  }
+  table.cfg .var { font-family: var(--mono); font-weight: 600; white-space: nowrap; }
+  table.cfg .def { font-family: var(--mono); color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+
+  /* ---------- golden path ---------- */
+  .gp { border: 1px solid var(--line-strong); background: var(--box); }
+  .gpstep { display: grid; grid-template-columns: 52px 1fr; border-top: 1px solid var(--line); }
+  .gpstep:first-child { border-top: none; }
+  .gpstep .num {
+    font-family: var(--mono); font-size: 12px; color: var(--accent); font-weight: 700;
+    padding: 16px 0 0 18px;
+  }
+  .gpstep .body { padding: 14px 20px 16px 0; }
+  .gpstep .call { font-family: var(--mono); font-size: 13.5px; font-weight: 600; overflow-x: auto; white-space: nowrap; }
+  .gpstep .call .at { color: var(--muted); font-weight: 400; font-size: 11.5px; }
+  .gpstep .note { font-size: 13.5px; color: var(--ink); margin: 5px 0 0; max-width: 75ch; }
+  .gpstep .note .halt { color: var(--warn); font-weight: 600; }
+  .gpstep.freeze { background: var(--panel); }
+  .envelope { margin: 22px 0 0; border: 1px solid var(--line-strong); background: var(--panel); padding: 18px 20px; overflow-x: auto; }
+  .envelope pre { margin: 0; font-family: var(--mono); font-size: 12.5px; line-height: 1.75; }
+  .envelope .k { color: var(--accent-ink); font-weight: 600; }
+  .envelope .c { color: var(--muted); }
+
+  /* ---------- legend ---------- */
+  .legend {
+    margin-top: 60px; border: 1px solid var(--line-strong); background: var(--panel);
+    padding: 14px 20px; display: flex; flex-wrap: wrap; gap: 10px 28px; align-items: center;
+    font-family: var(--mono); font-size: 11px; color: var(--muted);
+  }
+  .legend .t { letter-spacing: 0.18em; text-transform: uppercase; font-weight: 700; }
+  .legend .sw-solid { display: inline-block; width: 26px; height: 12px; border: 1px solid var(--line-strong); background: var(--box); vertical-align: -2px; margin-right: 7px; }
+  .legend .sw-dash { display: inline-block; width: 26px; height: 12px; border: 1px dashed var(--line-strong); vertical-align: -2px; margin-right: 7px; }
+  .legend .sw-star { color: var(--warn); font-weight: 700; margin-right: 5px; }
+  .legend .sw-chip { display: inline-block; width: 26px; height: 12px; background: var(--accent-soft); vertical-align: -2px; margin-right: 7px; }
+
+  a { color: var(--accent-ink); }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+</style>
+
+<div class="wrap">
+
+  <p class="eyebrow">Reference card · Python · Model Context Protocol</p>
+  <header class="masthead">
+    <div>
+      <h1>PSE Edge MCP</h1>
+      <p class="subtitle">How a tool call becomes end-of-day data — every class, protocol, and
+      seam in the server, plus the configuration matrix and one request traced end to end.</p>
+    </div>
+    <div class="versionblock">
+      <div class="v"><span>v</span>0.13.0</div>
+      <p>From <code>pyproject.toml</code>.<br>
+      Live at pse.sakayandgo.com,<br>published to <code>ghcr.io/phdwight/pse-edge-mcp</code>.</p>
+    </div>
+  </header>
+
+  <nav class="toc" aria-label="Sections">
+    <a href="#s1"><span class="n">01</span> Architecture &amp; layering</a>
+    <a href="#s2"><span class="n">02</span> Core class map</a>
+    <a href="#s3"><span class="n">03</span> Configuration matrix</a>
+    <a href="#s4"><span class="n">04</span> Golden path</a>
+  </nav>
+
+  <!-- ============================ 01 ============================ -->
+  <section id="s1">
+    <div class="sechead"><span class="n">01</span><h2>Architecture &amp; layering</h2></div>
+    <p class="lede">Four layers, one direction of dependency. Every read goes through
+    <code>FreezeService.get()</code> with an explicit per-domain <b>policy</b> — no tool
+    ever touches the HTTP client directly. ★ marks the invariant the whole design exists
+    to protect, and since 0.13.0 it guards <b>prices only</b>.</p>
+
+    <figure class="flowfig">
+      <div class="flowscroll">
+        <div class="flow">
+          <div class="fnode">
+            <div class="name">MCP client</div>
+            <div class="role">tool call in</div>
+          </div>
+          <div class="farrow"><span class="lbl">validates</span><span class="shaft"></span></div>
+          <div class="fnode">
+            <div class="name">server.py</div>
+            <div class="role">reply() · boundary</div>
+          </div>
+          <div class="farrow"><span class="lbl">delegates</span><span class="shaft"></span></div>
+          <div class="fnode hot">
+            <div class="name">Repository</div>
+            <div class="role">one of five</div>
+          </div>
+          <div class="farrow"><span class="lbl">freeze read</span><span class="shaft"></span></div>
+          <div class="fnode">
+            <div class="name">FreezeService</div>
+            <div class="role">3 policies</div>
+          </div>
+          <div class="farrow"><span class="lbl">miss → fetch once</span><span class="shaft"></span></div>
+          <div class="fnode">
+            <div class="name">PseEdgeClient</div>
+            <div class="role">throttled https</div>
+          </div>
+          <div class="farrow"><span class="lbl">2 dialects</span><span class="shaft"></span></div>
+          <div class="fnode edge">
+            <div class="name">PSE Edge</div>
+            <div class="role">edge.pse.com.ph</div>
+          </div>
+        </div>
+        <div class="hang">
+          <div class="hangcol" style="margin-left: 148px;">
+            <div class="hangline"></div>
+            <div class="hangbox">EOD-frozen (prices), market open: cached → serve the last close,<br>never refetch; <b>never cached → fetch once, serve previous_close only,<br>flagged “not realtime”</b>. Every other policy fetches at any hour — once.</div>
+          </div>
+        </div>
+      </div>
+      <figcaption>Fig. 1 — the read path every data tool follows</figcaption>
+    </figure>
+
+    <div class="invariant">
+      <span class="star" aria-hidden="true">★</span>
+      <p><strong>Market-boundary freeze — prices only (narrowed in 0.13.0).</strong> A cached stock
+      price is never refetched while the market is open (09:30–15:00 Asia/Manila, trading days) —
+      the last close answers, flagged <code>stale</code>. A price <em>nobody has ever asked for</em>
+      is the one exception: fetched once mid-session and served as <strong>identity +
+      <code>previous_close</code> only</strong> (every session-moving field withheld), with
+      <code>stale: true</code> plus a <code>meta.note</code> saying it is <strong>not a realtime
+      value</strong>; the settled figures replace it after the close. Every other domain is <strong>fetch-once-then-persist</strong>: a
+      miss may hit PSE Edge at any hour — once, single-flighted — and repeats of the same query are
+      served from the database until the next close. If PSE Edge is down, an expired entry is served
+      flagged <code>stale</code> rather than discarded.</p>
+    </div>
+
+    <div class="ladder" style="margin-bottom: 26px;">
+      <div class="rung">
+        <div class="mod"><div class="file">EOD-frozen</div><div class="tag">prices · the ★ gate</div></div>
+        <div class="desc"><p><code>get_stock_quote</code> · <code>get_price_history</code>. A cached
+        price is never refetched during a session — expired entries serve <code>stale</code> until the
+        close. A <b>never-cached</b> key is fetched once mid-session, surfaces only
+        <code>previous_close</code>, and is labelled via <code>meta.note</code> as not realtime for
+        the whole session. Also the <b>default</b> policy, so an unlabelled read can only
+        over-protect PSE Edge.</p></div>
+      </div>
+      <div class="rung">
+        <div class="mod"><div class="file">daily-refresh</div><div class="tag">everything else</div></div>
+        <div class="desc"><p>Companies, disclosures, profiles, financials, dividends, indices, summary.
+        First ask fetches at any hour; every repeat of the same query answers from storage until the
+        next 15:00 close — at most one upstream hit per unique query per boundary window.</p></div>
+      </div>
+      <div class="rung">
+        <div class="mod"><div class="file">immutable</div><div class="tag">never refetched</div></div>
+        <div class="desc"><p>Disclosure detail by <code>edge_no</code> — the object never changes upstream.
+        Fetched once, at any hour, cached forever; <code>valid_until: null</code>.</p></div>
+      </div>
+    </div>
+
+    <div class="ladder">
+      <div class="rung">
+        <div class="mod"><div class="file">server.py</div><div class="tag">MCP boundary</div></div>
+        <div class="desc">
+          <p>Validates arguments, delegates to a repository, shapes the reply. Error mapping happens
+          once in <code>reply()</code>; action tools go through <code>act()</code> instead (no freshness <code>meta</code>).</p>
+          <p class="no">Never: domain logic, cache keys, parsing, endpoint choices.</p>
+          <div class="toolgrid" aria-label="Tool surface">
+            <span class="tool">search_companies</span><span class="tool">validate_symbol</span>
+            <span class="tool">get_stock_quote</span><span class="tool">get_price_history</span>
+            <span class="tool">search_disclosures</span><span class="tool">search_disclosure_fulltext</span>
+            <span class="tool">get_disclosure</span><span class="tool">get_company_profile</span>
+            <span class="tool">get_financial_highlights</span><span class="tool">get_dividends_and_rights</span>
+            <span class="tool">get_indices</span><span class="tool">get_market_summary</span>
+            <span class="tool action">send_email · auth only</span>
+          </div>
+        </div>
+      </div>
+      <div class="rung">
+        <div class="mod"><div class="file">repositories.py</div><div class="tag">domain layer</div></div>
+        <div class="desc">
+          <p>One repository per data domain. Owns the cache key, the freeze read, the parse, and the
+          Pydantic model. <b>Endpoint routing lives here.</b></p>
+          <p class="no">Depends only on the dashed protocols below — testable with a few-line fake, no HTTP mocking.</p>
+        </div>
+      </div>
+      <div class="rung">
+        <div class="mod"><div class="file">service.py · sources.py</div><div class="tag">policy &amp; seams</div></div>
+        <div class="desc">
+          <p><code>FreezeService</code> enforces the per-read policy (EOD-frozen · daily-refresh ·
+          immutable) and wraps every result in <code>Served[T]</code> (value + <code>as_of</code>,
+          <code>valid_until</code>, <code>from_cache</code>, <code>stale</code>).</p>
+          <p><code>sources.py</code> declares the five narrow per-domain source protocols;
+          <code>FrozenCache</code> is the cache seam.</p>
+        </div>
+      </div>
+      <div class="rung">
+        <div class="mod"><div class="file">client.py · parsers.py</div><div class="tag">edge of the world</div></div>
+        <div class="desc">
+          <p><code>PseEdgeClient</code> is pure HTTP, MCP-agnostic: token-bucket throttle, single-flight,
+          retries. Two request dialects — JSON-body POST for chart <code>.ax</code> endpoints, form-encoded
+          POST returning HTML fragments for <code>search.ax</code>.</p>
+          <p><code>parsers.py</code> turns HTML/JSON into dicts; any shape drift raises
+          <code>EndpointChangedError</code> — loud, never partial.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================ 02 ============================ -->
+  <section id="s2">
+    <div class="sechead"><span class="n">02</span><h2>Core class map</h2></div>
+    <p class="lede">Five repositories cover the whole tool surface. Each one names the source
+    protocol it consumes and the models it returns — the concrete client satisfies all five
+    protocols, but no repository knows that.</p>
+
+    <div class="cards">
+      <div class="card">
+        <div class="cardhead"><span class="chip">Repository</span><span class="cardtag">companies</span></div>
+        <div class="inner">
+          <div class="cls">CompanyRepository</div>
+          <ul>
+            <li>search(query) <span class="ret">→ <b>list[CompanyHit]</b></span></li>
+            <li>resolve(symbol) <span class="ret">→ <b>CompanyHit</b></span></li>
+            <li>try_resolve(symbol) <span class="ret">→ <b>CompanyHit | None</b></span></li>
+          </ul>
+        </div>
+        <div class="foot">consumes <span class="proto">CompanySource</span> · policy <b>daily-refresh</b> · resolves symbol → <b>company_id</b> for every other repo</div>
+      </div>
+
+      <div class="card">
+        <div class="cardhead"><span class="chip">Repository</span><span class="cardtag">prices</span></div>
+        <div class="inner">
+          <div class="cls">QuoteRepository</div>
+          <ul>
+            <li>quote(symbol) <span class="ret">→ <b>StockQuote</b></span></li>
+            <li>history(symbol, start, end) <span class="ret">→ <b>PriceHistory</b></span></li>
+          </ul>
+        </div>
+        <div class="foot">consumes <span class="proto">QuoteSource</span> · policy <b>EOD-frozen ★</b> — the only market-gated domain · bars archived via <span class="proto">Archive</span></div>
+      </div>
+
+      <div class="card">
+        <div class="cardhead"><span class="chip">Repository</span><span class="cardtag">disclosures</span></div>
+        <div class="inner">
+          <div class="cls">DisclosureRepository</div>
+          <ul>
+            <li>search(…) <span class="ret">→ <b>DisclosureSearchResult</b></span></li>
+            <li>fulltext(…) <span class="ret">→ <b>KeywordSearchResult</b></span></li>
+            <li>detail(edge_no) <span class="ret">→ <b>DisclosureDetail</b></span></li>
+          </ul>
+        </div>
+        <div class="foot">consumes <span class="proto">DisclosureSource</span> · searches <b>daily-refresh</b>; <b>detail</b> is <b>immutable</b>: cached forever, <code>valid_until: null</code></div>
+      </div>
+
+      <div class="card">
+        <div class="cardhead"><span class="chip">Repository</span><span class="cardtag">company info</span></div>
+        <div class="inner">
+          <div class="cls">CompanyInfoRepository</div>
+          <ul>
+            <li>profile(symbol) <span class="ret">→ <b>CompanyProfile</b></span></li>
+            <li>financials(symbol) <span class="ret">→ <b>FinancialHighlights</b></span></li>
+            <li>dividends_and_rights(symbol) <span class="ret">→ <b>DividendsAndRights</b></span></li>
+          </ul>
+        </div>
+        <div class="foot">consumes <span class="proto">CompanyInfoSource</span> · policy <b>daily-refresh</b> · financial units passed through verbatim, never rescaled</div>
+      </div>
+
+      <div class="card">
+        <div class="cardhead"><span class="chip">Repository</span><span class="cardtag">market-wide</span></div>
+        <div class="inner">
+          <div class="cls">MarketRepository</div>
+          <ul>
+            <li>indices() <span class="ret">→ <b>MarketIndices</b></span></li>
+            <li>summary() <span class="ret">→ <b>MarketSummary</b></span></li>
+          </ul>
+        </div>
+        <div class="foot">consumes <span class="proto">MarketSource</span> · policy <b>daily-refresh</b> — an intraday snapshot is served until the close · index signs derived from the ▲/▼ glyph</div>
+      </div>
+
+      <div class="card">
+        <div class="cardhead"><span class="chip warnchip">Action</span><span class="cardtag">the only one</span></div>
+        <div class="inner">
+          <div class="cls">NotificationService</div>
+          <ul>
+            <li>send(user, subject, body) <span class="ret">→ <b>SentEmail</b></span></li>
+          </ul>
+        </div>
+        <div class="foot">recipient comes from the <b>bearer token</b>, never an argument — an address parameter would be an open mail relay and an injection exfiltration path</div>
+      </div>
+    </div>
+
+    <div class="duo">
+      <div class="panelbox">
+        <h3>Protocols &amp; swappable implementations</h3>
+        <table class="swap">
+          <tr><td class="p"><span>Storage</span></td><td class="impls">InMemoryStorage <span class="or">or</span> PostgresStorage</td></tr>
+          <tr><td class="p"><span>Archive</span></td><td class="impls">NullArchive <span class="or">or</span> PostgresArchive</td></tr>
+          <tr><td class="p"><span>UsageSink</span></td><td class="impls">NullUsageRecorder <span class="or">or</span> PostgresUsageSink</td></tr>
+          <tr><td class="p"><span>AuthStore</span></td><td class="impls">PostgresAuthStore</td></tr>
+          <tr><td class="p"><span>EmailSender</span></td><td class="impls">ConsoleEmailSender <span class="or">or</span> ZeptoMailSender</td></tr>
+          <tr><td class="p"><span>FrozenCache</span></td><td class="impls">FreezeService <span class="or">(what repositories actually see)</span></td></tr>
+        </table>
+        <p style="font-size: 12.5px; color: var(--muted); margin: 14px 0 0;">One switch picks the column:
+        <code>DATABASE_URL</code> unset → the in-memory / Null column; set → the Postgres column.
+        Postgres modules import lazily, so a lean install never pays for them.</p>
+      </div>
+
+      <div class="panelbox">
+        <h3>HTTP composition — built once, in asgi.py</h3>
+        <div class="onion">
+          <div class="shell"><span class="who">HealthApp</span><div class="what">/health liveness (no DB) · /health/ready readiness</div></div>
+          <div class="shell"><span class="who">AuthApp</span><div class="what">/oauth/* · passkey signup · /account · /privacy — reachable without a token</div></div>
+          <div class="shell indent1"><span class="who">AuthMiddleware</span><div class="what">bearer validation (TokenService) · quotas (QuotaTracker) · usage</div></div>
+          <div class="shell indent2 core"><span class="who">MCP app</span><div class="what">the tool surface from §01</div></div>
+        </div>
+        <p style="font-size: 12.5px; color: var(--muted); margin: 14px 0 0;">Behind AuthApp:
+        <code>OAuthService</code> (DCR · PKCE-only · refresh families), <code>PasskeyService</code> (WebAuthn + web sessions),
+        <code>TokenService</code> (opaque <code>pse_</code> tokens, SHA-256 at rest).</p>
+      </div>
+    </div>
+
+    <div class="duo">
+      <div class="panelbox">
+        <h3>Error family — one root, mapped once in reply()</h3>
+        <div class="errtree">
+          <div class="root">PseEdgeMcpError</div>
+          <div class="leaf">SymbolNotFoundError <span class="code">· SYMBOL_NOT_FOUND</span></div>
+          <div class="leaf">InvalidArgumentError <span class="code">· INVALID_ARGUMENT</span></div>
+          <div class="leaf">EndpointChangedError <span class="code">· <em>Edge redesigned — loud, never partial</em></span></div>
+          <div class="leaf">EdgeUnavailableError <span class="code">· unreachable <em>and</em> nothing cached</span></div>
+          <div class="leaf">MarketOpenNoCacheError <span class="code">· retry after 15:00 Manila</span></div>
+          <div class="leaf">ActionUnavailableError <span class="code">· action needs auth</span></div>
+          <div class="leaf">ActionRateLimitedError <span class="code">· 20 emails / user / day</span></div>
+        </div>
+      </div>
+
+      <div class="panelbox">
+        <h3>Watchdog — canary.py · pse-edge-canary</h3>
+        <p style="font-size: 13.5px; margin: 0 0 10px;">Nightly job that fetches live pages,
+        <b>bypassing the cache</b>, and validates the same Pydantic models the repositories build —
+        a 200 with a restyled table is exactly the failure it exists to catch.</p>
+        <p style="font-size: 13.5px; margin: 0;">Still refuses to run while the market is open
+        (the ★ invariant outranks it). Emails <code>PSE_OPERATOR_EMAIL</code> <b>only on failure</b>;
+        exits non-zero so cron notices.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================ 03 ============================ -->
+  <section id="s3">
+    <div class="sechead"><span class="n">03</span><h2>Configuration matrix</h2></div>
+    <p class="lede">Everything is environment-sourced into one frozen <code>Settings</code> object.
+    Two variables change the shape of the system: <code>DATABASE_URL</code> picks the storage column
+    in §02, and <code>PSE_AUTH_REQUIRED</code> turns on the whole auth stack (and the
+    <code>send_email</code> tool with it).</p>
+
+    <div class="cfgwrap">
+      <table class="cfg">
+        <thead><tr><th>Variable</th><th>Default</th><th>What it governs</th></tr></thead>
+        <tbody>
+          <tr class="grp"><td colspan="3">Upstream · protect PSE Edge</td></tr>
+          <tr><td class="var">PSE_EDGE_BASE_URL</td><td class="def">https://edge.pse.com.ph</td><td>Upstream portal root</td></tr>
+          <tr><td class="var">PSE_THROTTLE_RPS / PSE_THROTTLE_BURST</td><td class="def">1.0 / 2</td><td>Token-bucket rate toward Edge</td></tr>
+          <tr><td class="var">PSE_TIMEOUT_SEC / PSE_RETRY_ATTEMPTS</td><td class="def">20 / 3</td><td>Per-request timeout and retries</td></tr>
+
+          <tr class="grp"><td colspan="3">Storage · the one switch</td></tr>
+          <tr><td class="var">DATABASE_URL</td><td class="def">unset</td><td>Unset → in-memory cache + NullArchive. Set → shared Postgres cache + archive + auth tables (schema via Alembic only)</td></tr>
+          <tr><td class="var">PSE_DB_POOL_SIZE / PSE_DB_MAX_OVERFLOW</td><td class="def">5 / 10</td><td>Connection pool</td></tr>
+
+          <tr class="grp"><td colspan="3">Auth · opt-in, needs DATABASE_URL</td></tr>
+          <tr><td class="var">PSE_AUTH_REQUIRED</td><td class="def">0</td><td>Bearer auth + quotas + OAuth/passkeys; stdio never authenticates</td></tr>
+          <tr><td class="var">PSE_TOKEN_CACHE_TTL</td><td class="def">60 s</td><td>The revocation-latency budget — nothing else</td></tr>
+          <tr><td class="var">PSE_QUOTA_PER_MIN / PSE_QUOTA_PER_DAY</td><td class="def">60 / 2000</td><td>Per-user quotas, counted in-process (per worker)</td></tr>
+          <tr><td class="var">PSE_PUBLIC_URL</td><td class="def">http://localhost:8000</td><td>Real external https URL — drives WebAuthn rp_id, email links, OAuth issuer; wrong value breaks passkeys</td></tr>
+          <tr><td class="var">PSE_ACCESS_TTL_MIN / PSE_REFRESH_TTL_DAYS</td><td class="def">30 / 30</td><td>Token lifetimes; refresh reuse revokes the family</td></tr>
+          <tr><td class="var">PSE_ADMIN_EMAILS</td><td class="def">empty</td><td>Operator allowlist: the /account machine-client panel; never derived from user input</td></tr>
+
+          <tr class="grp"><td colspan="3">Email &amp; operations</td></tr>
+          <tr><td class="var">ZEPTOMAIL_API_KEY</td><td class="def">unset</td><td>Unset → ConsoleEmailSender; set → ZeptoMail</td></tr>
+          <tr><td class="var">PSE_EMAIL_FROM</td><td class="def">no-reply@localhost</td><td>Sender address</td></tr>
+          <tr><td class="var">PSE_OPERATOR_EMAIL</td><td class="def">unset</td><td>Canary failure alerts — failures only, never “all fine”</td></tr>
+          <tr><td class="var">PSE_USAGE_RETENTION_DAYS</td><td class="def">90</td><td>Usage log retention (aggregated per user-hour, never per request)</td></tr>
+
+          <tr class="grp"><td colspan="3">Server</td></tr>
+          <tr><td class="var">PSE_STATEFUL / PSE_SSE</td><td class="def">0 / 0</td><td>MCP session &amp; response mode</td></tr>
+          <tr><td class="var">PSE_LOG_JSON / PSE_LOG_LEVEL</td><td class="def">0 / INFO</td><td>Both formatters timestamp and redact; INFO logs refusals only</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ============================ 04 ============================ -->
+  <section id="s4">
+    <div class="sechead"><span class="n">04</span><h2>Golden path</h2></div>
+    <p class="lede">One request, traced through every layer:
+    <code>get_stock_quote("SM")</code> after market close, cold cache.</p>
+
+    <div class="gp">
+      <div class="gpstep">
+        <div class="num">1</div>
+        <div class="body">
+          <div class="call">get_stock_quote(symbol="SM") <span class="at">· server.py</span></div>
+          <p class="note"><code>validation.py</code> checks the symbol shape (bad input →
+          <code>INVALID_ARGUMENT</code>), then <code>reply()</code> wraps the repository call —
+          the only place errors become MCP error payloads.</p>
+        </div>
+      </div>
+      <div class="gpstep">
+        <div class="num">2</div>
+        <div class="body">
+          <div class="call">QuoteRepository.quote("SM") <span class="at">· repositories.py</span></div>
+          <p class="note">Resolves <code>SM</code> → <code>company_id</code> through
+          <code>CompanyRepository</code>, picks the endpoint, and builds the cache key. Tools never
+          see any of this.</p>
+        </div>
+      </div>
+      <div class="gpstep freeze">
+        <div class="num">3</div>
+        <div class="body">
+          <div class="call">FreezeService.get(key, fetch, policy="EOD-frozen") <span class="at">· service.py · ★</span></div>
+          <p class="note">Fresh cache entry → serve it. This is a <b>price</b> read, so the ★ gate
+          applies: market open + cached → serve the last close flagged <code>stale</code>, never
+          refetch; market open + <b>never cached</b> → fetch once and label the result
+          <code>stale: true</code> + <code>note</code> (“not a realtime value”) for the whole session.
+          Market closed + miss → fetch. A <code>daily-refresh</code> read (any other tool) fetches
+          here at any hour — once — then serves repeats from the database. Fetch fails but an expired
+          entry exists → serve it flagged <code>stale</code>.</p>
+        </div>
+      </div>
+      <div class="gpstep">
+        <div class="num">4</div>
+        <div class="body">
+          <div class="call">PseEdgeClient.fetch_stock_data_page(company_id) <span class="at">· client.py</span></div>
+          <p class="note">Token bucket (1 req/s), single-flight dedupe, retries. Wire dates are
+          <code>MM-dd-yyyy</code>; the JSON-vs-form dialect is chosen per endpoint.</p>
+        </div>
+      </div>
+      <div class="gpstep">
+        <div class="num">5</div>
+        <div class="body">
+          <div class="call">parse → StockQuote <span class="at">· parsers.py · models.py</span></div>
+          <p class="note">HTML → dict → validated Pydantic model. Any drift in Edge's markup raises
+          <code>EndpointChangedError</code> — never silently partial data.</p>
+        </div>
+      </div>
+      <div class="gpstep">
+        <div class="num">6</div>
+        <div class="body">
+          <div class="call">cache until next 15:00 close → archive bars <span class="at">· cache.py · archive.py</span></div>
+          <p class="note">The entry freezes until the next market close. Archive writes are
+          opportunistic — a dead database never fails a read.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="envelope">
+      <pre><span class="c">// every data tool returns this envelope — meta is the freshness contract</span>
+{
+  <span class="k">"data"</span>: { <span class="c">…StockQuote…</span> },
+  <span class="k">"meta"</span>: {
+    <span class="k">"as_of"</span>:       <span class="c">"2026-08-06T15:00:00+08:00"</span>,   <span class="c">// ISO-8601, Asia/Manila</span>
+    <span class="k">"valid_until"</span>: <span class="c">"2026-08-07T15:00:00+08:00"</span>,   <span class="c">// null when immutable</span>
+    <span class="k">"from_cache"</span>:  <span class="c">false</span>,
+    <span class="k">"stale"</span>:       <span class="c">false</span>,                          <span class="c">// true = not a settled EOD value</span>
+    <span class="k">"data_policy"</span>: <span class="c">"EOD-frozen"</span>,                   <span class="c">// prices; "daily-refresh" elsewhere; "immutable"</span>
+    <span class="k">"note"</span>:        <span class="c">null</span>                            <span class="c">// freshness caveat, e.g. "not a realtime value"</span>
+  }
+}</pre>
+    </div>
+  </section>
+
+  <div class="legend">
+    <span class="t">Legend</span>
+    <span><span class="sw-solid"></span>concrete class / module</span>
+    <span><span class="sw-dash"></span>protocol — a swap point</span>
+    <span><span class="sw-chip"></span>the MCP core</span>
+    <span><span class="sw-star">★</span>the freeze invariant</span>
+  </div>
+
+</div>
+</html>

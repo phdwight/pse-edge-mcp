@@ -4,14 +4,13 @@ An MCP server exposing **Philippine Stock Exchange** data from the [PSE Edge por
 
 > **Unofficial.** PSE Edge has no public API; this project speaks to the same endpoints the portal's own pages use. It is not affiliated with or endorsed by the PSE. Data is provided as-is for personal/research use, with no warranty.
 
-## Design: end-of-day by intention
+## Design: end-of-day prices, fetch-once everything else
 
-To avoid loading PSE Edge during trading hours, this server is deliberately an **EOD data service** (the *market-boundary freeze* policy):
+To keep load on PSE Edge minimal, every unique query hits it **at most once per day**, and prices follow the stricter *market-boundary freeze*:
 
-- Cached data is frozen between market session boundaries (Asia/Manila).
-- The first query after the 15:00 close fetches that day's final numbers; everything until the next boundary is served from cache — shared across all users.
-- **Zero upstream requests while the market is open.** Uncached queries during a session return `MARKET_OPEN_NO_CACHE` with a `retry_after` timestamp.
-- Every result carries `meta.as_of`, `meta.valid_until`, and `meta.stale` so clients always know exactly how fresh the data is.
+- **Prices (`get_stock_quote`, `get_price_history`) are end-of-day.** A cached price is never refetched while the market is open (Asia/Manila); the first query after the 15:00 close fetches that day's final numbers, and everything until the next boundary is served from cache — shared across all users. If the market is open and a symbol was *never* cached, one fetch happens and the quote serves only `previous_close` (the last settled price), flagged `stale: true` with a `meta.note` saying it is not a realtime value.
+- **Everything else (disclosures, profiles, financials, dividends, indices) is fetch-once-then-persist** (`data_policy: "daily-refresh"`): a cache miss may hit PSE Edge at any hour — once, deduplicated across concurrent callers — and repeats of the same query are served from storage until the next close.
+- Every result carries `meta.as_of`, `meta.valid_until`, `meta.stale`, and (when there is a caveat) `meta.note`, so clients always know exactly how fresh the data is.
 
 ## Install (Claude Desktop / Claude Code, stdio)
 
@@ -340,7 +339,9 @@ If PSE Edge is unreachable and cached data exists, tools return that data flagge
 **New to the codebase?** [docs/walkthrough.md](docs/walkthrough.md) is the developer and
 architect walkthrough: the request lifecycle, the freeze policy, the layering, how to add a
 tool or a whole data domain, and a symptom-to-cause debugging table. Also available as
-[a PDF](docs/walkthrough.pdf).
+[a PDF](docs/walkthrough.pdf). For a one-page visual map — classes, protocols, the data
+path, the config matrix — open [docs/reference-card.html](docs/reference-card.html) in any
+browser; it is fully self-contained and works offline.
 
 Work lands on `develop` and reaches `main` by pull request; `main` is protected and
 requires all three CI checks (`test`, `image (amd64)`, `image (arm64)`). Bumping `version` in `pyproject.toml` makes the next merge cut

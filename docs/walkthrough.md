@@ -13,7 +13,7 @@ understand it, debug it, or extend it.
 | `docs/deploy.md` | Running it in production |
 | `CLAUDE.md` | The short form of the invariants, kept next to the code |
 
-Version described: **0.12.0**. 36 modules, ~8,500 lines of source, ~6,400 lines of tests.
+Version described: **0.13.0**. 36 modules, ~8,700 lines of source, ~6,600 lines of tests.
 
 ---
 
@@ -34,12 +34,14 @@ PSE Edge is a public utility with no rate-limit contract and no commercial relat
 this project. Hammering it during trading hours would be antisocial and would get the
 project blocked. So:
 
-> **This is an end-of-day server. It makes zero upstream requests while the market is open.**
+> **Prices are end-of-day: a cached price is never refetched while the market is open.
+> Everything else hits PSE Edge at most once per unique query per day.**
 
-Almost every structural choice follows from that sentence — the cache is a *freeze* rather
-than a TTL, every response carries freshness metadata, there is an opportunistic archive,
-and there is a politeness throttle independent of user quotas. If a change you are
-contemplating would increase load on PSE Edge, it is probably the wrong change.
+(Narrowed in 0.13.0 — before that, the freeze gated *every* domain.) Almost every
+structural choice follows from that sentence — the cache is a *freeze* rather than a TTL,
+every response carries freshness metadata, there is an opportunistic archive, and there is
+a politeness throttle independent of user quotas. If a change you are contemplating would
+increase load on PSE Edge, it is probably the wrong change.
 
 ---
 
@@ -137,7 +139,9 @@ Two things worth noticing:
 This is the part to understand before anything else, because it is what makes the server
 *correct* rather than merely functional.
 
-`FreezeService.get()` in `service.py` implements one decision table:
+`FreezeService.get()` in `service.py` takes a per-read `policy` (chosen by the repository
+for its domain) and implements one decision table per policy. For **`EOD-frozen`** —
+price data, and deliberately also the default:
 
 ```
                 │  MARKET CLOSED               │  MARKET OPEN
@@ -148,31 +152,44 @@ This is the part to understand before anything else, because it is what makes th
    (expired)    │  serve                       │  flagged meta.stale = true
                 │                              │  ← never fetches
    ─────────────┼──────────────────────────────┼──────────────────────────────
-   cache empty  │  FETCH upstream, store,      │  raise MARKET_OPEN_NO_CACHE
-                │  serve                       │  with a retry_after timestamp
+   cache empty  │  FETCH upstream, store,      │  FETCH ONCE, serve flagged
+                │  serve                       │  stale + meta.note ("not a
+                │                              │  realtime value")
 ```
+
+For **`daily-refresh`** — every other domain — the market-open column disappears: a miss
+or expiry fetches at **any** hour, once, and repeats of the same query are served from
+storage until the next 15:00 close. **`immutable`** entries are fetched once ever.
 
 Market hours are **09:30–15:00 Asia/Manila on trading days**; weekends and the
 `PSE_HOLIDAYS` table in `market_calendar.py` are non-trading.
 
 ### Consequences a newcomer will trip over
 
-- **`MARKET_OPEN_NO_CACHE` is not a bug.** It is the policy working. Agents must handle it;
-  a `retry_after` timestamp is included so they can schedule rather than poll.
-- **`meta.stale = true` means the market is open** and you are seeing the last close. It
-  does not mean the data is wrong.
+- **A session-time quote for a never-cached symbol serves `previous_close` only.** The
+  one-time mid-session fetch must not present a delayed intraday number as a price, so
+  `QuoteRepository.quote` trims the model to identity + `previous_close` (raw_fields
+  emptied) and the `meta.note` says exactly that. The label derives from the entry's
+  `fetched_at`, so every repeat that session carries it; the first ask after the close
+  replaces the snapshot with the settled figures. (`MARKET_OPEN_NO_CACHE` is no longer
+  raised — since 0.13.0 this fallback answers instead; the error class remains for
+  clients that still handle the code.)
+- **`meta.stale = true` means "not a settled end-of-day value"** — the market is open and
+  you are seeing the last close, the value is a labelled mid-session snapshot (see
+  `meta.note`), or PSE Edge was unreachable. It does not mean the data is wrong.
 - **Concurrent cache misses collapse into one upstream request** (`SingleFlight` in
-  `ratelimit.py`). Ten simultaneous first-time requests for the same symbol produce one HTTP
-  call, not ten.
+  `ratelimit.py`). Ten simultaneous first-time requests for the same symbol produce one
+  HTTP call, not ten — and the flight body re-checks storage before fetching, so a miss
+  that raced a concurrent store (same worker or a sibling via the shared Postgres cache)
+  serves the stored entry instead of fetching again.
 - **An upstream outage serves the last close, flagged `stale`.** If the fetch fails because
   PSE Edge is unreachable and an expired entry exists, it is served rather than discarded —
-  holding real data and answering with an error instead is strictly worse, and `stale`
-  already means "real data, past its boundary". With nothing cached there is genuinely no
-  answer, and `EDGE_UNAVAILABLE` is returned.
-- **`immutable=True`** (passed by the disclosure-detail path) marks objects that never change
-  upstream — a disclosure identified by `edge_no`. Those are cached forever with
-  `valid_until: null` and `data_policy: "immutable"`. The open-market freeze still governs
-  their *first* fetch: protecting PSE Edge outranks serving a cache miss promptly.
+  holding real data and answering with an error instead is strictly worse. With nothing
+  cached there is genuinely no answer, and `EDGE_UNAVAILABLE` is returned.
+- **`policy="immutable"`** (passed by the disclosure-detail path) marks objects that never
+  change upstream — a disclosure identified by `edge_no`. Those are cached forever with
+  `valid_until: null` and `data_policy: "immutable"`; their first fetch may happen at any
+  hour like any other non-price read.
 
 ### The politeness throttle is separate from quotas
 
@@ -323,7 +340,8 @@ inventing one would quietly make the freshness contract meaningless where it doe
     "valid_until": "2026-08-01T15:00:00+08:00",
     "from_cache":  true,
     "stale":       false,
-    "data_policy": "EOD-frozen"
+    "data_policy": "EOD-frozen",
+    "note":        null
   }
 }
 ```
@@ -332,8 +350,11 @@ inventing one would quietly make the freshness contract meaningless where it doe
 policy that would otherwise look like stale data. A client that ignores `meta` will
 eventually mislead someone about when a price was true.
 
-- `data_policy: "immutable"` with `valid_until: null` marks objects that never change
+- `data_policy` is `"EOD-frozen"` for price data, `"daily-refresh"` for every other
+  domain, or `"immutable"` (with `valid_until: null`) for objects that never change
   upstream.
+- `note`, when set, is a human-readable freshness caveat — e.g. a mid-session quote
+  serving only `previous_close`. **Relay it to the user.**
 - **Clients should cache against `valid_until`.** Re-querying before it passes returns a
   byte-identical answer and only burns quota.
 
@@ -344,7 +365,7 @@ so an LLM can react to them rather than seeing a traceback.
 
 | Code | Meaning | Caller should |
 |---|---|---|
-| `MARKET_OPEN_NO_CACHE` | Nothing cached and the market is open | Retry after `retry_after` |
+| `MARKET_OPEN_NO_CACHE` | *No longer raised since 0.13.0* — kept for old clients; the labelled `previous_close` fallback answers instead | Handle like any stale reply |
 | `SYMBOL_NOT_FOUND` | No such ticker | Try `search_companies` |
 | `INVALID_ARGUMENT` | Failed validation | Fix the arguments |
 | `ENDPOINT_CHANGED` | PSE Edge's response shape changed | **Alert a human — see §12** |
@@ -808,7 +829,7 @@ protected. **Merging to `main` publishes a multi-arch image**, and a merge that 
 |---|---|
 | `POST /mcp` → **421 Invalid Host header** | The SDK's DNS-rebinding guard. `PSE_PUBLIC_URL` must match the host clients actually use — `asgi.transport_security_for()` derives the allowlist from it |
 | OAuth completes, then the **first tool call fails** | Same as above. Everything about auth is fine; look at the transport layer |
-| `MARKET_OPEN_NO_CACHE` | Working as designed. Retry after the close |
+| A quote with only `previous_close` populated, `stale: true` + `meta.note` | Working as designed: session-time ask for a never-cached symbol. Settled figures arrive after the close |
 | `ENDPOINT_CHANGED` | PSE Edge changed shape. **Re-capture the fixture, compare against `docs/endpoints.md`, fix the parser.** Never paper over it. The nightly canary should have mailed you first — check why it did not |
 | Canary mail: "PSE Edge canary FAILED" | Exactly the above, caught before a user hit it. Same fix |
 | HTTP **415** from an `.ax` endpoint | Wrong dialect — that endpoint needs a JSON body, not form encoding |
@@ -847,9 +868,9 @@ The lines worth knowing by sight:
 | Line | Means |
 |---|---|
 | `starting pse-edge-mcp <version> …` | the config the process **actually** resolved to. First thing to read in an incident |
-| `upstream: fetching from PSE Edge key=…` | a real request left for PSE Edge |
+| `upstream: fetching from PSE Edge key=… policy=…` | a real request left for PSE Edge. `policy=EOD-frozen` during market hours is legitimate only once per never-cached key — repeats of one price key within a session mean the freeze is broken |
 | `upstream: fetched and cached key=… duration_ms=…` | it came back, and how slow it was |
-| `freeze: refusing an uncached read while the market is open` | the policy working, not a fault |
+| `freeze: uncached price read during the session — fetching once, serving as non-realtime` | the 0.13.0 fallback working, not a fault |
 | `auth: rejected a bearer token` / `quota: refused` | refusals only — successes are the access log |
 | `oauth: issued a client_credentials access token` | a machine client minted a token |
 | **`oauth: REFRESH TOKEN REUSE detected`** (WARNING) | a rotated token was presented twice, so it **leaked** |
