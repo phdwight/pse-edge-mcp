@@ -356,3 +356,7 @@ a GitHub Release with a matching immutable image tag.
 ## License
 
 MIT
+
+---
+
+<sub>MCP Registry identity: `mcp-name: io.github.phdwight/pse-edge-mcp`</sub>
