@@ -52,6 +52,7 @@ from .service import FreezeService, Served
 from .validation import (
     optional_date,
     require_edge_no,
+    require_limit,
     require_ordered,
     require_page,
     require_text,
@@ -379,7 +380,7 @@ def build_server(
         return await reply(run)
 
     @mcp.tool()
-    async def get_disclosure(edge_no: str) -> dict[str, Any]:
+    async def get_disclosure(edge_no: str, max_files: int = 20) -> dict[str, Any]:
         """Get one disclosure's details and attachment links by its edge_no.
 
         edge_no is the 32-character hex id returned by search_disclosures.
@@ -387,10 +388,22 @@ def build_server(
         attachment plus the rendered body HTML. This server does not download or parse
         attachments — fetch the returned URLs yourself if you need their contents.
 
+        At most max_files attachments are returned (default 20, max 100).
+        attachments_total always reports how many exist; if attachments_truncated is
+        true, call again with a higher max_files — the disclosure is cached, so the
+        repeat costs nothing upstream.
+
         A published disclosure never changes, so these results are cached permanently
         (meta.data_policy is "immutable").
         """
-        return await reply(lambda: disclosures.detail(require_edge_no(edge_no)))
+
+        async def run() -> Served[Any]:
+            return await disclosures.detail(
+                require_edge_no(edge_no),
+                max_files=require_limit(max_files, "max_files"),
+            )
+
+        return await reply(run)
 
     # ---- Phase 3: company info & market ------------------------------------
 

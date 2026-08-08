@@ -278,6 +278,20 @@ class QuoteRepository:
         )
 
 
+def _cap_attachments(detail: DisclosureDetail, max_files: int) -> DisclosureDetail:
+    """Return at most `max_files` attachments, honestly labelled.
+
+    Applied after the memo so the cached model stays complete — the cap is a response-size
+    guard, not a cache policy — and `attachments_total`/`attachments_truncated` always say
+    what was withheld rather than letting a shortened list read as the whole set.
+    """
+    if len(detail.attachments) <= max_files:
+        return detail
+    return detail.model_copy(
+        update={"attachments": detail.attachments[:max_files], "attachments_truncated": True}
+    )
+
+
 def _previous_close_only(quote: StockQuote) -> StockQuote:
     """Reduce a quote to identity + previous_close, dropping every session-moving field.
 
@@ -422,8 +436,20 @@ class DisclosureRepository:
 
         return self._memo.resolve(f"{key}#fulltext", served, build)
 
-    async def detail(self, edge_no: str) -> Served[DisclosureDetail]:
-        """A published disclosure never changes, so this is cached permanently."""
+    #: Attachment cap when the caller does not name one. Generous for real filings
+    #: (most carry a handful) while bounding the pathological many-file disclosure.
+    MAX_FILES_DEFAULT = 20
+
+    async def detail(
+        self, edge_no: str, *, max_files: int = MAX_FILES_DEFAULT
+    ) -> Served[DisclosureDetail]:
+        """A published disclosure never changes, so this is cached permanently.
+
+        `max_files` caps the attachments *returned*; the memoised model keeps the full
+        list, and the result always reports `attachments_total` (with
+        `attachments_truncated` when the cap bit). Because the cache is immutable, a
+        repeat call with a higher cap serves the rest without touching PSE Edge.
+        """
         served = await self._cache.get(
             f"disclosure:{edge_no}",
             lambda: self._source.fetch_disclosure_viewer(edge_no),
@@ -437,9 +463,11 @@ class DisclosureRepository:
             for attachment in parsed["attachments"]:
                 attachment["download_url"] = self._absolute(attachment["download_url"])
             parsed.pop("body_file_id", None)
+            parsed["attachments_total"] = len(parsed["attachments"])
             return DisclosureDetail(**parsed)
 
-        return self._memo.resolve(f"disclosure:{edge_no}#detail", served, build)
+        full = self._memo.resolve(f"disclosure:{edge_no}#detail", served, build)
+        return full.map(lambda detail: _cap_attachments(detail, max_files))
 
     def _absolute(self, path: str | None) -> str | None:
         """Parsers emit site-relative paths; callers outside this process need absolute."""

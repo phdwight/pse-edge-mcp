@@ -5,6 +5,17 @@ Format: [Keep a Changelog](https://keepachangelog.com/) · Versioning: [SemVer](
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-08-08
+
+### Added
+- **`get_disclosure` caps its attachment list** at `max_files` (new optional argument;
+  default 20, bounded 1–100 — out of range is `INVALID_ARGUMENT` before any upstream
+  call). The reply is honest about the cut: `attachments_total` always reports how many
+  attachments exist upstream, and `attachments_truncated: true` marks a shortened list —
+  never letting it read as the whole set. The cap is applied after the immutable cache
+  and parse memo, so the stored model stays complete and a repeat call with a higher
+  `max_files` serves the rest without touching PSE Edge.
+
 ## [0.14.0] - 2026-08-08
 
 ### Added

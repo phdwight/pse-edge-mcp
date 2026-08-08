@@ -22,6 +22,14 @@ def require_page(page: int) -> int:
     return page
 
 
+def require_limit(value: int, field: str, *, lo: int = 1, hi: int = 100) -> int:
+    """Bound a caller-supplied result cap: big enough to be useful, small enough that a
+    model asking for 'everything' cannot turn one reply into a megabyte."""
+    if not lo <= value <= hi:
+        raise InvalidArgumentError(f"{field} must be between {lo} and {hi}, got {value}")
+    return value
+
+
 def require_text(value: str, field: str) -> str:
     stripped = value.strip()
     if not stripped:

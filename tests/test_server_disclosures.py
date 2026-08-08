@@ -200,6 +200,20 @@ async def test_get_disclosure_rejects_malformed_edge_no_without_calling_edge():
 
 
 @respx.mock
+async def test_get_disclosure_rejects_an_out_of_range_max_files_without_calling_edge():
+    route = respx.get(f"{BASE}/openDiscViewer.do")
+    edge_no = "ff4c7557aee1d72b64d70b69f0a3140b"
+    mcp = build_test_server()
+
+    zero = await call(mcp, "get_disclosure", edge_no=edge_no, max_files=0)
+    huge = await call(mcp, "get_disclosure", edge_no=edge_no, max_files=1000)
+
+    assert zero["error"] == "INVALID_ARGUMENT"
+    assert huge["error"] == "INVALID_ARGUMENT"
+    assert not route.called
+
+
+@respx.mock
 async def test_fulltext_tool_reports_coverage_limits(keyword_search_html):
     respx.post(f"{BASE}/keyword/search.ax").mock(
         return_value=httpx.Response(200, text=keyword_search_html)
