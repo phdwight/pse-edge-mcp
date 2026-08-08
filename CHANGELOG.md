@@ -8,6 +8,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/) · Versioning: [SemVer](
 ## [0.15.0] - 2026-08-08
 
 ### Added
+- **Adminer database browser in the dev compose stack**, opt-in via a compose profile:
+  `docker compose --profile tools up -d adminer`, then http://127.0.0.1:8081
+  (Server `db`, user `pse`, database `pse_edge`). Bound to loopback only, and excluded
+  from the default `docker compose up` so nothing new runs unasked.
 - **`get_disclosure` caps its attachment list** at `max_files` (new optional argument;
   default 20, bounded 1–100 — out of range is `INVALID_ARGUMENT` before any upstream
   call). The reply is honest about the cut: `attachments_total` always reports how many
