@@ -265,6 +265,10 @@ async def test_tool_surface_is_stable():
     # Descriptions come from the docstrings and are how the model picks a tool.
     assert all(t.description for t in tools)
     assert "EOD-frozen" in dict((t.name, t.description) for t in tools)["get_stock_quote"]
+    # Every data tool declares itself a pure read so hosts can auto-approve it.
+    assert all(
+        t.annotations is not None and t.annotations.read_only_hint is True for t in tools
+    ), "a data tool without readOnlyHint costs the user a permission prompt per call"
 
 
 async def test_get_server_version_reports_the_installed_release():

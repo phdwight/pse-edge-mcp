@@ -13,7 +13,7 @@ understand it, debug it, or extend it.
 | `docs/deploy.md` | Running it in production |
 | `CLAUDE.md` | The short form of the invariants, kept next to the code |
 
-Version described: **0.15.0**. 36 modules, ~8,700 lines of source, ~6,700 lines of tests.
+Version described: **0.16.0**. 36 modules, ~8,700 lines of source, ~6,700 lines of tests.
 
 ---
 
@@ -21,7 +21,7 @@ Version described: **0.15.0**. 36 modules, ~8,700 lines of source, ~6,700 lines 
 
 An **MCP server** (Model Context Protocol — a standard way to expose tools to an LLM
 client) that serves **Philippine Stock Exchange** data taken from the PSE Edge disclosure
-portal. It exposes **12 read-only tools** — quotes, price history, disclosures, financial reports,
+portal. It exposes **13 read-only tools** — quotes, price history, disclosures, financial reports,
 dividends, index and market data — plus **one action tool**, `send_email`, on deployments
 with auth enabled.
 
@@ -70,7 +70,7 @@ Local development:
 
 ```bash
 uv sync --all-extras          # Python 3.14, uv for everything
-uv run pytest                 # 309 tests, no network access
+uv run pytest                 # 323 tests, no network access
 uv run ruff check .           # line length 100
 uv run mypy src               # strict
 ```

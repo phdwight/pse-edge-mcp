@@ -5,6 +5,17 @@ Format: [Keep a Changelog](https://keepachangelog.com/) · Versioning: [SemVer](
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-08-08
+
+### Added
+- **Tool annotations (MCP `ToolAnnotations`) on every tool.** The thirteen data tools
+  declare `readOnlyHint: true` (+ `openWorldHint: false` — one fixed upstream, not open
+  web), so hosts that auto-approve read-only tools stop prompting per call; `send_email`
+  declares itself non-read-only and non-idempotent so no host can ever auto-approve it by
+  mistake. Hints are advisory for clients, never security. Guarded by tests on both
+  sides: the surface test asserts every data tool carries `readOnlyHint`, and the
+  notifications test asserts the action tool never does.
+
 ### Changed
 - **Dependencies and CI actions brought to latest stable.** `uv lock --upgrade` across the
   tree (alembic 1.19, cryptography 50, starlette 1.4.1, uvicorn 0.52.1, ruff 0.16.2, …);

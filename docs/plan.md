@@ -246,10 +246,21 @@ Scalability decisions made **now**, paid for **later**:
 | Signup abuse (throwaway accounts) | Email verification + disposable-domain blocklist + low free tier; admin revocation |
 | Email deliverability | Use an established transactional provider; verification links are the only email we send |
 
-## 9. Open items (fine to settle during Phase 0)
+## 9. Open items
 
-- Final package/repo name (`pse-edge-mcp` placeholder — check PyPI availability)
-- Exact disclosure template taxonomy Edge uses (drives `search_disclosures` filters)
-- Whether financial highlights are served as JSON or need HTML parsing (affects Phase 3 effort)
-- License (MIT suggested)
-- Free-tier quota numbers (60 req/min / 2k per day is a starting guess)
+Original open items (name, taxonomy, JSON-vs-HTML, license, quotas) were all settled
+during delivery. What remains open now:
+
+- **Attachment content as MCP resources (undecided, raised 2026-08-08).** `get_disclosure`
+  returns attachment download URLs as plain strings — deliberate v1 scope — but major MCP
+  hosts cannot fetch arbitrary URLs, so a model can see that a PDF exists and cannot read
+  it. The spec-native fix (2025-06-18): return `resource_link` content and serve bytes via
+  `resources/read`, with the server fetching the attachment once into the immutable cache
+  (consistent with dedup discipline) and optionally extracting PDF text. Costs to weigh
+  before building: bandwidth and storage per attachment, PDF→text extraction (a new
+  dependency, against the lean-image invariant), per-user quota interaction, and PSE Edge
+  politeness (attachments can be MBs where pages are KBs — likely wants its own throttle
+  and a size cap). Decide scope first: raw bytes, extracted text, or both.
+- **MCP Registry listing + PyPI publish.** `uvx pse-edge-mcp` is advertised in the README
+  but nothing publishes to PyPI; the official registry (server.json manifest) is how 2026
+  clients discover servers by name. Needs a publish job in release.yml plus a manifest.

@@ -31,6 +31,7 @@ except ImportError:  # older SDKs shipped the same API as FastMCP
     from mcp.server.fastmcp import Context  # type: ignore[no-redef,import-not-found]
     from mcp.server.fastmcp import FastMCP as MCPServer  # type: ignore[no-redef]
 
+from mcp.types import ToolAnnotations
 from pydantic import BaseModel
 
 from .archive import Archive, NullArchive
@@ -72,6 +73,16 @@ Edge at most once per query and then served from storage until the next market
 close — check meta.as_of for when it was actually fetched. Every result carries
 meta.as_of / meta.valid_until; meta.stale=true means the value is not a settled
 end-of-day figure (session-time price, or PSE Edge was unreachable)."""
+
+# Behavior hints hosts read for permissioning and display (spec ToolAnnotations): a
+# client may auto-approve a readOnlyHint tool instead of prompting per call. Every data
+# tool here is a pure read against one fixed upstream (closed world, not web search);
+# send_email is the lone action — it creates something (not destructive), and each call
+# sends another email (not idempotent). Hints are advisory for clients, never security.
+READ_ONLY = ToolAnnotations(read_only_hint=True, open_world_hint=False)
+ACTION = ToolAnnotations(
+    read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=False
+)
 
 # ~6 months, the default span for a price-history request.
 DEFAULT_HISTORY_DAYS = 182
@@ -223,7 +234,7 @@ def build_server(
         _version = "0.0.0+unknown"
     mcp = MCPServer("pse-edge", version=_version, instructions=INSTRUCTIONS)
 
-    @mcp.tool()
+    @mcp.tool(annotations=READ_ONLY)
     async def search_companies(query: str) -> dict[str, Any]:
         """Search PSE-listed companies by name or ticker symbol.
 
@@ -232,7 +243,7 @@ def build_server(
         """
         return await reply(lambda: companies.search(require_text(query, "query")))
 
-    @mcp.tool()
+    @mcp.tool(annotations=READ_ONLY)
     async def validate_symbol(symbol: str) -> dict[str, Any]:
         """Check whether a ticker symbol is a real PSE-listed company. Cheap.
 
@@ -262,7 +273,7 @@ def build_server(
 
         return await reply(run)
 
-    @mcp.tool()
+    @mcp.tool(annotations=READ_ONLY)
     async def get_stock_quote(symbol: str) -> dict[str, Any]:
         """Get the latest end-of-day quote for a PSE stock symbol (e.g. SM, AREIT, BDO).
 
@@ -275,7 +286,7 @@ def build_server(
         """
         return await reply(lambda: quotes.quote(require_text(symbol, "symbol")))
 
-    @mcp.tool()
+    @mcp.tool(annotations=READ_ONLY)
     async def get_price_history(
         symbol: str, start_date: str | None = None, end_date: str | None = None
     ) -> dict[str, Any]:
@@ -293,7 +304,7 @@ def build_server(
 
         return await reply(run)
 
-    @mcp.tool()
+    @mcp.tool(annotations=READ_ONLY)
     async def search_disclosures(
         symbol: str | None = None,
         start_date: str | None = None,
@@ -338,7 +349,7 @@ def build_server(
 
         return await reply(run)
 
-    @mcp.tool()
+    @mcp.tool(annotations=READ_ONLY)
     async def search_disclosure_fulltext(
         keyword: str,
         start_date: str | None = None,
@@ -380,7 +391,7 @@ def build_server(
 
         return await reply(run)
 
-    @mcp.tool()
+    @mcp.tool(annotations=READ_ONLY)
     async def get_disclosure(edge_no: str, max_files: int = 20) -> dict[str, Any]:
         """Get one disclosure's details and attachment links by its edge_no.
 
@@ -408,7 +419,7 @@ def build_server(
 
     # ---- company info & market ---------------------------------------------
 
-    @mcp.tool()
+    @mcp.tool(annotations=READ_ONLY)
     async def get_company_profile(symbol: str) -> dict[str, Any]:
         """Get a PSE-listed company's profile: sector, incorporation, auditor, contacts.
 
@@ -419,7 +430,7 @@ def build_server(
         """
         return await reply(lambda: company_info.profile(require_text(symbol, "symbol")))
 
-    @mcp.tool()
+    @mcp.tool(annotations=READ_ONLY)
     async def get_financial_highlights(symbol: str) -> dict[str, Any]:
         """Get the financial highlights PSE Edge publishes for a company.
 
@@ -438,7 +449,7 @@ def build_server(
         """
         return await reply(lambda: company_info.financials(require_text(symbol, "symbol")))
 
-    @mcp.tool()
+    @mcp.tool(annotations=READ_ONLY)
     async def get_dividends_and_rights(symbol: str) -> dict[str, Any]:
         """Get a company's declared dividends and stock rights offers.
 
@@ -452,7 +463,7 @@ def build_server(
             lambda: company_info.dividends_and_rights(require_text(symbol, "symbol"))
         )
 
-    @mcp.tool()
+    @mcp.tool(annotations=READ_ONLY)
     async def get_indices() -> dict[str, Any]:
         """Get PSEi and the PSE sector index levels with their daily change.
 
@@ -465,7 +476,7 @@ def build_server(
         """
         return await reply(market.indices)
 
-    @mcp.tool()
+    @mcp.tool(annotations=READ_ONLY)
     async def get_market_summary() -> dict[str, Any]:
         """Get a market-wide snapshot: index levels plus PSE Edge's homepage feeds.
 
@@ -479,7 +490,7 @@ def build_server(
         """
         return await reply(market.summary)
 
-    @mcp.tool()
+    @mcp.tool(annotations=READ_ONLY)
     async def get_server_version() -> dict[str, Any]:
         """Get the deployed version of this MCP server (pse-edge-mcp).
 
@@ -497,7 +508,7 @@ def build_server(
     # a model will keep choosing it and keep apologising.
     if settings.auth_required and notifier is not None:
 
-        @mcp.tool()
+        @mcp.tool(annotations=ACTION)
         async def send_email(subject: str, body: str, ctx: Context) -> dict[str, Any]:
             """Email the signed-in user — and only them — a note you have composed.
 
