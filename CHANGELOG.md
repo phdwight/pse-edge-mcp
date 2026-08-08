@@ -5,6 +5,17 @@ Format: [Keep a Changelog](https://keepachangelog.com/) · Versioning: [SemVer](
 
 ## [Unreleased]
 
+### Changed
+- **Dependencies and CI actions brought to latest stable.** `uv lock --upgrade` across the
+  tree (alembic 1.19, cryptography 50, starlette 1.4.1, uvicorn 0.52.1, ruff 0.16.2, …);
+  all GitHub Actions bumped off deprecated Node 20 runtimes (checkout v7, setup-uv v9,
+  buildx v4, build-push v7, login v4, upload/download-artifact v7/v8), and
+  `trivy-action` pinned to a release (0.36.0) instead of floating `master`. Docker bases
+  were already current-major (python 3.14, postgres 18, caddy 2, adminer 5). Held back
+  deliberately: `soft-webauthn` 0.1.3 (0.1.4's fido2>=1 requirement makes the lock
+  unsolvable on the >=3.15 resolution split; test-only dep), and `pydantic-core`
+  (pinned exactly by pydantic itself).
+
 ## [0.15.0] - 2026-08-08
 
 ### Added
