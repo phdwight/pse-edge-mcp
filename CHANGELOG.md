@@ -5,6 +5,14 @@ Format: [Keep a Changelog](https://keepachangelog.com/) · Versioning: [SemVer](
 
 ## [Unreleased]
 
+## [0.16.1] - 2026-08-08
+
+### Fixed
+- **MCP Registry publish unblocked.** The registry's ownership check requires
+  `mcp-name: io.github.phdwight/pse-edge-mcp` to appear in the PyPI package README —
+  added as a footer line — and caps the listing description at 100 characters —
+  `server.json`'s shortened to fit. Packaging only; no behavior change.
+
 ## [0.16.0] - 2026-08-08
 
 ### Added

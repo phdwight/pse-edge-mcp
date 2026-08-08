@@ -1,18 +1,18 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-09-29/server.schema.json",
   "name": "io.github.phdwight/pse-edge-mcp",
-  "description": "Philippine Stock Exchange (PSE Edge) data: EOD quotes, price history, disclosures with readable attachments, financials, dividends, and market indices.",
+  "description": "Philippine Stock Exchange data via PSE Edge: EOD quotes, price history, disclosures, financials.",
   "repository": {
     "url": "https://github.com/phdwight/pse-edge-mcp",
     "source": "github"
   },
-  "version": "0.16.0",
+  "version": "0.16.1",
   "websiteUrl": "https://github.com/phdwight/pse-edge-mcp",
   "packages": [
     {
       "registryType": "pypi",
       "identifier": "pse-edge-mcp",
-      "version": "0.16.0",
+      "version": "0.16.1",
       "transport": {
         "type": "stdio"
       }
