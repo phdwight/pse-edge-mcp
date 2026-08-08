@@ -138,6 +138,11 @@ Structure (fixture: `disclosure_viewer.html`):
 **The body `file_id` differs from the attachment `file_id`** (verified: body 1949127,
 attachment 1949133) — one disclosure has several. `edge_no` is the stable natural key and
 a published disclosure never changes, so details are cached permanently
+
+Since 0.16.0 the server also fetches `GET /downloadFile.do?file_id={int}` itself, for the
+`pse-edge://attachment/{file_id}` MCP resource: plain GET, raw file bytes back (usually
+`application/pdf`; observed ~KBs to a few MB — a live SM Form 23-B was 2.7 MB), fetched
+once ever per file (immutable cache), refused above 10 MB.
 (`data_policy: "immutable"`, no boundary refetch).
 
 `downloadHtml.do` returns a standalone XHTML doc with content in `#contentBox` (built by a

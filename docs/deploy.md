@@ -494,7 +494,8 @@ on every version bump using [Trusted Publishing](https://docs.pypi.org/trusted-p
 the project owner): *Your projects → Publishing → add a pending publisher* with owner
 `phdwight`, repository `pse-edge-mcp`, workflow `release.yml`, environment `pypi`. Until
 that exists the job fails at the upload step, visibly, without blocking the image release.
-Once live, `uvx pse-edge-mcp` installs the real thing.
+*(Configured for this repo on 2026-08-08 — publishing is live since 0.16.0, and
+`uvx pse-edge-mcp` installs the real thing.)*
 
 **MCP Registry (manual, per release).** `server.json` at the repo root is the manifest;
 a test pins its `version` to `pyproject.toml`, so bumping one without the other fails CI.

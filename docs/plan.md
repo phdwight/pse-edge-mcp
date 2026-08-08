@@ -262,6 +262,8 @@ during delivery. What remains open now:
   and `file_id` validated to digits so the resource cannot become a proxy for arbitrary
   upstream queries. Bytes are cached base64 in the JSON cache — accepted overhead
   (~33%) for keeping one `Storage` protocol.
-- **MCP Registry listing + PyPI publish.** `uvx pse-edge-mcp` is advertised in the README
-  but nothing publishes to PyPI; the official registry (server.json manifest) is how 2026
-  clients discover servers by name. Needs a publish job in release.yml plus a manifest.
+- **MCP Registry listing + PyPI publish (PyPI half done 2026-08-08, 0.16.0).** The
+  `pypi` job in release.yml publishes on every version bump via Trusted Publishing, and
+  `pse-edge-mcp` is live on PyPI — `uvx pse-edge-mcp` works. Still pending: submitting
+  `server.json` to the registry (`mcp-publisher login github && mcp-publisher publish`,
+  operator action; the manifest version is test-pinned to pyproject so it cannot drift).

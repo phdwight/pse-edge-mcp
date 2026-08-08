@@ -124,6 +124,18 @@ Unofficial — Edge has no public API; we speak to the portal's own internal end
   `get_disclosure(edge_no)` via `openDiscViewer.do`. Disclosure tables are parsed by
   `<thead>` label, never by column position — the two endpoints order columns differently.
   See docs/endpoints.md §"v3 corrections" for the three v2 claims this work disproved.
+- **MCP surface beyond tools (0.16.0).** Every tool declares `ToolAnnotations`: the 13
+  reads carry `readOnlyHint: true` (hosts may auto-approve), and `send_email` must
+  **never** gain it — hints are advisory for clients, never security; the
+  recipient-from-token design stays the actual guarantee (tests pin both directions).
+  The `pse-edge://attachment/{file_id}` resource serves attachment bytes: `file_id` is
+  validated to **digits only** (the resource must not become a proxy for arbitrary
+  upstream queries), the 10 MB cap lives in the **client, before anything is stored**,
+  and the fetch is `immutable` — once ever per file. Prompts (`market_recap`,
+  `company_briefing`) bake the meta-relay rules into their rendered text; keep that when
+  editing them. `server.json` is the MCP Registry manifest — its version is test-pinned
+  to pyproject (`tests/test_packaging.py`), and the `pypi` job in release.yml publishes
+  on every version bump via Trusted Publishing.
 - **Company info & market:** `get_company_profile`, `get_financial_highlights`,
   `get_dividends_and_rights`, `get_indices`, `get_market_summary`. Findings that shape the
   code (details in docs/endpoints.md v4): financial-report **units labels contradict each
