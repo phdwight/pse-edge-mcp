@@ -246,10 +246,22 @@ Scalability decisions made **now**, paid for **later**:
 | Signup abuse (throwaway accounts) | Email verification + disposable-domain blocklist + low free tier; admin revocation |
 | Email deliverability | Use an established transactional provider; verification links are the only email we send |
 
-## 9. Open items (fine to settle during Phase 0)
+## 9. Open items
 
-- Final package/repo name (`pse-edge-mcp` placeholder — check PyPI availability)
-- Exact disclosure template taxonomy Edge uses (drives `search_disclosures` filters)
-- Whether financial highlights are served as JSON or need HTML parsing (affects Phase 3 effort)
-- License (MIT suggested)
-- Free-tier quota numbers (60 req/min / 2k per day is a starting guess)
+Original open items (name, taxonomy, JSON-vs-HTML, license, quotas) were all settled
+during delivery. What remains open now:
+
+- **Attachment content as MCP resources (decided + shipped 2026-08-08, 0.16.0).** Scope
+  chosen: **raw bytes, no text extraction** — hosts read PDFs natively, and extraction
+  would add a PDF library against the lean-image invariant (revisit only if a host that
+  cannot ingest PDFs matters). Served via `resources/read` at
+  `pse-edge://attachment/{file_id}`, advertised per attachment as `resource_uri` in
+  `get_disclosure`. Guardrails: immutable cache (one PSE Edge fetch per file, ever;
+  single-flighted; same politeness throttle), a 10 MB cap enforced in the client before
+  anything is stored (`ATTACHMENT_TOO_LARGE`; `download_url` remains the escape hatch),
+  and `file_id` validated to digits so the resource cannot become a proxy for arbitrary
+  upstream queries. Bytes are cached base64 in the JSON cache — accepted overhead
+  (~33%) for keeping one `Storage` protocol.
+- **MCP Registry listing + PyPI publish.** `uvx pse-edge-mcp` is advertised in the README
+  but nothing publishes to PyPI; the official registry (server.json manifest) is how 2026
+  clients discover servers by name. Needs a publish job in release.yml plus a manifest.

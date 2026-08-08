@@ -249,7 +249,7 @@ restarting in a loop.
 ## Stage 1 — LAN only
 
 ```bash
-PSE_IMAGE_TAG=0.14.0            # pin a version; see the warning below
+PSE_IMAGE_TAG=0.16.0            # pin a version; see the warning below
 POSTGRES_PASSWORD=<long random value>
 ```
 
@@ -264,7 +264,7 @@ is reachable at `http://<nas-ip>:8200`, and nothing is exposed to the internet.
 Check it:
 
 ```bash
-curl http://<nas-ip>:8200/health           # {"status": "ok", "version": "0.14.0", ...}
+curl http://<nas-ip>:8200/health           # {"status": "ok", "version": "0.16.0", ...}
 curl -X POST http://<nas-ip>:8200/mcp      # 401 — auth is on
 ```
 
@@ -480,3 +480,32 @@ that the `resource` field in the metadata is your real hostname and not `localho
 
 Then visit `https://$PSE_DOMAIN/signup` and complete a real signup, as above — the one check
 stage 1 could not perform.
+
+---
+
+## Publishing (PyPI + MCP Registry)
+
+Two discovery channels, both driven from a release. The image publish needs nothing —
+this section is about the *package* and the *registry listing*.
+
+**PyPI (one-time setup, then automatic).** `release.yml`'s `pypi` job builds and uploads
+on every version bump using [Trusted Publishing](https://docs.pypi.org/trusted-publishers/)
+— OIDC, no token stored in this repo. Before the first publish, on pypi.org (logged in as
+the project owner): *Your projects → Publishing → add a pending publisher* with owner
+`phdwight`, repository `pse-edge-mcp`, workflow `release.yml`, environment `pypi`. Until
+that exists the job fails at the upload step, visibly, without blocking the image release.
+Once live, `uvx pse-edge-mcp` installs the real thing.
+
+**MCP Registry (manual, per release).** `server.json` at the repo root is the manifest;
+a test pins its `version` to `pyproject.toml`, so bumping one without the other fails CI.
+To (re)publish the listing after a release, from the repo root:
+
+```bash
+brew install mcp-publisher        # or download from github.com/modelcontextprotocol/registry
+mcp-publisher login github        # proves ownership of the io.github.phdwight namespace
+mcp-publisher publish             # validates and submits server.json
+```
+
+The listing points at both the PyPI package (stdio) and the hosted remote
+(`https://pse.sakayandgo.com/mcp`), so clients can pick either. Publish the PyPI package
+first — the registry verifies the package version exists.

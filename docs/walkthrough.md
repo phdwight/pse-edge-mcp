@@ -13,7 +13,7 @@ understand it, debug it, or extend it.
 | `docs/deploy.md` | Running it in production |
 | `CLAUDE.md` | The short form of the invariants, kept next to the code |
 
-Version described: **0.15.0**. 36 modules, ~8,700 lines of source, ~6,700 lines of tests.
+Version described: **0.16.0**. 36 modules, ~8,700 lines of source, ~6,700 lines of tests.
 
 ---
 
@@ -21,7 +21,7 @@ Version described: **0.15.0**. 36 modules, ~8,700 lines of source, ~6,700 lines 
 
 An **MCP server** (Model Context Protocol — a standard way to expose tools to an LLM
 client) that serves **Philippine Stock Exchange** data taken from the PSE Edge disclosure
-portal. It exposes **12 read-only tools** — quotes, price history, disclosures, financial reports,
+portal. It exposes **13 read-only tools** — quotes, price history, disclosures, financial reports,
 dividends, index and market data — plus **one action tool**, `send_email`, on deployments
 with auth enabled.
 
@@ -70,7 +70,7 @@ Local development:
 
 ```bash
 uv sync --all-extras          # Python 3.14, uv for everything
-uv run pytest                 # 309 tests, no network access
+uv run pytest                 # 323 tests, no network access
 uv run ruff check .           # line length 100
 uv run mypy src               # strict
 ```
@@ -270,7 +270,21 @@ mocking at all**.
 Thirteen tools are read-only: twelve return PSE Edge data in the same envelope (§7), and
 `get_server_version` (0.14.0) reports the server's own deployed release with **no `meta`** —
 meta is a data-freshness contract, and a version has no `as_of`. The fourteenth,
-`send_email`, is an **action** — see below.
+`send_email`, is an **action** — see below. Every tool declares MCP `ToolAnnotations`
+(0.16.0): the read-onlys carry `readOnlyHint: true` so hosts can auto-approve them;
+`send_email` declares the opposite so no host ever auto-approves it.
+
+Beyond tools, the server exposes one **MCP resource** (0.16.0):
+`pse-edge://attachment/{file_id}` serves a disclosure attachment's raw bytes via
+`resources/read` — most hosts cannot fetch arbitrary URLs, so `download_url` alone left
+files visible but unreadable. One PSE Edge fetch per file ever (immutable cache), 10 MB
+cap, `file_id` validated to digits. Each `get_disclosure` attachment advertises its
+`resource_uri`.
+
+Two **prompts** (0.16.0) appear in host prompt-pickers — `market_recap` and
+`company_briefing(symbol)` — both baking in the meta-relay rules, and the briefing's
+`symbol` argument **autocompletes** from PSE Edge's own autocomplete via
+`completion/complete`.
 
 | Tool | Arguments | Repository |
 |---|---|---|

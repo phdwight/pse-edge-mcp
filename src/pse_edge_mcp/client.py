@@ -22,7 +22,7 @@ from tenacity import (
 )
 
 from .config import Settings
-from .errors import EdgeUnavailableError, EndpointChangedError
+from .errors import AttachmentTooLargeError, EdgeUnavailableError, EndpointChangedError
 from .ratelimit import TokenBucket
 
 
@@ -232,6 +232,21 @@ class PseEdgeClient:
         """GET /openDiscViewer.do — disclosure detail page (metadata + attachment ids)."""
         resp = await self._get("/openDiscViewer.do", edge_no=edge_no)
         return resp.text
+
+    #: Attachments can be megabytes where pages are kilobytes. The cap bounds cache rows
+    #: and keeps one download from monopolising the politeness budget toward PSE Edge.
+    MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024
+
+    async def fetch_attachment(self, file_id: str) -> tuple[bytes, str]:
+        """GET /downloadFile.do — one attachment's raw bytes plus its content type."""
+        resp = await self._get("/downloadFile.do", file_id=file_id)
+        raw = resp.content
+        if len(raw) > self.MAX_ATTACHMENT_BYTES:
+            raise AttachmentTooLargeError(
+                f"attachment {file_id} is {len(raw)} bytes, over the "
+                f"{self.MAX_ATTACHMENT_BYTES}-byte cap — fetch its download_url directly"
+            )
+        return raw, resp.headers.get("content-type", "application/octet-stream")
 
     # ---- company info & market -----------------------------------------------
 

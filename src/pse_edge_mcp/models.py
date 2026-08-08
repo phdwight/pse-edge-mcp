@@ -165,6 +165,12 @@ class DisclosureAttachment(BaseModel):
     file_id: str
     filename: str
     download_url: str = Field(description="Absolute URL; fetch it yourself if you need the file")
+    resource_uri: str | None = Field(
+        default=None,
+        description="MCP resource URI (pse-edge://attachment/<file_id>) serving this "
+        "file's raw bytes via resources/read — for hosts that cannot fetch URLs. "
+        "Fetched from PSE Edge once, cached immutably, capped at 10 MB.",
+    )
 
 
 class DisclosureDocument(BaseModel):

@@ -5,6 +5,52 @@ Format: [Keep a Changelog](https://keepachangelog.com/) · Versioning: [SemVer](
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-08-08
+
+### Added
+- **Prompts and argument completion.** Two canned prompts appear in host prompt-pickers:
+  `market_recap` (argumentless session recap) and `company_briefing(symbol)` (one-page
+  company brief) — both bake in the meta-relay rules, so a rendered prompt reminds the
+  model to state `as_of` and never present a flagged value as realtime. The briefing's
+  `symbol` argument autocompletes from PSE Edge's own autocomplete (cached like any
+  lookup; errors yield an empty list, never a popup-breaking failure).
+- **Human-friendly titles on every tool** plus server identity metadata (title, website)
+  for host catalogs.
+- **PyPI publish + MCP Registry manifest.** `release.yml` gains a `pypi` job that builds
+  and publishes on every version bump via Trusted Publishing (OIDC, no stored secret —
+  needs a one-time publisher setup on pypi.org, documented in docs/deploy.md), making
+  `uvx pse-edge-mcp` real. `server.json` (the MCP Registry manifest) describes the
+  package and the hosted remote; a test pins its version to `pyproject.toml` so the
+  manifest can never point at a package version that does not exist.
+- **Disclosure attachments are now readable through MCP.** Most hosts cannot fetch
+  arbitrary URLs, so `download_url` alone left attachments visible but unreadable. Each
+  attachment in `get_disclosure` now carries `resource_uri`
+  (`pse-edge://attachment/<file_id>`), served by a new MCP resource that returns the
+  file's raw bytes. Decided scope: bytes only, no text extraction (hosts read PDFs
+  natively; extraction would add a PDF library against the lean-image invariant).
+  Fetched from PSE Edge once ever (immutable cache, single-flighted, politeness
+  throttle), capped at 10 MB (`ATTACHMENT_TOO_LARGE` beyond — the download_url still
+  works), and `file_id` is validated to digits so the resource cannot proxy arbitrary
+  upstream queries.
+- **Tool annotations (MCP `ToolAnnotations`) on every tool.** The thirteen data tools
+  declare `readOnlyHint: true` (+ `openWorldHint: false` — one fixed upstream, not open
+  web), so hosts that auto-approve read-only tools stop prompting per call; `send_email`
+  declares itself non-read-only and non-idempotent so no host can ever auto-approve it by
+  mistake. Hints are advisory for clients, never security. Guarded by tests on both
+  sides: the surface test asserts every data tool carries `readOnlyHint`, and the
+  notifications test asserts the action tool never does.
+
+### Changed
+- **Dependencies and CI actions brought to latest stable.** `uv lock --upgrade` across the
+  tree (alembic 1.19, cryptography 50, starlette 1.4.1, uvicorn 0.52.1, ruff 0.16.2, …);
+  all GitHub Actions bumped off deprecated Node 20 runtimes (checkout v7, setup-uv v9,
+  buildx v4, build-push v7, login v4, upload/download-artifact v7/v8), and
+  `trivy-action` pinned to a release (0.36.0) instead of floating `master`. Docker bases
+  were already current-major (python 3.14, postgres 18, caddy 2, adminer 5). Held back
+  deliberately: `soft-webauthn` 0.1.3 (0.1.4's fido2>=1 requirement makes the lock
+  unsolvable on the >=3.15 resolution split; test-only dep), and `pydantic-core`
+  (pinned exactly by pydantic itself).
+
 ## [0.15.0] - 2026-08-08
 
 ### Added

@@ -54,6 +54,17 @@ class MarketOpenNoCacheError(PseEdgeMcpError):
         return {**super().payload(), "retry_after": self.retry_after.isoformat()}
 
 
+class AttachmentTooLargeError(PseEdgeMcpError):
+    """An attachment exceeds the download cap.
+
+    The cap bounds cache rows and keeps one download from monopolising the politeness
+    budget toward PSE Edge. The file is still reachable by its download_url — the caller
+    just has to fetch it outside this server.
+    """
+
+    code = "ATTACHMENT_TOO_LARGE"
+
+
 class ActionUnavailableError(PseEdgeMcpError):
     """An action tool cannot run in this deployment or session.
 

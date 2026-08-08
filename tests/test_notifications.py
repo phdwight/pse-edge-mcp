@@ -162,3 +162,8 @@ async def test_send_email_appears_with_auth_and_takes_no_recipient():
             f"{forbidden!r} must not be an argument — the recipient comes from the token"
         )
     assert "only them" in (tools["send_email"].description or "").lower()
+    # The one action tool must never masquerade as a read: a host that auto-approves
+    # readOnlyHint tools would otherwise send email without asking.
+    hints = tools["send_email"].annotations
+    assert hints is not None and hints.read_only_hint is False
+    assert hints.idempotent_hint is False, "every call sends another email"

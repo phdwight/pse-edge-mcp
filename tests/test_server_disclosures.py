@@ -200,6 +200,44 @@ async def test_get_disclosure_rejects_malformed_edge_no_without_calling_edge():
 
 
 @respx.mock
+async def test_attachment_resource_serves_bytes_and_caches_immutably():
+    """The pse-edge://attachment/{file_id} resource is how hosts that cannot fetch URLs
+    read a disclosure file: bytes out, one upstream hit ever."""
+    pdf = b"%PDF-1.4 resource fixture"
+    route = respx.get(f"{BASE}/downloadFile.do").mock(
+        return_value=httpx.Response(200, content=pdf, headers={"content-type": "application/pdf"})
+    )
+    mcp = build_test_server()
+
+    templates = await mcp.list_resource_templates()
+    assert any("pse-edge://attachment/" in str(t.uri_template) for t in templates)
+
+    first = await mcp.read_resource("pse-edge://attachment/1949133")
+    [content] = list(first)
+    assert content.content == pdf
+
+    again = await mcp.read_resource("pse-edge://attachment/1949133")
+    assert list(again)[0].content == pdf
+    assert route.call_count == 1, "immutable: the file is fetched from PSE Edge once ever"
+
+
+@respx.mock
+async def test_attachment_resource_rejects_a_non_numeric_file_id_without_calling_edge():
+    route = respx.get(f"{BASE}/downloadFile.do")
+    mcp = build_test_server()
+    import pytest
+
+    # A traversal-shaped URI never matches the template — the SDK refuses it first.
+    with pytest.raises(Exception, match="Unknown resource"):
+        await mcp.read_resource("pse-edge://attachment/../oauth")
+    # A matching-but-non-numeric id reaches our validator, which refuses it (the SDK
+    # wraps the InvalidArgumentError in its template-error message).
+    with pytest.raises(Exception, match="Error creating resource"):
+        await mcp.read_resource("pse-edge://attachment/DROP")
+    assert not route.called, "either way, nothing reaches PSE Edge"
+
+
+@respx.mock
 async def test_get_disclosure_rejects_an_out_of_range_max_files_without_calling_edge():
     route = respx.get(f"{BASE}/openDiscViewer.do")
     edge_no = "ff4c7557aee1d72b64d70b69f0a3140b"
@@ -265,6 +303,29 @@ async def test_tool_surface_is_stable():
     # Descriptions come from the docstrings and are how the model picks a tool.
     assert all(t.description for t in tools)
     assert "EOD-frozen" in dict((t.name, t.description) for t in tools)["get_stock_quote"]
+    # Every data tool declares itself a pure read so hosts can auto-approve it.
+    assert all(
+        t.annotations is not None and t.annotations.read_only_hint is True for t in tools
+    ), "a data tool without readOnlyHint costs the user a permission prompt per call"
+    # And every tool carries a human-friendly title for host catalogs.
+    assert all(t.title for t in tools)
+
+
+async def test_prompts_are_listed_and_render_with_the_symbol():
+    """The two canned prompts hosts surface in their pickers: one argumentless recap,
+    one per-company briefing whose symbol is normalised into the rendered text."""
+    mcp = build_test_server()
+
+    prompts = {p.name for p in await mcp.list_prompts()}
+    assert {"market_recap", "company_briefing"} <= prompts
+
+    rendered = await mcp.get_prompt("company_briefing", {"symbol": "sm"})
+    text = rendered.messages[0].content.text  # type: ignore[union-attr]
+    assert " SM." in text and "validate_symbol" in text
+    assert "meta.note" in text, "the prompt must carry the not-realtime relay rule"
+
+    recap = await mcp.get_prompt("market_recap", None)
+    assert "get_indices" in recap.messages[0].content.text  # type: ignore[union-attr]
 
 
 async def test_get_server_version_reports_the_installed_release():

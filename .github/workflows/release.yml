@@ -42,7 +42,7 @@ jobs:
       bumped: ${{ steps.version.outputs.bumped }}
       tags: ${{ steps.version.outputs.tags }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 2 # need HEAD~1 to tell whether the version changed
 
@@ -87,8 +87,8 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v9.0.0
         with:
           python-version: "3.14"
       - run: uv sync --all-extras
@@ -109,16 +109,16 @@ jobs:
             runner: ubuntu-24.04-arm
     runs-on: ${{ matrix.runner }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v9.0.0
         with:
           python-version: "3.14"
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
 
       # Load into the local daemon first so the gates below run on the exact bits that
       # get pushed. Native runner => no QEMU, and `docker run` works for the smoke test.
       - name: Build ${{ matrix.platform }}
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           platforms: ${{ matrix.platform }}
@@ -142,7 +142,7 @@ jobs:
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Scan image for secrets
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: pse-edge-mcp:candidate
           scanners: secret
@@ -162,7 +162,7 @@ jobs:
           test "$TOOLS" -ge 6
 
       - name: Log in to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -172,7 +172,7 @@ jobs:
       # provenance/sbom off so the manifest list holds exactly one entry per arch.
       - name: Push ${{ matrix.platform }} by digest
         id: push
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           platforms: ${{ matrix.platform }}
@@ -192,26 +192,45 @@ jobs:
           mkdir -p /tmp/digests
           touch "/tmp/digests/${DIGEST#sha256:}"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: digest-${{ matrix.arch }}
           path: /tmp/digests/*
           if-no-files-found: error
           retention-days: 1
 
+  pypi:
+    # Publishes the sdist+wheel on every version bump via PyPI Trusted Publishing
+    # (OIDC — no long-lived secret in this repo). One-time setup on pypi.org: add a
+    # GitHub publisher for project pse-edge-mcp (owner phdwight, repo pse-edge-mcp,
+    # workflow release.yml, environment pypi). Until that exists this job fails at
+    # the upload step — visibly, without blocking the image release (nothing needs it).
+    needs: [test, version]
+    if: needs.version.outputs.bumped == 'true'
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      contents: read
+      id-token: write # OIDC token for Trusted Publishing
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v9.0.0
+      - run: uv build
+      - uses: pypa/gh-action-pypi-publish@release/v1
+
   merge:
     needs: [build, version]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: /tmp/digests
           pattern: digest-*
           merge-multiple: true
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
       - name: Log in to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
