@@ -233,7 +233,7 @@ DATABASE_URL=postgresql+asyncpg://user:pass@host/db uv run alembic upgrade head
 | `get_price_history(symbol, start_date?, end_date?)` | Daily OHLC series from Edge's chart endpoint |
 | `search_disclosures(symbol?, start_date?, end_date?, template?, page?)` | Disclosure metadata, market-wide or per company; 50/page with exact totals |
 | `search_disclosure_fulltext(keyword, ...)` | Search the text *inside* disclosure attachments, with snippets |
-| `get_disclosure(edge_no, max_files?)` | One disclosure's details plus attachment and body-HTML links; attachments capped at `max_files` (default 20) with an honest truncation flag |
+| `get_disclosure(edge_no, max_files?)` | One disclosure's details plus attachment and body-HTML links; attachments capped at `max_files` (default 20) with an honest truncation flag. Each attachment carries a `resource_uri` — read the file's bytes via MCP `resources/read` (`pse-edge://attachment/<file_id>`, cached immutably, 10 MB cap) |
 | `get_company_profile(symbol)` | Sector, incorporation, auditor, transfer agent, contacts |
 | `get_financial_highlights(symbol)` | Annual + quarterly balance sheet and income statement |
 | `get_dividends_and_rights(symbol)` | Declared dividends and stock rights, linked to their disclosures |

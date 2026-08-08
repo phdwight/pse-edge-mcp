@@ -19,6 +19,7 @@ cannot be dropped on the way to the caller.
 
 from __future__ import annotations
 
+import base64
 from collections.abc import Iterable
 from datetime import date
 from typing import Any, Literal
@@ -462,12 +463,30 @@ class DisclosureRepository:
             parsed["body_html_url"] = self._absolute(parsed.get("body_html_url"))
             for attachment in parsed["attachments"]:
                 attachment["download_url"] = self._absolute(attachment["download_url"])
+                # The MCP-native way to read the file: hosts that cannot fetch arbitrary
+                # URLs (most of them) resources/read this instead.
+                attachment["resource_uri"] = f"pse-edge://attachment/{attachment['file_id']}"
             parsed.pop("body_file_id", None)
             parsed["attachments_total"] = len(parsed["attachments"])
             return DisclosureDetail(**parsed)
 
         full = self._memo.resolve(f"disclosure:{edge_no}#detail", served, build)
         return full.map(lambda detail: _cap_attachments(detail, max_files))
+
+    async def attachment(self, file_id: str) -> Served[tuple[bytes, str]]:
+        """One attachment's raw bytes + content type, fetched from PSE Edge once ever.
+
+        A published file never changes, so this is `immutable` like the detail page.
+        Bytes are cached base64-encoded (the cache stores JSON values); the size cap
+        lives in the client, so an oversized file is refused before anything is stored.
+        """
+
+        async def fetch() -> dict[str, str]:
+            raw, content_type = await self._source.fetch_attachment(file_id)
+            return {"b64": base64.b64encode(raw).decode(), "content_type": content_type}
+
+        served = await self._cache.get(f"attachment:{file_id}", fetch, policy="immutable")
+        return served.map(lambda v: (base64.b64decode(v["b64"]), v["content_type"]))
 
     def _absolute(self, path: str | None) -> str | None:
         """Parsers emit site-relative paths; callers outside this process need absolute."""

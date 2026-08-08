@@ -54,6 +54,7 @@ from .service import FreezeService, Served
 from .validation import (
     optional_date,
     require_edge_no,
+    require_file_id,
     require_limit,
     require_ordered,
     require_page,
@@ -397,8 +398,10 @@ def build_server(
 
         edge_no is the 32-character hex id returned by search_disclosures.
         Returns the company, template, date, related documents, and URLs for each
-        attachment plus the rendered body HTML. This server does not download or parse
-        attachments — fetch the returned URLs yourself if you need their contents.
+        attachment plus the rendered body HTML. To read a file's contents, use the
+        attachment's resource_uri (pse-edge://attachment/<file_id>) via resources/read —
+        the tools themselves stay metadata-only; download_url remains for callers that
+        can fetch URLs directly.
 
         At most max_files attachments are returned (default 20, max 100).
         attachments_total always reports how many exist; if attachments_truncated is
@@ -489,6 +492,24 @@ def build_server(
         cannot include them — say so rather than implying the data is missing or stale.
         """
         return await reply(market.summary)
+
+    @mcp.resource(
+        "pse-edge://attachment/{file_id}",
+        name="disclosure-attachment",
+        title="Disclosure attachment",
+        description="Raw bytes of a disclosure attachment (usually a PDF). file_id comes "
+        "from get_disclosure's attachments[].file_id / resource_uri. Fetched from PSE "
+        "Edge once, cached immutably, capped at 10 MB (ATTACHMENT_TOO_LARGE beyond — "
+        "use the attachment's download_url instead).",
+        mime_type="application/octet-stream",
+    )
+    async def disclosure_attachment(file_id: str) -> bytes:
+        """Most MCP hosts cannot fetch arbitrary URLs, so download_url alone leaves
+        attachments visible but unreadable. This resource closes that gap; the tools
+        stay metadata-only by design."""
+        served = await disclosures.attachment(require_file_id(file_id))
+        raw, _content_type = served.value
+        return raw
 
     @mcp.tool(annotations=READ_ONLY)
     async def get_server_version() -> dict[str, Any]:

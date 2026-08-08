@@ -70,3 +70,28 @@ async def test_server_error_becomes_edge_unavailable():
     with pytest.raises(EdgeUnavailableError):
         await client.fetch_stock_data_page("599")
     await client.aclose()
+
+
+@respx.mock
+async def test_fetch_attachment_returns_bytes_and_content_type():
+    pdf = b"%PDF-1.4 tiny fixture"
+    route = respx.get(f"{BASE}/downloadFile.do").mock(
+        return_value=httpx.Response(200, content=pdf, headers={"content-type": "application/pdf"})
+    )
+    raw, content_type = await make_client().fetch_attachment("1949133")
+    assert raw == pdf and content_type == "application/pdf"
+    assert route.calls.last.request.url.params["file_id"] == "1949133"
+
+
+@respx.mock
+async def test_fetch_attachment_refuses_oversized_files(monkeypatch):
+    """The cap bounds cache rows and protects the politeness budget: an oversized file
+    is refused before anything downstream can store it."""
+    from pse_edge_mcp.errors import AttachmentTooLargeError
+
+    monkeypatch.setattr(PseEdgeClient, "MAX_ATTACHMENT_BYTES", 16)
+    respx.get(f"{BASE}/downloadFile.do").mock(
+        return_value=httpx.Response(200, content=b"x" * 17)
+    )
+    with pytest.raises(AttachmentTooLargeError):
+        await make_client().fetch_attachment("1")

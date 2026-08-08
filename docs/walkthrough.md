@@ -270,7 +270,16 @@ mocking at all**.
 Thirteen tools are read-only: twelve return PSE Edge data in the same envelope (§7), and
 `get_server_version` (0.14.0) reports the server's own deployed release with **no `meta`** —
 meta is a data-freshness contract, and a version has no `as_of`. The fourteenth,
-`send_email`, is an **action** — see below.
+`send_email`, is an **action** — see below. Every tool declares MCP `ToolAnnotations`
+(0.16.0): the read-onlys carry `readOnlyHint: true` so hosts can auto-approve them;
+`send_email` declares the opposite so no host ever auto-approves it.
+
+Beyond tools, the server exposes one **MCP resource** (0.16.0):
+`pse-edge://attachment/{file_id}` serves a disclosure attachment's raw bytes via
+`resources/read` — most hosts cannot fetch arbitrary URLs, so `download_url` alone left
+files visible but unreadable. One PSE Edge fetch per file ever (immutable cache), 10 MB
+cap, `file_id` validated to digits. Each `get_disclosure` attachment advertises its
+`resource_uri`.
 
 | Tool | Arguments | Repository |
 |---|---|---|

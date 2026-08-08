@@ -77,6 +77,9 @@ class FakeDisclosureSource:
         self.viewer_calls.append(edge_no)
         return self.html
 
+    async def fetch_attachment(self, file_id: str) -> tuple[bytes, str]:
+        return (b"%PDF-1.4 fake " + file_id.encode(), "application/pdf")
+
 
 SM_AUTOCOMPLETE = [
     {"cmpyId": "154", "cmpyNm": "San Miguel Corporation", "symbol": "SMC", "etfYn": "0"},
@@ -257,6 +260,28 @@ async def test_detail_is_cached_immutably_and_returns_absolute_urls(disclosure_v
         == "https://edge.pse.com.ph/downloadFile.do?file_id=1949133"
     )
     assert served.value.body_html_url == "https://edge.pse.com.ph/downloadHtml.do?file_id=1949127"
+
+
+async def test_attachment_bytes_roundtrip_the_json_cache_immutably():
+    """Bytes live in a JSON cache, so they are stored base64 and must come back
+    byte-identical; a published file never changes, so the read is immutable."""
+    cache = FakeCache()
+    repo = DisclosureRepository(FakeDisclosureSource(""), cache, "https://edge.pse.com.ph")
+
+    served = await repo.attachment("1949133")
+
+    raw, content_type = served.value
+    assert raw == b"%PDF-1.4 fake 1949133" and content_type == "application/pdf"
+    assert cache.keys == ["attachment:1949133"]
+    assert cache.policies == ["immutable"]
+
+
+async def test_detail_attachments_carry_the_mcp_resource_uri(disclosure_viewer_html):
+    repo = DisclosureRepository(
+        FakeDisclosureSource(disclosure_viewer_html), FakeCache(), "https://edge.pse.com.ph"
+    )
+    served = await repo.detail("ff4c7557aee1d72b64d70b69f0a3140b")
+    assert served.value.attachments[0].resource_uri == "pse-edge://attachment/1949133"
 
 
 async def test_a_many_file_disclosure_is_capped_and_honestly_labelled():

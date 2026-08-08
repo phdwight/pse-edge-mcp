@@ -500,6 +500,7 @@
             <li>search(…) <span class="ret">→ <b>DisclosureSearchResult</b></span></li>
             <li>fulltext(…) <span class="ret">→ <b>KeywordSearchResult</b></span></li>
             <li>detail(edge_no, max_files) <span class="ret">→ <b>DisclosureDetail</b></span></li>
+            <li>attachment(file_id) <span class="ret">→ <b>bytes</b> · MCP resource</span></li>
           </ul>
         </div>
         <div class="foot">consumes <span class="proto">DisclosureSource</span> · searches <b>daily-refresh</b>; <b>detail</b> is <b>immutable</b>: cached forever, <code>valid_until: null</code></div>

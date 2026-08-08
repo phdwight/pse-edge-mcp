@@ -8,6 +8,16 @@ Format: [Keep a Changelog](https://keepachangelog.com/) · Versioning: [SemVer](
 ## [0.16.0] - 2026-08-08
 
 ### Added
+- **Disclosure attachments are now readable through MCP.** Most hosts cannot fetch
+  arbitrary URLs, so `download_url` alone left attachments visible but unreadable. Each
+  attachment in `get_disclosure` now carries `resource_uri`
+  (`pse-edge://attachment/<file_id>`), served by a new MCP resource that returns the
+  file's raw bytes. Decided scope: bytes only, no text extraction (hosts read PDFs
+  natively; extraction would add a PDF library against the lean-image invariant).
+  Fetched from PSE Edge once ever (immutable cache, single-flighted, politeness
+  throttle), capped at 10 MB (`ATTACHMENT_TOO_LARGE` beyond — the download_url still
+  works), and `file_id` is validated to digits so the resource cannot proxy arbitrary
+  upstream queries.
 - **Tool annotations (MCP `ToolAnnotations`) on every tool.** The thirteen data tools
   declare `readOnlyHint: true` (+ `openWorldHint: false` — one fixed upstream, not open
   web), so hosts that auto-approve read-only tools stop prompting per call; `send_email`

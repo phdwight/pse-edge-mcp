@@ -251,16 +251,17 @@ Scalability decisions made **now**, paid for **later**:
 Original open items (name, taxonomy, JSON-vs-HTML, license, quotas) were all settled
 during delivery. What remains open now:
 
-- **Attachment content as MCP resources (undecided, raised 2026-08-08).** `get_disclosure`
-  returns attachment download URLs as plain strings — deliberate v1 scope — but major MCP
-  hosts cannot fetch arbitrary URLs, so a model can see that a PDF exists and cannot read
-  it. The spec-native fix (2025-06-18): return `resource_link` content and serve bytes via
-  `resources/read`, with the server fetching the attachment once into the immutable cache
-  (consistent with dedup discipline) and optionally extracting PDF text. Costs to weigh
-  before building: bandwidth and storage per attachment, PDF→text extraction (a new
-  dependency, against the lean-image invariant), per-user quota interaction, and PSE Edge
-  politeness (attachments can be MBs where pages are KBs — likely wants its own throttle
-  and a size cap). Decide scope first: raw bytes, extracted text, or both.
+- **Attachment content as MCP resources (decided + shipped 2026-08-08, 0.16.0).** Scope
+  chosen: **raw bytes, no text extraction** — hosts read PDFs natively, and extraction
+  would add a PDF library against the lean-image invariant (revisit only if a host that
+  cannot ingest PDFs matters). Served via `resources/read` at
+  `pse-edge://attachment/{file_id}`, advertised per attachment as `resource_uri` in
+  `get_disclosure`. Guardrails: immutable cache (one PSE Edge fetch per file, ever;
+  single-flighted; same politeness throttle), a 10 MB cap enforced in the client before
+  anything is stored (`ATTACHMENT_TOO_LARGE`; `download_url` remains the escape hatch),
+  and `file_id` validated to digits so the resource cannot become a proxy for arbitrary
+  upstream queries. Bytes are cached base64 in the JSON cache — accepted overhead
+  (~33%) for keeping one `Storage` protocol.
 - **MCP Registry listing + PyPI publish.** `uvx pse-edge-mcp` is advertised in the README
   but nothing publishes to PyPI; the official registry (server.json manifest) is how 2026
   clients discover servers by name. Needs a publish job in release.yml plus a manifest.

@@ -73,6 +73,20 @@ def resolve_window(
     return start, end
 
 
+def require_file_id(raw: str) -> str:
+    """Validate an attachment file_id (numeric, from the disclosure viewer).
+
+    The id is interpolated into an upstream request, so anything but digits is refused —
+    the resource endpoint must not become a proxy for arbitrary PSE Edge queries.
+    """
+    key = raw.strip()
+    if not key.isdigit() or len(key) > 12:
+        raise InvalidArgumentError(
+            f"file_id must be the numeric id from get_disclosure's attachments, got '{raw}'"
+        )
+    return key
+
+
 def require_edge_no(raw: str) -> str:
     """Normalise and validate a 32-hex disclosure key."""
     key = raw.strip().lower()
