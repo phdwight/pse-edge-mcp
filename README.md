@@ -242,6 +242,11 @@ DATABASE_URL=postgresql+asyncpg://user:pass@host/db uv run alembic upgrade head
 | `get_server_version()` | The deployed version of this MCP server itself (matches `/health`) |
 | `send_email(subject, body)` | Email **yourself** a note (auth-enabled deployments only) |
 
+Beyond tools, the server exposes the attachment **resource** above, two **prompts**
+(`market_recap`, `company_briefing(symbol)` — the symbol argument autocompletes from PSE
+Edge's own lookup), and MCP **tool annotations** so hosts can auto-approve the read-only
+tools. It is described for the MCP Registry in [`server.json`](server.json).
+
 `send_email` is the only tool that acts rather than reads. **It has no recipient argument**:
 the message always goes to the account that authenticated the session, so it cannot be used
 as a relay and there is nothing for prompt injection to redirect — which matters because

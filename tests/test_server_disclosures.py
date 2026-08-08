@@ -307,6 +307,25 @@ async def test_tool_surface_is_stable():
     assert all(
         t.annotations is not None and t.annotations.read_only_hint is True for t in tools
     ), "a data tool without readOnlyHint costs the user a permission prompt per call"
+    # And every tool carries a human-friendly title for host catalogs.
+    assert all(t.title for t in tools)
+
+
+async def test_prompts_are_listed_and_render_with_the_symbol():
+    """The two canned prompts hosts surface in their pickers: one argumentless recap,
+    one per-company briefing whose symbol is normalised into the rendered text."""
+    mcp = build_test_server()
+
+    prompts = {p.name for p in await mcp.list_prompts()}
+    assert {"market_recap", "company_briefing"} <= prompts
+
+    rendered = await mcp.get_prompt("company_briefing", {"symbol": "sm"})
+    text = rendered.messages[0].content.text  # type: ignore[union-attr]
+    assert " SM." in text and "validate_symbol" in text
+    assert "meta.note" in text, "the prompt must carry the not-realtime relay rule"
+
+    recap = await mcp.get_prompt("market_recap", None)
+    assert "get_indices" in recap.messages[0].content.text  # type: ignore[union-attr]
 
 
 async def test_get_server_version_reports_the_installed_release():

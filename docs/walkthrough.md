@@ -281,6 +281,11 @@ files visible but unreadable. One PSE Edge fetch per file ever (immutable cache)
 cap, `file_id` validated to digits. Each `get_disclosure` attachment advertises its
 `resource_uri`.
 
+Two **prompts** (0.16.0) appear in host prompt-pickers — `market_recap` and
+`company_briefing(symbol)` — both baking in the meta-relay rules, and the briefing's
+`symbol` argument **autocompletes** from PSE Edge's own autocomplete via
+`completion/complete`.
+
 | Tool | Arguments | Repository |
 |---|---|---|
 | `search_companies` | `query` | `CompanyRepository.search` |

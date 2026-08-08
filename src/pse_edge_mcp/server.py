@@ -31,7 +31,14 @@ except ImportError:  # older SDKs shipped the same API as FastMCP
     from mcp.server.fastmcp import Context  # type: ignore[no-redef,import-not-found]
     from mcp.server.fastmcp import FastMCP as MCPServer  # type: ignore[no-redef]
 
-from mcp.types import ToolAnnotations
+from mcp.types import (
+    Completion,
+    CompletionArgument,
+    CompletionContext,
+    PromptReference,
+    ResourceTemplateReference,
+    ToolAnnotations,
+)
 from pydantic import BaseModel
 
 from .archive import Archive, NullArchive
@@ -162,6 +169,21 @@ def _caller(ctx: Any) -> tuple[str | None, str | None]:
     )
 
 
+async def _symbol_completions(companies: CompanyRepository, partial: str) -> Completion:
+    """Autocomplete the company_briefing prompt's symbol argument from PSE Edge's own
+    autocomplete (cached daily-refresh like any lookup). Errors yield an empty list —
+    a completion popup is the wrong place to surface EDGE_UNAVAILABLE."""
+    text = partial.strip()
+    if not text:
+        return Completion(values=[])
+    try:
+        served = await companies.search(text)
+    except PseEdgeMcpError:
+        return Completion(values=[])
+    symbols = [hit.symbol for hit in served.value][:50]
+    return Completion(values=symbols, total=len(symbols), has_more=False)
+
+
 def build_storage(settings: Settings) -> tuple[Storage | None, Archive, AsyncEngine | None]:
     """Pick the storage backend from configuration.
 
@@ -233,9 +255,15 @@ def build_server(
         _version = importlib.metadata.version("pse-edge-mcp")
     except importlib.metadata.PackageNotFoundError:  # running from a source tree
         _version = "0.0.0+unknown"
-    mcp = MCPServer("pse-edge", version=_version, instructions=INSTRUCTIONS)
+    mcp = MCPServer(
+        "pse-edge",
+        title="PSE Edge — Philippine Stock Exchange",
+        website_url="https://github.com/phdwight/pse-edge-mcp",
+        version=_version,
+        instructions=INSTRUCTIONS,
+    )
 
-    @mcp.tool(annotations=READ_ONLY)
+    @mcp.tool(annotations=READ_ONLY, title="Search companies")
     async def search_companies(query: str) -> dict[str, Any]:
         """Search PSE-listed companies by name or ticker symbol.
 
@@ -244,7 +272,7 @@ def build_server(
         """
         return await reply(lambda: companies.search(require_text(query, "query")))
 
-    @mcp.tool(annotations=READ_ONLY)
+    @mcp.tool(annotations=READ_ONLY, title="Validate ticker symbol")
     async def validate_symbol(symbol: str) -> dict[str, Any]:
         """Check whether a ticker symbol is a real PSE-listed company. Cheap.
 
@@ -274,7 +302,7 @@ def build_server(
 
         return await reply(run)
 
-    @mcp.tool(annotations=READ_ONLY)
+    @mcp.tool(annotations=READ_ONLY, title="Stock quote (EOD)")
     async def get_stock_quote(symbol: str) -> dict[str, Any]:
         """Get the latest end-of-day quote for a PSE stock symbol (e.g. SM, AREIT, BDO).
 
@@ -287,7 +315,7 @@ def build_server(
         """
         return await reply(lambda: quotes.quote(require_text(symbol, "symbol")))
 
-    @mcp.tool(annotations=READ_ONLY)
+    @mcp.tool(annotations=READ_ONLY, title="Price history (OHLC)")
     async def get_price_history(
         symbol: str, start_date: str | None = None, end_date: str | None = None
     ) -> dict[str, Any]:
@@ -305,7 +333,7 @@ def build_server(
 
         return await reply(run)
 
-    @mcp.tool(annotations=READ_ONLY)
+    @mcp.tool(annotations=READ_ONLY, title="Search disclosures")
     async def search_disclosures(
         symbol: str | None = None,
         start_date: str | None = None,
@@ -350,7 +378,7 @@ def build_server(
 
         return await reply(run)
 
-    @mcp.tool(annotations=READ_ONLY)
+    @mcp.tool(annotations=READ_ONLY, title="Full-text disclosure search")
     async def search_disclosure_fulltext(
         keyword: str,
         start_date: str | None = None,
@@ -392,7 +420,7 @@ def build_server(
 
         return await reply(run)
 
-    @mcp.tool(annotations=READ_ONLY)
+    @mcp.tool(annotations=READ_ONLY, title="Disclosure detail")
     async def get_disclosure(edge_no: str, max_files: int = 20) -> dict[str, Any]:
         """Get one disclosure's details and attachment links by its edge_no.
 
@@ -422,7 +450,7 @@ def build_server(
 
     # ---- company info & market ---------------------------------------------
 
-    @mcp.tool(annotations=READ_ONLY)
+    @mcp.tool(annotations=READ_ONLY, title="Company profile")
     async def get_company_profile(symbol: str) -> dict[str, Any]:
         """Get a PSE-listed company's profile: sector, incorporation, auditor, contacts.
 
@@ -433,7 +461,7 @@ def build_server(
         """
         return await reply(lambda: company_info.profile(require_text(symbol, "symbol")))
 
-    @mcp.tool(annotations=READ_ONLY)
+    @mcp.tool(annotations=READ_ONLY, title="Financial highlights")
     async def get_financial_highlights(symbol: str) -> dict[str, Any]:
         """Get the financial highlights PSE Edge publishes for a company.
 
@@ -452,7 +480,7 @@ def build_server(
         """
         return await reply(lambda: company_info.financials(require_text(symbol, "symbol")))
 
-    @mcp.tool(annotations=READ_ONLY)
+    @mcp.tool(annotations=READ_ONLY, title="Dividends & rights")
     async def get_dividends_and_rights(symbol: str) -> dict[str, Any]:
         """Get a company's declared dividends and stock rights offers.
 
@@ -466,7 +494,7 @@ def build_server(
             lambda: company_info.dividends_and_rights(require_text(symbol, "symbol"))
         )
 
-    @mcp.tool(annotations=READ_ONLY)
+    @mcp.tool(annotations=READ_ONLY, title="Market indices")
     async def get_indices() -> dict[str, Any]:
         """Get PSEi and the PSE sector index levels with their daily change.
 
@@ -479,7 +507,7 @@ def build_server(
         """
         return await reply(market.indices)
 
-    @mcp.tool(annotations=READ_ONLY)
+    @mcp.tool(annotations=READ_ONLY, title="Market summary")
     async def get_market_summary() -> dict[str, Any]:
         """Get a market-wide snapshot: index levels plus PSE Edge's homepage feeds.
 
@@ -511,7 +539,61 @@ def build_server(
         raw, _content_type = served.value
         return raw
 
-    @mcp.tool(annotations=READ_ONLY)
+    # ---- prompts: canned workflows hosts surface in their prompt pickers ----
+
+    @mcp.prompt(
+        name="market_recap",
+        title="Market recap",
+        description="Concise recap of the latest PSE session: index levels with "
+        "direction, sector highlights, and notable disclosures.",
+    )
+    async def market_recap() -> str:
+        return (
+            "Using the pse-edge tools, write a concise recap of the latest Philippine "
+            "Stock Exchange session. Call get_indices for index levels and direction, "
+            "and get_market_summary for the disclosure feeds. Lead with the PSEi level "
+            "and change, then sector movers, then three to five notable disclosures "
+            "(name each company and its edge_no). State meta.as_of so the reader knows "
+            "which session this describes, and relay any meta.note verbatim."
+        )
+
+    @mcp.prompt(
+        name="company_briefing",
+        title="Company briefing",
+        description="One-page briefing on a PSE-listed company: quote, profile, "
+        "financials, dividends, and recent disclosures. Argument: ticker symbol.",
+    )
+    async def company_briefing(symbol: str) -> str:
+        wanted = symbol.strip().upper()
+        return (
+            f"Prepare a one-page briefing on the PSE-listed company {wanted}. Use "
+            f"validate_symbol first; if invalid, offer close matches via "
+            f"search_companies and stop. Otherwise call get_stock_quote, "
+            f"get_company_profile, get_financial_highlights, get_dividends_and_rights, "
+            f"and search_disclosures (symbol only, most recent page). Structure: who "
+            f"they are, latest end-of-day price with 52-week context, financial "
+            f"trajectory, dividend record, then notable recent disclosures. Quote "
+            f"meta.as_of for the price, and relay any meta.note verbatim — never "
+            f"present a flagged value as realtime."
+        )
+
+    # The SDK's completion() carries no type annotations yet; the handler itself is
+    # fully typed, so the ignore is scoped to the decorator call alone.
+    @mcp.completion()  # type: ignore[no-untyped-call, untyped-decorator]
+    async def _complete(
+        ref: PromptReference | ResourceTemplateReference,
+        argument: CompletionArgument,
+        context: CompletionContext | None,
+    ) -> Completion | None:
+        if (
+            isinstance(ref, PromptReference)
+            and ref.name == "company_briefing"
+            and argument.name == "symbol"
+        ):
+            return await _symbol_completions(companies, argument.value)
+        return None
+
+    @mcp.tool(annotations=READ_ONLY, title="Server version")
     async def get_server_version() -> dict[str, Any]:
         """Get the deployed version of this MCP server (pse-edge-mcp).
 
@@ -529,7 +611,7 @@ def build_server(
     # a model will keep choosing it and keep apologising.
     if settings.auth_required and notifier is not None:
 
-        @mcp.tool(annotations=ACTION)
+        @mcp.tool(annotations=ACTION, title="Email yourself a note")
         async def send_email(subject: str, body: str, ctx: Context) -> dict[str, Any]:
             """Email the signed-in user — and only them — a note you have composed.
 

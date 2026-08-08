@@ -8,6 +8,20 @@ Format: [Keep a Changelog](https://keepachangelog.com/) · Versioning: [SemVer](
 ## [0.16.0] - 2026-08-08
 
 ### Added
+- **Prompts and argument completion.** Two canned prompts appear in host prompt-pickers:
+  `market_recap` (argumentless session recap) and `company_briefing(symbol)` (one-page
+  company brief) — both bake in the meta-relay rules, so a rendered prompt reminds the
+  model to state `as_of` and never present a flagged value as realtime. The briefing's
+  `symbol` argument autocompletes from PSE Edge's own autocomplete (cached like any
+  lookup; errors yield an empty list, never a popup-breaking failure).
+- **Human-friendly titles on every tool** plus server identity metadata (title, website)
+  for host catalogs.
+- **PyPI publish + MCP Registry manifest.** `release.yml` gains a `pypi` job that builds
+  and publishes on every version bump via Trusted Publishing (OIDC, no stored secret —
+  needs a one-time publisher setup on pypi.org, documented in docs/deploy.md), making
+  `uvx pse-edge-mcp` real. `server.json` (the MCP Registry manifest) describes the
+  package and the hosted remote; a test pins its version to `pyproject.toml` so the
+  manifest can never point at a package version that does not exist.
 - **Disclosure attachments are now readable through MCP.** Most hosts cannot fetch
   arbitrary URLs, so `download_url` alone left attachments visible but unreadable. Each
   attachment in `get_disclosure` now carries `resource_uri`

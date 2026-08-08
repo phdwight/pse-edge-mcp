@@ -199,6 +199,25 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+  pypi:
+    # Publishes the sdist+wheel on every version bump via PyPI Trusted Publishing
+    # (OIDC — no long-lived secret in this repo). One-time setup on pypi.org: add a
+    # GitHub publisher for project pse-edge-mcp (owner phdwight, repo pse-edge-mcp,
+    # workflow release.yml, environment pypi). Until that exists this job fails at
+    # the upload step — visibly, without blocking the image release (nothing needs it).
+    needs: [test, version]
+    if: needs.version.outputs.bumped == 'true'
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      contents: read
+      id-token: write # OIDC token for Trusted Publishing
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v9.0.0
+      - run: uv build
+      - uses: pypa/gh-action-pypi-publish@release/v1
+
   merge:
     needs: [build, version]
     runs-on: ubuntu-latest

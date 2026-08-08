@@ -149,6 +149,21 @@ async def test_company_lookups_are_cached_under_a_normalised_key():
     assert cache.keys == ["autocomplete:SM", "autocomplete:SM"]
 
 
+async def test_symbol_completion_offers_matching_tickers_and_swallows_blanks():
+    """The company_briefing prompt's symbol argument autocompletes from PSE Edge's own
+    autocomplete; a blank partial returns nothing rather than querying upstream."""
+    from pse_edge_mcp.server import _symbol_completions
+
+    companies = CompanyRepository(FakeCompanySource(SM_AUTOCOMPLETE), FakeCache())
+
+    completion = await _symbol_completions(companies, "sm")
+    assert completion.values == ["SMC", "SM", "SMPH"]
+    assert completion.total == 3 and completion.has_more is False
+
+    blank = await _symbol_completions(companies, "   ")
+    assert blank.values == []
+
+
 async def test_try_resolve_answers_unknown_symbols_instead_of_raising():
     """validate_symbol needs "no" as an answer where every other tool needs a failure."""
     repo = CompanyRepository(FakeCompanySource(SM_AUTOCOMPLETE), FakeCache())
