@@ -416,6 +416,10 @@
           <p>Validates arguments, delegates to a repository, shapes the reply. Error mapping happens
           once in <code>reply()</code>; action tools go through <code>act()</code> instead (no freshness <code>meta</code>).</p>
           <p class="no">Never: domain logic, cache keys, parsing, endpoint choices.</p>
+          <p>Beyond tools: the <code>pse-edge://attachment/{file_id}</code> <b>resource</b>
+          (attachment bytes, immutable, 10 MB cap), two <b>prompts</b> with symbol
+          <b>completion</b>, and <code>ToolAnnotations</code> on every tool — reads carry
+          <code>readOnlyHint</code>; <code>send_email</code> never does.</p>
           <div class="toolgrid" aria-label="Tool surface">
             <span class="tool">search_companies</span><span class="tool">validate_symbol</span>
             <span class="tool">get_stock_quote</span><span class="tool">get_price_history</span>
