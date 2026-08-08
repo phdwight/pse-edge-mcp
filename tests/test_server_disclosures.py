@@ -1,4 +1,4 @@
-"""Tool-layer tests for the Phase 2 disclosure tools.
+"""Tool-layer tests for the disclosure tools.
 
 These exercise the routing decisions the tools make — which Edge endpoint serves a
 given query, what gets cached under which key, and how errors surface — with the

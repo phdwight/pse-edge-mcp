@@ -1,4 +1,4 @@
-"""Phase 3: company profile, financial highlights, dividends/rights, indices, summary.
+"""Company profile, financial highlights, dividends/rights, indices, summary.
 
 Parsers run against fixtures recorded live 2026-07-30; repositories run against fakes.
 No test touches PSE Edge.

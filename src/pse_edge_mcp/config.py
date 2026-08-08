@@ -34,7 +34,7 @@ class Settings:
     db_pool_size: int = 5
     db_max_overflow: int = 10
 
-    # Auth (Phase 5 stage 1). Opt-in until the self-service OAuth flow ships; requires
+    # Auth. Opt-in (flipping it default-on at deploy is still pending); requires
     # DATABASE_URL, since accounts live in Postgres. stdio mode never authenticates.
     auth_required: bool = False
     # The token-validation cache TTL is the revocation-latency budget and nothing else:
@@ -43,7 +43,7 @@ class Settings:
     quota_per_minute: int = 60
     quota_per_day: int = 2000
 
-    # Phase 5 stage 2: the OAuth/passkey surface. public_url is what browsers and OAuth
+    # The OAuth/passkey surface. public_url is what browsers and OAuth
     # clients see — it drives the WebAuthn rp_id/origin, email links, and the metadata
     # issuer, so it must be the externally reachable base URL in production.
     public_url: str = "http://localhost:8000"

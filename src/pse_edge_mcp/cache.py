@@ -1,6 +1,6 @@
 """Storage protocol + in-memory implementation.
 
-The Postgres implementation (Phase 4) implements the same protocol; entries carry
+The Postgres implementation (`storage_postgres.py`) implements the same protocol; entries carry
 their fetch timestamp so the market-boundary policy is evaluated at read time —
 expiry is a property of the calendar, not of the store.
 """

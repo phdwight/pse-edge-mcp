@@ -114,7 +114,7 @@ def normalise_url(database_url: str) -> str:
     return database_url
 
 
-# --- Phase 5 stage 1: accounts and bearer tokens -----------------------------
+# --- accounts and bearer tokens -----------------------------------------------
 #
 # `users` holds the account plus its quota overrides; `auth_tokens` holds SHA-256 hashes
 # of opaque bearer tokens — the plaintext is shown once at issue time and never stored,
@@ -149,7 +149,7 @@ auth_tokens = Table(
     Column("family_id", String, index=True),  # refresh-rotation family, for reuse detection
 )
 
-# --- Phase 5 stage 2: passkeys and OAuth -------------------------------------
+# --- passkeys and OAuth --------------------------------------------------------
 #
 # The browser-facing flows need server-side state that any replica can pick up
 # (stateless HTTP means no process affinity): short-lived web sessions, pending email
@@ -233,7 +233,7 @@ oauth_flows = Table(
     Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
 )
 
-# --- Phase 5 privacy: usage audit log (plan §6a) ------------------------------
+# --- privacy: usage audit log (plan §6a) ---------------------------------------
 #
 # Aggregated per (user, day, hour), NOT one row per request. Two reasons: at 1k req/s a
 # per-request row is ~86M rows/day of pure churn, and the compliance question a log has to

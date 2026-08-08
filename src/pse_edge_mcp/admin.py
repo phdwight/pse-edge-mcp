@@ -1,7 +1,7 @@
 """`pse-edge-admin` — account and token operations (plan §6 "admin operations").
 
-Until the self-service OAuth flow ships (Phase 5 stage 2), this CLI is how accounts come
-to exist: create a user, issue them a bearer token, hand the token over out-of-band. The
+Self-service signup exists (passkeys + OAuth), but this CLI remains the operator path:
+create a user directly, issue them a bearer token, hand the token over out-of-band. The
 plaintext token is printed exactly once — only its SHA-256 is stored, so it cannot be
 recovered later, only revoked and reissued.
 

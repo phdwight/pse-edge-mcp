@@ -8,10 +8,11 @@ in `repositories.py`, so this file changes only when the *tool surface* changes.
 Error mapping is applied once, by `reply()`, rather than repeated in every tool — it
 was six copies of the same try/except before.
 
-Tools (Phase 1): search_companies, get_stock_quote, get_price_history.
-Tools (Phase 2): search_disclosures, search_disclosure_fulltext, get_disclosure.
-Tools (Phase 3): get_company_profile, get_financial_highlights, get_dividends_and_rights,
-                 get_indices, get_market_summary.
+Tools — companies & prices: search_companies, validate_symbol, get_stock_quote,
+        get_price_history.
+Tools — disclosures: search_disclosures, search_disclosure_fulltext, get_disclosure.
+Tools — company info & market: get_company_profile, get_financial_highlights,
+        get_dividends_and_rights, get_indices, get_market_summary.
 Utility: get_server_version (the deployed release, no meta).
 """
 
@@ -405,7 +406,7 @@ def build_server(
 
         return await reply(run)
 
-    # ---- Phase 3: company info & market ------------------------------------
+    # ---- company info & market ---------------------------------------------
 
     @mcp.tool()
     async def get_company_profile(symbol: str) -> dict[str, Any]:

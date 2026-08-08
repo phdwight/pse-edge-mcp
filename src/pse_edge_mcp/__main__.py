@@ -8,7 +8,7 @@ subscriptions, no sampling, no elicitation, no progress. Every request is self-c
 That default is what makes horizontal scaling ordinary. Any replica can serve any request,
 so plain round-robin works with no sticky routing, no per-session memory and no event store;
 and without SSE, idle clients hold no connection, so N users stop meaning N concurrent
-connections. All shared state already lives in Postgres (Phase 4), so this is the last
+connections. All shared state already lives in Postgres, so this is the last
 piece of "any replica, any request".
 
 `--stateful` and `--sse` restore session mode for anyone who needs resumability or

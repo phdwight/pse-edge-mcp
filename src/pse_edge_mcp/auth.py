@@ -1,4 +1,4 @@
-"""Bearer-token authentication and per-user quotas (Phase 5 stage 1).
+"""Bearer-token authentication and per-user quotas.
 
 Design (plan §6, rationale revised 2026-07-30):
 

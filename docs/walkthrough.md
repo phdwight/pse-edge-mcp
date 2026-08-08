@@ -8,7 +8,7 @@ understand it, debug it, or extend it.
 
 | Document | Contents |
 |---|---|
-| `docs/plan.md` | Every design decision: scope, caching policy, auth design, phases, risks |
+| `docs/plan.md` | Every design decision: scope, caching policy, auth design, delivery history, risks |
 | `docs/endpoints.md` | The verified PSE Edge endpoint map — request dialects, parameter names, response shapes |
 | `docs/deploy.md` | Running it in production |
 | `CLAUDE.md` | The short form of the invariants, kept next to the code |

@@ -260,7 +260,7 @@ Edge's own units labels are inconsistent between its annual and quarterly sectio
 period reports its `currency_units` for you to check. Index changes are signed here even
 though Edge prints them unsigned (it shows direction only as a colour and an arrow).
 
-All six delivery phases are complete; see `docs/plan.md` for what each decided.
+Everything planned has shipped; see `docs/plan.md` for what each decision settled.
 
 ## Container image
 

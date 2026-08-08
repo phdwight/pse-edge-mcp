@@ -7,7 +7,7 @@ domain. That placement is the point:
 - **Single responsibility:** a cache key now lives beside the fetch it identifies.
   When these were built inline in the tool functions, a typo produced a silent cache
   miss or, worse, a collision between two different queries.
-- **Open/closed:** a new data domain (Phase 3's financial reports, dividends, indices)
+- **Open/closed:** a new data domain (financial reports, dividends, indices)
   is a new repository. Adding one does not touch existing repositories or the tools.
 - **Dependency inversion:** repositories depend on the narrow protocols in `sources.py`
   and on `FrozenCache`, never on `PseEdgeClient` or `FreezeService` concretely, so they
