@@ -12,7 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v9
+      - uses: astral-sh/setup-uv@v9.0.0
         with:
           python-version: "3.14"
       - run: uv sync --all-extras
@@ -37,7 +37,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v9
+      - uses: astral-sh/setup-uv@v9.0.0
         with:
           python-version: "3.14"
       # Each runner is native for its own arch, so a plain build needs no buildx or QEMU.
@@ -54,7 +54,7 @@ jobs:
           uv sync --all-extras --quiet
           uv run python scripts/check_image.py pse-edge-mcp:ci --extra postgres --extra auth | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Scan image for secrets & vulns
-        uses: aquasecurity/trivy-action@0.36.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: pse-edge-mcp:ci
           scanners: secret
