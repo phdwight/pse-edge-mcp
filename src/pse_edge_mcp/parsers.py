@@ -154,7 +154,7 @@ def parse_stock_data_page(html: str) -> dict[str, Any]:
     }
 
 
-# --- disclosures (Phase 2) ---------------------------------------------------
+# --- disclosures ---------------------------------------------------------------
 #
 # announcements/search.ax and companyDisclosures/search.ax return the same kind of
 # HTML table but with DIFFERENT column orders (announcements leads with Company Name;
@@ -390,7 +390,7 @@ def parse_disclosure_viewer(html: str) -> dict[str, Any]:
     }
 
 
-# --- Phase 3: company info & market -----------------------------------------
+# --- company info & market ---------------------------------------------------
 
 _PROFILE_FIELDS = {
     "sector": "sector",
@@ -661,7 +661,7 @@ def parse_indices(html: str) -> list[dict[str, Any]]:
     """Parse the Index Summary block off the PSE Edge homepage.
 
     There is no AJAX feed for indices — the homepage renders them server-side, so this
-    parses the page itself (verified Phase 0).
+    parses the page itself (verified at endpoint capture).
     """
     tree = HTMLParser(html)
     container = tree.css_first("div.index")

@@ -70,7 +70,7 @@ def disclosure_viewer_html() -> str:
     return _fixture("disclosure_viewer.html")
 
 
-# Phase 3 fixtures — recorded live 2026-07-30 (see docs/endpoints.md §4-5).
+# Company-info & market fixtures — recorded live 2026-07-30 (see docs/endpoints.md §4-5).
 @pytest.fixture
 def company_profile_html() -> str:
     """companyInformation/form.do for SM (cmpy_id 599)."""

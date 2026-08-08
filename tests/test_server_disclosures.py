@@ -1,4 +1,4 @@
-"""Tool-layer tests for the Phase 2 disclosure tools.
+"""Tool-layer tests for the disclosure tools.
 
 These exercise the routing decisions the tools make — which Edge endpoint serves a
 given query, what gets cached under which key, and how errors surface — with the
@@ -196,6 +196,20 @@ async def test_get_disclosure_rejects_malformed_edge_no_without_calling_edge():
     route = respx.get(f"{BASE}/openDiscViewer.do")
     result = await call(build_test_server(), "get_disclosure", edge_no="not-a-real-id")
     assert result["error"] == "INVALID_ARGUMENT"
+    assert not route.called
+
+
+@respx.mock
+async def test_get_disclosure_rejects_an_out_of_range_max_files_without_calling_edge():
+    route = respx.get(f"{BASE}/openDiscViewer.do")
+    edge_no = "ff4c7557aee1d72b64d70b69f0a3140b"
+    mcp = build_test_server()
+
+    zero = await call(mcp, "get_disclosure", edge_no=edge_no, max_files=0)
+    huge = await call(mcp, "get_disclosure", edge_no=edge_no, max_files=1000)
+
+    assert zero["error"] == "INVALID_ARGUMENT"
+    assert huge["error"] == "INVALID_ARGUMENT"
     assert not route.called
 
 

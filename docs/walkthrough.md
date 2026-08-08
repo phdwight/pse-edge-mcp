@@ -8,12 +8,12 @@ understand it, debug it, or extend it.
 
 | Document | Contents |
 |---|---|
-| `docs/plan.md` | Every design decision: scope, caching policy, auth design, phases, risks |
+| `docs/plan.md` | Every design decision: scope, caching policy, auth design, delivery history, risks |
 | `docs/endpoints.md` | The verified PSE Edge endpoint map — request dialects, parameter names, response shapes |
 | `docs/deploy.md` | Running it in production |
 | `CLAUDE.md` | The short form of the invariants, kept next to the code |
 
-Version described: **0.14.0**. 36 modules, ~8,700 lines of source, ~6,600 lines of tests.
+Version described: **0.15.0**. 36 modules, ~8,700 lines of source, ~6,700 lines of tests.
 
 ---
 
@@ -280,7 +280,7 @@ meta is a data-freshness contract, and a version has no `as_of`. The fourteenth,
 | `get_price_history` | `symbol`, `start_date?`, `end_date?` | `QuoteRepository.history` |
 | `search_disclosures` | `symbol?`, `start_date?`, `end_date?`, `template?`, `page` | `DisclosureRepository.search` |
 | `search_disclosure_fulltext` | `keyword`, `start_date?`, `end_date?`, `symbol?`, `subject_title?`, `page` | `DisclosureRepository.fulltext` |
-| `get_disclosure` | `edge_no` | `DisclosureRepository.detail` |
+| `get_disclosure` | `edge_no`, `max_files?` | `DisclosureRepository.detail` |
 | `get_company_profile` | `symbol` | `CompanyInfoRepository.profile` |
 | `get_financial_highlights` | `symbol` | `CompanyInfoRepository.financials` |
 | `get_dividends_and_rights` | `symbol` | `CompanyInfoRepository.dividends_and_rights` |

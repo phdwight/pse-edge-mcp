@@ -250,11 +250,38 @@ async def test_detail_is_cached_immutably_and_returns_absolute_urls(disclosure_v
 
     assert cache.policies == ["immutable"]
     assert served.meta.data_policy == "immutable" or served.meta.valid_until is None
+    assert served.value.attachments_total == len(served.value.attachments)
+    assert served.value.attachments_truncated is False
     assert (
         served.value.attachments[0].download_url
         == "https://edge.pse.com.ph/downloadFile.do?file_id=1949133"
     )
     assert served.value.body_html_url == "https://edge.pse.com.ph/downloadHtml.do?file_id=1949127"
+
+
+async def test_a_many_file_disclosure_is_capped_and_honestly_labelled():
+    """The max_files cap is a response-size guard: at most that many attachments come
+    back, and attachments_total / attachments_truncated say what was withheld — a
+    shortened list must never read as the whole set."""
+    from pse_edge_mcp.models import DisclosureAttachment, DisclosureDetail
+    from pse_edge_mcp.repositories import _cap_attachments
+
+    full = DisclosureDetail(
+        edge_no="ab" * 16,
+        attachments=[
+            DisclosureAttachment(file_id=str(i), filename=f"annex-{i}.pdf", download_url=f"u{i}")
+            for i in range(30)
+        ],
+        attachments_total=30,
+    )
+
+    capped = _cap_attachments(full, 20)
+    assert len(capped.attachments) == 20
+    assert capped.attachments_total == 30 and capped.attachments_truncated is True
+    assert [a.file_id for a in capped.attachments] == [str(i) for i in range(20)], "order kept"
+
+    untouched = _cap_attachments(full, 30)
+    assert untouched is full, "a list within the cap passes through unchanged"
 
 
 async def test_trailing_slash_on_base_url_does_not_double_up(disclosure_viewer_html):

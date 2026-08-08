@@ -132,7 +132,7 @@ class PseEdgeClient:
             raise EndpointChangedError("DisclosureCht.ax: missing chartData key")
         return data
 
-    # ---- disclosures (Phase 2) ---------------------------------------------
+    # ---- disclosures ---------------------------------------------------------
 
     async def search_announcements(
         self,
@@ -233,7 +233,7 @@ class PseEdgeClient:
         resp = await self._get("/openDiscViewer.do", edge_no=edge_no)
         return resp.text
 
-    # ---- company info & market (Phase 3) -----------------------------------
+    # ---- company info & market -----------------------------------------------
 
     async def fetch_company_information(self, company_id: str) -> str:
         """GET /companyInformation/form.do — profile page (th/td label rows)."""
@@ -261,8 +261,9 @@ class PseEdgeClient:
     async def fetch_homepage(self) -> str:
         """GET / — indices and the market-wide feeds are server-rendered here.
 
-        No AJAX feed exists for indices (verified Phase 0), so the homepage itself is the
-        source for both get_indices and get_market_summary. One fetch serves both.
+        No AJAX feed exists for indices (verified at endpoint capture), so the homepage
+        itself is the source for both get_indices and get_market_summary. One fetch
+        serves both.
         """
         resp = await self._get("/")
         return resp.text

@@ -5,7 +5,7 @@ Unofficial — Edge has no public API; we speak to the portal's own internal end
 
 **Read these first — they are the project's memory:**
 
-- `docs/plan.md` — every design decision: scope, architecture, caching policy, auth design, phases, risks. Treat decided items as settled unless the user says otherwise.
+- `docs/plan.md` — every design decision: scope, architecture, caching policy, auth design, delivery history, risks. Treat decided items as settled unless the user says otherwise.
 - `docs/endpoints.md` — the verified endpoint map (live-captured 2026-07-30): request dialects, param names, response shapes, pagination. Trust this over guesses; PSE Edge param names sometimes differ from its own HTML form fields.
 
 ## Non-negotiable invariants
@@ -44,7 +44,7 @@ Unofficial — Edge has no public API; we speak to the portal's own internal end
    closure from `uv export` (so any stray extra or leaked dev dep fails), and reports size
    as information only. Don't reintroduce a megabyte threshold — it passes while shipping
    junk and fails on a genuinely needed large dependency. Add a runtime dependency only
-   when code imports it (this is why the `postgres` extra waits for Phase 4).
+   when code imports it (this is why `postgres` is an extra instead of a hard dependency).
 
 ## Branching & release (decided)
 
@@ -102,7 +102,7 @@ Unofficial — Edge has no public API; we speak to the portal's own internal end
   `market_calendar.py`, `config.py`.
 
   Rules that follow from it:
-  - A new data domain (Phase 3: financials, dividends, indices) = a new repository +
+  - A new data domain (e.g. financials, dividends, indices) = a new repository +
     thin tools. Don't add fetch/parse orchestration to `server.py`.
   - Tools never build cache keys or call `parse_*` — that's the repository's job.
   - Repositories take the narrow protocols from `sources.py`, so they're testable with
@@ -115,16 +115,16 @@ Unofficial — Edge has no public API; we speak to the portal's own internal end
     `-> dict[str, Any]`. `tests/test_server_disclosures.py::test_tool_surface_is_stable`
     guards this.
 
-## Roadmap (details in docs/plan.md §7)
+## Subsystem rules (everything planned has shipped; delivery history in docs/plan.md §7)
 
-- **Phase 2 (done):** disclosures — `search_disclosures` (`/announcements/search.ax`
+- **Disclosures:** `search_disclosures` (`/announcements/search.ax`
   market-wide + date range, `/companyDisclosures/search.ax` for full per-company history),
   `search_disclosure_fulltext` (`/keyword/search.ax`, attachment text; index only covers
   ~2023-2025, so it is a separate tool with a coverage warning, not the primary search),
   `get_disclosure(edge_no)` via `openDiscViewer.do`. Disclosure tables are parsed by
   `<thead>` label, never by column position — the two endpoints order columns differently.
-  See docs/endpoints.md §"v3 corrections" for the three v2 claims this phase disproved.
-- **Phase 3 (done):** `get_company_profile`, `get_financial_highlights`,
+  See docs/endpoints.md §"v3 corrections" for the three v2 claims this work disproved.
+- **Company info & market:** `get_company_profile`, `get_financial_highlights`,
   `get_dividends_and_rights`, `get_indices`, `get_market_summary`. Findings that shape the
   code (details in docs/endpoints.md v4): financial-report **units labels contradict each
   other** between the annual and quarterly sections, so values are passed through verbatim
@@ -134,7 +134,7 @@ Unofficial — Edge has no public API; we speak to the portal's own internal end
   `DividendsOrRights` in the query string and `cmpy_id` in the body; homepage feeds are keyed
   by Edge's own group labels rather than invented buckets. `directors_and_management_list.do`
   is mapped but has no tool yet.
-- **Phase 4 (done):** Postgres storage backend (`storage_postgres.py`, same `Storage`
+- **Postgres storage (optional):** backend in `storage_postgres.py` (same `Storage`
   protocol) + Alembic (`migrations/`) + opportunistic archive (`archive.py` protocol,
   `archive_postgres.py` impl). `DATABASE_URL` unset = in-memory cache + `NullArchive`;
   set = shared cache + archive. Key rules: **Postgres stays optional** — `db.py`,
@@ -145,7 +145,7 @@ Unofficial — Edge has no public API; we speak to the portal's own internal end
   at runtime — compose has a one-shot `migrate` service and `check_schema()` fails loudly
   at startup if migrations were skipped. **A failed archive write never fails a read**
   (caught broadly: a dead database raises OSError, not just SQLAlchemyError).
-- **Phase 5 (staged; stage 1 done):** bearer auth + quotas + admin CLI, opt-in via
+- **Bearer auth + quotas:** admin-CLI provisioning, opt-in via
   `PSE_AUTH_REQUIRED=1` (needs `DATABASE_URL`; stdio never authenticates). Key rules:
   tokens are opaque, `pse_`-prefixed, stored as SHA-256 only; the validation-cache TTL
   **is the revocation-latency budget and nothing else** (default 60 s); refusals are never
@@ -153,7 +153,7 @@ Unofficial — Edge has no public API; we speak to the portal's own internal end
   — plan §6 records why the old "DB hit per request anyway" JWT argument is retired);
   `auth.py` must stay SQLAlchemy-free (lean-install path), Postgres bits live in
   `auth_store.py` and import lazily. Provisioning: `pse-edge-admin`.
-- **Phase 5 stage 2 (done):** OAuth 2.1 + passkeys. `oauth.py` (DCR/authorize/PKCE/refresh),
+- **OAuth 2.1 + passkeys:** `oauth.py` (DCR/authorize/PKCE/refresh),
   `passkeys.py` (WebAuthn + web sessions), `auth_app.py` (pure-ASGI route table wrapping the
   guarded MCP app), `email.py` (ZeptoMail | console). **Authlib was dropped** — it has no
   server-side ASGI integration (Flask/Django only); see plan §6. Rules that must not regress:
@@ -163,7 +163,7 @@ Unofficial — Edge has no public API; we speak to the portal's own internal end
   Layering is `AuthApp(AuthMiddleware(mcp_app))` so `/oauth/*` and signup are reachable
   without a token. Journey test: `tests/test_auth_journey.py` (soft-webauthn, real
   signatures, real Postgres).
-- **Phase 5 privacy (done):** `/privacy` page, `/account` subject-access view, self-service
+- **Privacy:** `/privacy` page, `/account` subject-access view, self-service
   `POST /account/delete`, usage log with 90-day retention, disposable-email blocklist, CSRF
   on both state-changing forms. Rules: the usage log **aggregates per user-hour, never per
   request** (minimal collection *and* no hot-path write); erasure is a **hard delete in one
@@ -171,7 +171,7 @@ Unofficial — Edge has no public API; we speak to the portal's own internal end
   `metadata.tables` — a new user-keyed table fails that test rather than silently retaining
   data; the admin `delete-user` reuses the user's own erasure path so the two cannot drift.
   `usage.py` must stay SQLAlchemy-free; the sink lives in `usage_postgres.py`.
-- **Phase 5 stage 3 (done, 0.8.0):** `client_credentials` for headless agents. **The gate is
+- **`client_credentials` for headless agents (0.8.0):** **The gate is
   the whole feature:** `/oauth/register` is open, so authorization for this grant must never
   be derivable from anything a registrant supplies (a self-declared `grant_types`, a
   requested auth method, a presented secret). It is `oauth_clients.client_type == 'machine'`,
@@ -225,8 +225,8 @@ Unofficial — Edge has no public API; we speak to the portal's own internal end
   `stale` instead of raising. Discarding real data to return an error is strictly worse, and
   `stale` already means "real data, past its boundary", so clients need no change.
   `EDGE_UNAVAILABLE` now means unreachable **and nothing cached**.
-- **Phase 5 remaining:** flip auth to default-on at deploy.
-- **Phase 6 (done):** `compose.prod.yaml` + `Caddyfile` + `docs/deploy.md`. Rules:
+- **Still outstanding:** flip auth to default-on at deploy.
+- **Production deploy:** `compose.prod.yaml` + `Caddyfile` + `docs/deploy.md`. Rules:
   the HTTP stack is composed **once** in `asgi.py` — `__main__` and production must not
   build it separately; `asgi.app` resolves lazily (PEP 562) so importing the module has no
   side effects; `/health` is liveness (never touches the DB — a DB-dependent liveness probe

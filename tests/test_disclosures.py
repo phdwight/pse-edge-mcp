@@ -1,4 +1,4 @@
-"""Phase 2 disclosure tests: parsers against recorded fixtures + client wire dialects.
+"""Disclosure tests: parsers against recorded fixtures + client wire dialects.
 
 All HTTP is mocked (respx). Fixtures were captured live on 2026-07-30 during closed
 hours; see docs/endpoints.md §3.

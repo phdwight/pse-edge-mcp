@@ -183,6 +183,16 @@ class DisclosureDetail(BaseModel):
         description="Related documents in this disclosure's viewer (amendments, series)",
     )
     attachments: list[DisclosureAttachment] = Field(default_factory=list)
+    attachments_total: int = Field(
+        default=0,
+        description="How many attachments the disclosure carries upstream — may exceed "
+        "len(attachments) when the max_files cap truncated the list",
+    )
+    attachments_truncated: bool = Field(
+        default=False,
+        description="True when attachments was cut to max_files. The disclosure is cached "
+        "immutably, so repeating the call with a higher max_files fetches nothing upstream.",
+    )
     body_html_url: str | None = Field(
         default=None,
         description="Absolute URL of the rendered disclosure body HTML. Not fetched or "
@@ -190,7 +200,7 @@ class DisclosureDetail(BaseModel):
     )
 
 
-# --- Phase 3: company info & market -----------------------------------------
+# --- company info & market ---------------------------------------------------
 
 
 class CompanyProfile(BaseModel):
@@ -332,7 +342,8 @@ class MarketSummary(BaseModel):
     `Today`, `This Week` — rather than folded into invented buckets, so a caller sees the
     site's own taxonomy and a new or renamed group appears instead of being dropped.
 
-    Note: Edge publishes no gainers/losers/most-active data anywhere (verified Phase 0),
+    Note: Edge publishes no gainers/losers/most-active data anywhere (verified at
+    endpoint capture, 2026-07-30),
     so those are absent by necessity rather than oversight — the PSE main site, not Edge,
     would be the source.
     """

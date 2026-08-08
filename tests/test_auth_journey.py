@@ -1,4 +1,4 @@
-"""The whole Phase 5 journey, driven through the real ASGI stack.
+"""The whole auth journey, driven through the real ASGI stack.
 
 signup → verification email → passkey enrollment → dynamic client registration →
 authorize → passkey login → consent → PKCE exchange → authenticated MCP call → refresh.
@@ -219,7 +219,7 @@ def pkce_pair() -> tuple[str, str]:
 
 
 async def test_signup_enroll_authorize_and_call_mcp_with_the_issued_token(stack):
-    """The whole point of Phase 5, end to end: a stranger becomes an authenticated MCP
+    """The whole point of the auth stack, end to end: a stranger becomes an authenticated MCP
     caller without a password ever existing."""
     async with serving(stack) as (http, email):
         # 1. Unauthenticated MCP access is refused, and the refusal says where to go.

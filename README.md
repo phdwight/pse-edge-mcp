@@ -233,7 +233,7 @@ DATABASE_URL=postgresql+asyncpg://user:pass@host/db uv run alembic upgrade head
 | `get_price_history(symbol, start_date?, end_date?)` | Daily OHLC series from Edge's chart endpoint |
 | `search_disclosures(symbol?, start_date?, end_date?, template?, page?)` | Disclosure metadata, market-wide or per company; 50/page with exact totals |
 | `search_disclosure_fulltext(keyword, ...)` | Search the text *inside* disclosure attachments, with snippets |
-| `get_disclosure(edge_no)` | One disclosure's details plus attachment and body-HTML links |
+| `get_disclosure(edge_no, max_files?)` | One disclosure's details plus attachment and body-HTML links; attachments capped at `max_files` (default 20) with an honest truncation flag |
 | `get_company_profile(symbol)` | Sector, incorporation, auditor, transfer agent, contacts |
 | `get_financial_highlights(symbol)` | Annual + quarterly balance sheet and income statement |
 | `get_dividends_and_rights(symbol)` | Declared dividends and stock rights, linked to their disclosures |
@@ -260,7 +260,7 @@ Edge's own units labels are inconsistent between its annual and quarterly sectio
 period reports its `currency_units` for you to check. Index changes are signed here even
 though Edge prints them unsigned (it shows direction only as a colour and an arrow).
 
-All six delivery phases are complete; see `docs/plan.md` for what each decided.
+Everything planned has shipped; see `docs/plan.md` for what each decision settled.
 
 ## Container image
 
