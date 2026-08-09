@@ -13,7 +13,7 @@ understand it, debug it, or extend it.
 | `docs/deploy.md` | Running it in production |
 | `CLAUDE.md` | The short form of the invariants, kept next to the code |
 
-Version described: **0.17.0**. 36 modules, ~8,900 lines of source, ~6,800 lines of tests.
+Version described: **0.18.0**. 36 modules, ~8,900 lines of source, ~6,800 lines of tests.
 
 ---
 
@@ -700,7 +700,7 @@ without the rotation benefit that justifies one.
                                    min(60 s, remaining token life)
                                                                               │
                                                                               ▼
-   END ─────── expiry (30 min / 1 h / 30 d)   or   revocation (§9.8)
+   END ─────── expiry (15 min / 1 h / 30 d)   or   revocation (§9.8)
 ```
 
 **Refusals are never cached.** Only successful validations are, and the cached entry can

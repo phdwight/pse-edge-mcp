@@ -308,7 +308,7 @@
       seam in the server, plus the configuration matrix and one request traced end to end.</p>
     </div>
     <div class="versionblock">
-      <div class="v"><span>v</span>0.17.0</div>
+      <div class="v"><span>v</span>0.18.0</div>
       <p>From <code>pyproject.toml</code>.<br>
       Live at pse.sakayandgo.com,<br>published to <code>ghcr.io/phdwight/pse-edge-mcp</code>.</p>
     </div>
@@ -630,7 +630,7 @@
           <tr><td class="var">PSE_TOKEN_CACHE_TTL</td><td class="def">60 s</td><td>The revocation-latency budget — nothing else</td></tr>
           <tr><td class="var">PSE_QUOTA_PER_MIN / PSE_QUOTA_PER_DAY</td><td class="def">60 / 2000</td><td>Per-user quotas, counted in-process (per worker)</td></tr>
           <tr><td class="var">PSE_PUBLIC_URL</td><td class="def">http://localhost:8000</td><td>Real external https URL — drives WebAuthn rp_id, email links, OAuth issuer; wrong value breaks passkeys</td></tr>
-          <tr><td class="var">PSE_ACCESS_TTL_MIN / PSE_REFRESH_TTL_DAYS</td><td class="def">30 / 30</td><td>Token lifetimes; refresh reuse revokes the family. Unrefreshed families expire after PSE_REFRESH_UNUSED_TTL_DAYS (2)</td></tr>
+          <tr><td class="var">PSE_ACCESS_TTL_MIN / PSE_REFRESH_TTL_HOURS</td><td class="def">15 / 24</td><td>Token lifetimes; the refresh token is single-use and reuse revokes the family. PSE_REFRESH_UNUSED_TTL_HOURS (24) caps a family that never rotated. A client idle past the refresh TTL re-runs the browser flow</td></tr>
           <tr><td class="var">PSE_ADMIN_EMAILS</td><td class="def">empty</td><td>Operator allowlist: the /account machine-client panel; never derived from user input</td></tr>
 
           <tr class="grp"><td colspan="3">Email &amp; operations</td></tr>
