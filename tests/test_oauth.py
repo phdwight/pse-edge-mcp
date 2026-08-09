@@ -10,6 +10,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import secrets
+from datetime import UTC
 from urllib.parse import parse_qs, urlparse
 
 import pytest
@@ -190,7 +191,7 @@ async def test_full_code_exchange_returns_a_usable_token_pair(pg_engine):
     assert tokens["token_type"] == "Bearer"
     assert tokens["access_token"].startswith("pse_")
     assert tokens["refresh_token"].startswith("pse_")
-    assert tokens["expires_in"] == 1800
+    assert tokens["expires_in"] == 900
 
 
 async def test_code_is_single_use(pg_engine):
@@ -275,6 +276,57 @@ async def test_refresh_rotates_and_returns_a_new_pair(pg_engine):
 
     assert second["refresh_token"] != first["refresh_token"], "tokens must rotate"
     assert second["access_token"] != first["access_token"]
+
+
+async def test_an_unrefreshed_family_expires_early_and_rotation_earns_the_full_ttl(pg_engine):
+    """Clients that re-run OAuth per conversation abandon session families. A family
+    that has never refreshed holds only the short unused-TTL, so an abandoned sign-in
+    falls off the account page quickly; the first rotation proves a client is really
+    holding the token and the successor earns the full lifetime."""
+    from datetime import datetime, timedelta
+
+    from sqlalchemy import select as sa_select
+
+    from pse_edge_mcp.db import auth_tokens
+    from pse_edge_mcp.oauth import hash_token
+
+    service = OAuthService(pg_engine, refresh_ttl_hours=24, refresh_unused_ttl_hours=2)
+    client_id, code, verifier = await complete_authorize(pg_engine, service)
+    first = await service.exchange(
+        {
+            "grant_type": "authorization_code",
+            "code": code,
+            "code_verifier": verifier,
+            "client_id": client_id,
+            "redirect_uri": REDIRECT,
+        }
+    )
+
+    async def refresh_expiry(token: str) -> datetime:
+        async with pg_engine.connect() as conn:
+            row = (
+                await conn.execute(
+                    sa_select(auth_tokens.c.expires_at).where(
+                        auth_tokens.c.token_hash == hash_token(token),
+                        auth_tokens.c.kind == "refresh",
+                    )
+                )
+            ).one()
+        return row.expires_at
+
+    now = datetime.now(UTC)
+    initial = await refresh_expiry(first["refresh_token"])
+    assert initial < now + timedelta(hours=3), "a never-refreshed family must expire early"
+
+    second = await service.exchange(
+        {
+            "grant_type": "refresh_token",
+            "refresh_token": first["refresh_token"],
+            "client_id": client_id,
+        }
+    )
+    rotated = await refresh_expiry(second["refresh_token"])
+    assert rotated > now + timedelta(hours=23), "rotation earns the full refresh lifetime"
 
 
 async def test_refresh_revokes_the_previous_access_token(pg_engine):

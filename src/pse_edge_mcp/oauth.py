@@ -164,14 +164,21 @@ class OAuthService:
         self,
         engine: AsyncEngine,
         *,
-        access_ttl_min: int = 30,
-        refresh_ttl_days: int = 30,
+        access_ttl_min: int = 15,
+        refresh_ttl_hours: int = 24,
+        refresh_unused_ttl_hours: int = 24,
         resource: str | None = None,
         now: Callable[[], datetime] | None = None,
     ) -> None:
         self._engine = engine
         self._access_ttl = timedelta(minutes=access_ttl_min)
-        self._refresh_ttl = timedelta(days=refresh_ttl_days)
+        self._refresh_ttl = timedelta(hours=refresh_ttl_hours)
+        # A brand-new session family gets a short refresh window until it proves a
+        # client is actually holding it (first rotation). Clients that re-run the whole
+        # OAuth flow per conversation abandon families constantly; without this, every
+        # abandoned sign-in sits on the account page as "active" for the full lifetime.
+        # Clamped, so it is a floor-and-ceiling pair, never an inversion.
+        self._refresh_unused_ttl = min(timedelta(hours=refresh_unused_ttl_hours), self._refresh_ttl)
         # The canonical RFC 8707 resource this server issues tokens for, e.g.
         # "https://host/mcp". None disables the check (tests, and any deployment that
         # does not care to pin an audience).
@@ -724,6 +731,11 @@ class OAuthService:
     ) -> dict[str, Any]:
         access, refresh = generate_token(), generate_token()
         family = family_id or uuid.uuid4().hex
+        # family_id is passed only by the refresh grant: its presence proves the client
+        # came back and rotated, so the successor earns the full refresh lifetime. An
+        # initial mint (code exchange) gets the short unused-family window instead — an
+        # abandoned sign-in falls off the active list in days, not weeks.
+        refresh_ttl = self._refresh_ttl if family_id else self._refresh_unused_ttl
         now = self._now()
         async with self._engine.begin() as conn:
             await self._purge_expired(conn, now)
@@ -742,7 +754,7 @@ class OAuthService:
                             "token_hash": hash_token(refresh),
                             "user_id": user_id,
                             "kind": "refresh",
-                            "expires_at": now + self._refresh_ttl,
+                            "expires_at": now + refresh_ttl,
                             "client_id": client_id,
                             "family_id": family,
                         },

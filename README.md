@@ -58,8 +58,8 @@ Nothing here is manual except the two browser steps in bold.
    `/login` and use the passkey they already have. No password exists anywhere in the system.
 6. **The user approves the client** on a consent screen naming it.
 7. The browser returns to the client with a single-use code; the client exchanges it at
-   `/oauth/token` with its PKCE verifier and receives an access token (30 min) and a refresh
-   token (30 days).
+   `/oauth/token` with its PKCE verifier and receives an access token (15 min) and a
+   single-use refresh token (24 h).
 8. The client calls `/mcp` with `Authorization: Bearer …` and refreshes silently from then
    on. The user is not asked again.
 

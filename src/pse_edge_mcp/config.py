@@ -47,8 +47,17 @@ class Settings:
     # clients see — it drives the WebAuthn rp_id/origin, email links, and the metadata
     # issuer, so it must be the externally reachable base URL in production.
     public_url: str = "http://localhost:8000"
-    access_token_ttl_min: int = 30
-    refresh_token_ttl_days: int = 30
+    # Short lifetimes are the point (0.18.0): the access token is a bearer credential that
+    # travels on every request, and the refresh token is the only thing standing between a
+    # stolen browser profile and a month of access. 15 min / 24 h bounds both. The cost is
+    # that a client idle for more than a day re-runs the browser flow.
+    access_token_ttl_min: int = 15
+    refresh_token_ttl_hours: int = 24
+    # A session family that has never refreshed holds this shorter lifetime — clients that
+    # re-run OAuth per conversation abandon families, and an abandoned sign-in should not
+    # sit "active" on the account page. At the 24 h ceiling this no longer bites (it is
+    # clamped to the full lifetime); it exists for deployments that raise the ceiling.
+    refresh_unused_ttl_hours: int = 24
     # ZeptoMail (decided 2026-07-30). Key arrives via env only; unset -> emails are
     # logged to the console, which is the dev/test mode.
     zeptomail_api_key: str | None = None
@@ -111,8 +120,11 @@ class Settings:
             access_token_ttl_min=int(
                 os.environ.get("PSE_ACCESS_TTL_MIN", cls.access_token_ttl_min)
             ),
-            refresh_token_ttl_days=int(
-                os.environ.get("PSE_REFRESH_TTL_DAYS", cls.refresh_token_ttl_days)
+            refresh_token_ttl_hours=int(
+                os.environ.get("PSE_REFRESH_TTL_HOURS", cls.refresh_token_ttl_hours)
+            ),
+            refresh_unused_ttl_hours=int(
+                os.environ.get("PSE_REFRESH_UNUSED_TTL_HOURS", cls.refresh_unused_ttl_hours)
             ),
             zeptomail_api_key=os.environ.get("ZEPTOMAIL_API_KEY") or None,
             email_from=os.environ.get("PSE_EMAIL_FROM", cls.email_from),

@@ -5,6 +5,37 @@ Format: [Keep a Changelog](https://keepachangelog.com/) · Versioning: [SemVer](
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-08-09
+
+### Changed
+- **Token lifetimes cut: access 15 min (was 30), refresh 24 h (was 30 days).** Both are
+  bearer credentials — the access token travels on every request and the refresh token is
+  the whole session — so the window a leaked one is worth stealing is now hours, not a
+  month. Refresh tokens remain **single-use**: every rotation mints a new pair and revokes
+  the old one, and presenting a spent token still kills the entire family.
+- **The refresh knobs are expressed in hours**: `PSE_REFRESH_TTL_HOURS` (24) and
+  `PSE_REFRESH_UNUSED_TTL_HOURS` (24) replace `PSE_REFRESH_TTL_DAYS` /
+  `PSE_REFRESH_UNUSED_TTL_DAYS`, which no longer had the resolution to express the new
+  default. The old names are ignored — unset them if your environment still carries them.
+  With the ceiling at 24 h the unused-family window (0.17.0) is clamped to the same value
+  and no longer bites; it stays for deployments that raise the ceiling.
+- **Operational consequence:** a client that goes more than 24 h without making a request
+  must re-run the browser authorization flow (sign-in → passkey → consent). Machine clients
+  are unaffected — `client_credentials` re-mints from the client secret with no refresh
+  token, and its 1 h access TTL is unchanged.
+
+## [0.17.0] - 2026-08-09
+
+### Added
+- **Abandoned sign-ins expire in days, not a month.** A refresh-token family that has
+  never refreshed now holds a short lifetime (`PSE_REFRESH_UNUSED_TTL_DAYS`, default 2)
+  instead of the full `PSE_REFRESH_TTL_DAYS` (30). The first rotation proves a client is
+  actually holding the session and earns the successor the full lifetime. Motivated by
+  observed client behavior: some MCP clients (ChatGPT's connector, notably) re-run the
+  whole OAuth flow per conversation and abandon the previous session — each one sat on
+  the account page as "active" for 30 days. No effect on well-behaved clients: refreshing
+  even once keeps a session alive exactly as before.
+
 ## [0.16.1] - 2026-08-08
 
 ### Fixed
