@@ -90,8 +90,6 @@ async def test_fetch_attachment_refuses_oversized_files(monkeypatch):
     from pse_edge_mcp.errors import AttachmentTooLargeError
 
     monkeypatch.setattr(PseEdgeClient, "MAX_ATTACHMENT_BYTES", 16)
-    respx.get(f"{BASE}/downloadFile.do").mock(
-        return_value=httpx.Response(200, content=b"x" * 17)
-    )
+    respx.get(f"{BASE}/downloadFile.do").mock(return_value=httpx.Response(200, content=b"x" * 17))
     with pytest.raises(AttachmentTooLargeError):
         await make_client().fetch_attachment("1")

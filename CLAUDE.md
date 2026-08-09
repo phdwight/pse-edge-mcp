@@ -171,7 +171,10 @@ Unofficial — Edge has no public API; we speak to the portal's own internal end
   server-side ASGI integration (Flask/Django only); see plan §6. Rules that must not regress:
   unknown client/redirect is fatal and never redirects (open-redirector); redirect URIs match
   exactly; PKCE mandatory + S256 only; codes single-use via one atomic UPDATE...RETURNING;
-  refresh reuse revokes the whole family; only `kind='access'` authenticates as a bearer.
+  refresh reuse revokes the whole family; only `kind='access'` authenticates as a bearer;
+  a family that has never refreshed expires after `PSE_REFRESH_UNUSED_TTL_DAYS` (default
+  2 — abandoned sign-ins from re-auth-happy clients must fall off `/account` in days),
+  and the first rotation earns the full `PSE_REFRESH_TTL_DAYS`.
   Layering is `AuthApp(AuthMiddleware(mcp_app))` so `/oauth/*` and signup are reachable
   without a token. Journey test: `tests/test_auth_journey.py` (soft-webauthn, real
   signatures, real Postgres).

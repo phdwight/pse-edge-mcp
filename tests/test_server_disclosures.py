@@ -304,9 +304,9 @@ async def test_tool_surface_is_stable():
     assert all(t.description for t in tools)
     assert "EOD-frozen" in dict((t.name, t.description) for t in tools)["get_stock_quote"]
     # Every data tool declares itself a pure read so hosts can auto-approve it.
-    assert all(
-        t.annotations is not None and t.annotations.read_only_hint is True for t in tools
-    ), "a data tool without readOnlyHint costs the user a permission prompt per call"
+    assert all(t.annotations is not None and t.annotations.read_only_hint is True for t in tools), (
+        "a data tool without readOnlyHint costs the user a permission prompt per call"
+    )
     # And every tool carries a human-friendly title for host catalogs.
     assert all(t.title for t in tools)
 

@@ -148,6 +148,7 @@ def create_app(settings: Settings | None = None) -> Any:
                 engine,
                 access_ttl_min=settings.access_token_ttl_min,
                 refresh_ttl_days=settings.refresh_token_ttl_days,
+                refresh_unused_ttl_days=settings.refresh_unused_ttl_days,
                 # The RFC 8707 audience machine clients may request. Same string the
                 # protected-resource metadata advertises, so a client that reads discovery
                 # and echoes `resource` back is always correct by construction.

@@ -5,6 +5,18 @@ Format: [Keep a Changelog](https://keepachangelog.com/) · Versioning: [SemVer](
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-08-09
+
+### Added
+- **Abandoned sign-ins expire in days, not a month.** A refresh-token family that has
+  never refreshed now holds a short lifetime (`PSE_REFRESH_UNUSED_TTL_DAYS`, default 2)
+  instead of the full `PSE_REFRESH_TTL_DAYS` (30). The first rotation proves a client is
+  actually holding the session and earns the successor the full lifetime. Motivated by
+  observed client behavior: some MCP clients (ChatGPT's connector, notably) re-run the
+  whole OAuth flow per conversation and abandon the previous session — each one sat on
+  the account page as "active" for 30 days. No effect on well-behaved clients: refreshing
+  even once keeps a session alive exactly as before.
+
 ## [0.16.1] - 2026-08-08
 
 ### Fixed

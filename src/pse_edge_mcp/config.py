@@ -49,6 +49,10 @@ class Settings:
     public_url: str = "http://localhost:8000"
     access_token_ttl_min: int = 30
     refresh_token_ttl_days: int = 30
+    # A session family that has never refreshed holds this shorter lifetime — clients
+    # that re-run OAuth per conversation abandon families, and an abandoned sign-in
+    # should fall off the account page in days, not sit "active" for a month.
+    refresh_unused_ttl_days: int = 2
     # ZeptoMail (decided 2026-07-30). Key arrives via env only; unset -> emails are
     # logged to the console, which is the dev/test mode.
     zeptomail_api_key: str | None = None
@@ -113,6 +117,9 @@ class Settings:
             ),
             refresh_token_ttl_days=int(
                 os.environ.get("PSE_REFRESH_TTL_DAYS", cls.refresh_token_ttl_days)
+            ),
+            refresh_unused_ttl_days=int(
+                os.environ.get("PSE_REFRESH_UNUSED_TTL_DAYS", cls.refresh_unused_ttl_days)
             ),
             zeptomail_api_key=os.environ.get("ZEPTOMAIL_API_KEY") or None,
             email_from=os.environ.get("PSE_EMAIL_FROM", cls.email_from),
