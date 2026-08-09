@@ -164,20 +164,21 @@ class OAuthService:
         self,
         engine: AsyncEngine,
         *,
-        access_ttl_min: int = 30,
-        refresh_ttl_days: int = 30,
-        refresh_unused_ttl_days: int = 2,
+        access_ttl_min: int = 15,
+        refresh_ttl_hours: int = 24,
+        refresh_unused_ttl_hours: int = 24,
         resource: str | None = None,
         now: Callable[[], datetime] | None = None,
     ) -> None:
         self._engine = engine
         self._access_ttl = timedelta(minutes=access_ttl_min)
-        self._refresh_ttl = timedelta(days=refresh_ttl_days)
+        self._refresh_ttl = timedelta(hours=refresh_ttl_hours)
         # A brand-new session family gets a short refresh window until it proves a
         # client is actually holding it (first rotation). Clients that re-run the whole
         # OAuth flow per conversation abandon families constantly; without this, every
-        # abandoned sign-in sits on the account page as "active" for the full 30 days.
-        self._refresh_unused_ttl = min(timedelta(days=refresh_unused_ttl_days), self._refresh_ttl)
+        # abandoned sign-in sits on the account page as "active" for the full lifetime.
+        # Clamped, so it is a floor-and-ceiling pair, never an inversion.
+        self._refresh_unused_ttl = min(timedelta(hours=refresh_unused_ttl_hours), self._refresh_ttl)
         # The canonical RFC 8707 resource this server issues tokens for, e.g.
         # "https://host/mcp". None disables the check (tests, and any deployment that
         # does not care to pin an audience).

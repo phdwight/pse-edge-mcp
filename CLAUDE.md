@@ -172,9 +172,14 @@ Unofficial — Edge has no public API; we speak to the portal's own internal end
   unknown client/redirect is fatal and never redirects (open-redirector); redirect URIs match
   exactly; PKCE mandatory + S256 only; codes single-use via one atomic UPDATE...RETURNING;
   refresh reuse revokes the whole family; only `kind='access'` authenticates as a bearer;
-  a family that has never refreshed expires after `PSE_REFRESH_UNUSED_TTL_DAYS` (default
-  2 — abandoned sign-ins from re-auth-happy clients must fall off `/account` in days),
-  and the first rotation earns the full `PSE_REFRESH_TTL_DAYS`.
+  a family that has never refreshed expires after `PSE_REFRESH_UNUSED_TTL_HOURS`
+  (abandoned sign-ins from re-auth-happy clients must fall off `/account` quickly), and the
+  first rotation earns the full `PSE_REFRESH_TTL_HOURS`.
+  **Lifetimes are deliberately short (0.18.0): access 15 min, refresh 24 h, and a refresh
+  token is single-use by rotation.** Access tokens are *not* single-use and must not become
+  so — every MCP request carries the bearer, so a one-shot access token would force a token
+  exchange per JSON-RPC call and break every client. Single-use lives where it is meaningful:
+  the authorization code and the refresh token.
   Layering is `AuthApp(AuthMiddleware(mcp_app))` so `/oauth/*` and signup are reachable
   without a token. Journey test: `tests/test_auth_journey.py` (soft-webauthn, real
   signatures, real Postgres).

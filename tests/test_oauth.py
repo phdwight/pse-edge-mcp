@@ -191,7 +191,7 @@ async def test_full_code_exchange_returns_a_usable_token_pair(pg_engine):
     assert tokens["token_type"] == "Bearer"
     assert tokens["access_token"].startswith("pse_")
     assert tokens["refresh_token"].startswith("pse_")
-    assert tokens["expires_in"] == 1800
+    assert tokens["expires_in"] == 900
 
 
 async def test_code_is_single_use(pg_engine):
@@ -281,7 +281,7 @@ async def test_refresh_rotates_and_returns_a_new_pair(pg_engine):
 async def test_an_unrefreshed_family_expires_early_and_rotation_earns_the_full_ttl(pg_engine):
     """Clients that re-run OAuth per conversation abandon session families. A family
     that has never refreshed holds only the short unused-TTL, so an abandoned sign-in
-    falls off the account page in days; the first rotation proves a client is really
+    falls off the account page quickly; the first rotation proves a client is really
     holding the token and the successor earns the full lifetime."""
     from datetime import datetime, timedelta
 
@@ -290,7 +290,7 @@ async def test_an_unrefreshed_family_expires_early_and_rotation_earns_the_full_t
     from pse_edge_mcp.db import auth_tokens
     from pse_edge_mcp.oauth import hash_token
 
-    service = OAuthService(pg_engine, refresh_ttl_days=30, refresh_unused_ttl_days=2)
+    service = OAuthService(pg_engine, refresh_ttl_hours=24, refresh_unused_ttl_hours=2)
     client_id, code, verifier = await complete_authorize(pg_engine, service)
     first = await service.exchange(
         {
@@ -316,7 +316,7 @@ async def test_an_unrefreshed_family_expires_early_and_rotation_earns_the_full_t
 
     now = datetime.now(UTC)
     initial = await refresh_expiry(first["refresh_token"])
-    assert initial < now + timedelta(days=3), "a never-refreshed family must expire in days"
+    assert initial < now + timedelta(hours=3), "a never-refreshed family must expire early"
 
     second = await service.exchange(
         {
@@ -326,7 +326,7 @@ async def test_an_unrefreshed_family_expires_early_and_rotation_earns_the_full_t
         }
     )
     rotated = await refresh_expiry(second["refresh_token"])
-    assert rotated > now + timedelta(days=29), "rotation earns the full refresh lifetime"
+    assert rotated > now + timedelta(hours=23), "rotation earns the full refresh lifetime"
 
 
 async def test_refresh_revokes_the_previous_access_token(pg_engine):

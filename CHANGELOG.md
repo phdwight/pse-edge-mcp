@@ -5,6 +5,25 @@ Format: [Keep a Changelog](https://keepachangelog.com/) · Versioning: [SemVer](
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-08-09
+
+### Changed
+- **Token lifetimes cut: access 15 min (was 30), refresh 24 h (was 30 days).** Both are
+  bearer credentials — the access token travels on every request and the refresh token is
+  the whole session — so the window a leaked one is worth stealing is now hours, not a
+  month. Refresh tokens remain **single-use**: every rotation mints a new pair and revokes
+  the old one, and presenting a spent token still kills the entire family.
+- **The refresh knobs are expressed in hours**: `PSE_REFRESH_TTL_HOURS` (24) and
+  `PSE_REFRESH_UNUSED_TTL_HOURS` (24) replace `PSE_REFRESH_TTL_DAYS` /
+  `PSE_REFRESH_UNUSED_TTL_DAYS`, which no longer had the resolution to express the new
+  default. The old names are ignored — unset them if your environment still carries them.
+  With the ceiling at 24 h the unused-family window (0.17.0) is clamped to the same value
+  and no longer bites; it stays for deployments that raise the ceiling.
+- **Operational consequence:** a client that goes more than 24 h without making a request
+  must re-run the browser authorization flow (sign-in → passkey → consent). Machine clients
+  are unaffected — `client_credentials` re-mints from the client secret with no refresh
+  token, and its 1 h access TTL is unchanged.
+
 ## [0.17.0] - 2026-08-09
 
 ### Added
