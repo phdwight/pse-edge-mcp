@@ -196,6 +196,23 @@ class PasskeyService:
             )
         return token
 
+    async def peek_verification(self, token: str) -> None:
+        """Check a verification token without spending it.
+
+        Mail clients and security gateways GET every link in an email before the user
+        clicks, so the GET handler must be able to validate the token read-only; only the
+        explicit POST from `/verify`'s confirm button consumes it.
+        """
+        stmt = select(email_verifications.c.token_hash).where(
+            email_verifications.c.token_hash == hash_token(token),
+            email_verifications.c.consumed_at.is_(None),
+            email_verifications.c.expires_at > self._now(),
+        )
+        async with self._engine.begin() as conn:
+            row = (await conn.execute(stmt)).first()
+        if row is None:
+            raise PasskeyError("this verification link is invalid, expired or already used")
+
     async def consume_verification(self, token: str) -> WebSession:
         """Verify an email link and hand back a session allowed to enroll a passkey."""
         now = self._now()

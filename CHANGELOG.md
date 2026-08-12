@@ -5,6 +5,18 @@ Format: [Keep a Changelog](https://keepachangelog.com/) · Versioning: [SemVer](
 
 ## [Unreleased]
 
+## [0.18.1] - 2026-08-12
+
+### Fixed
+- **Signup verification links survive email-scanner prefetches.** Mail clients and
+  security gateways (Outlook SafeLinks, Apple Mail previews, corporate scanners) GET
+  every link in an email before the user clicks; the old `GET /verify` consumed the
+  single-use token on that robot request, so the human's real click was told the link
+  was "already used or expired". `GET /verify` now only validates the token and renders
+  a confirm page; the button's `POST /verify` is what consumes it and starts the
+  enrollment session. Tokens stay strictly single-use, and prefetchers never receive a
+  session cookie.
+
 ## [0.18.0] - 2026-08-09
 
 ### Changed

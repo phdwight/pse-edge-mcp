@@ -139,8 +139,11 @@ async def enroll_passkey(http: httpx.AsyncClient, email: CapturingEmail, address
     assert "check your email" in signup.text.lower()
 
     link = email.last_link
-    verify = await http.get(urlparse(link).path, params=parse_qs(urlparse(link).query))
-    assert verify.status_code == 302, "a valid link starts an enrollment session"
+    token = parse_qs(urlparse(link).query)["token"][0]
+    preview = await http.get(urlparse(link).path, params={"token": token})
+    assert preview.status_code == 200, "the link renders a confirm page without consuming"
+    verify = await http.post("/verify", data={"token": token})
+    assert verify.status_code == 302, "confirming starts an enrollment session"
 
     options = (await http.post("/enroll/options", json={})).json()
     device = SoftWebauthnDevice()
@@ -375,12 +378,29 @@ async def test_a_replayed_verification_link_is_refused(stack):
     """Single-use: a link forwarded or found in a mailbox later must not enroll again."""
     async with serving(stack) as (http, email):
         await http.post("/signup", data={"email": "replay@example.com"})
-        link = urlparse(email.last_link)
-        first = await http.get(link.path, params=parse_qs(link.query))
+        token = parse_qs(urlparse(email.last_link).query)["token"][0]
+        first = await http.post("/verify", data={"token": token})
         assert first.status_code == 302
-        second = await http.get(link.path, params=parse_qs(link.query))
+        second = await http.post("/verify", data={"token": token})
         assert second.status_code == 400
         assert "already used" in second.text
+        stale_page = await http.get("/verify", params={"token": token})
+        assert stale_page.status_code == 400
+
+
+async def test_a_scanners_prefetch_does_not_spend_the_verification_link(stack):
+    """Mail clients and security gateways GET every link before the user clicks; those
+    prefetches must leave the token intact or the human's real click finds it spent."""
+    async with serving(stack) as (http, email):
+        await http.post("/signup", data={"email": "prefetch@example.com"})
+        link = urlparse(email.last_link)
+        token = parse_qs(link.query)["token"][0]
+        for _ in range(3):  # SafeLinks, Apple preview, corporate scanner
+            preview = await http.get(link.path, params={"token": token})
+            assert preview.status_code == 200
+            assert "set-cookie" not in preview.headers, "a robot must not get a session"
+        clicked = await http.post("/verify", data={"token": token})
+        assert clicked.status_code == 302, "the human's click still works after prefetches"
 
 
 async def test_signup_does_not_reveal_whether_an_address_is_registered(stack):
