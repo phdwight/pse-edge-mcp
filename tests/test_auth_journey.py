@@ -134,13 +134,16 @@ def client(app: Any) -> httpx.AsyncClient:
 
 async def enroll_passkey(http: httpx.AsyncClient, email: CapturingEmail, address: str):
     """signup → email link → passkey enrollment. Returns the soft authenticator."""
-    signup = await http.post("/signup", data={"email": address})
+    signup = await http.post("/signup", data={"email": address, "agree": "yes"})
     assert signup.status_code == 200
     assert "check your email" in signup.text.lower()
 
     link = email.last_link
-    verify = await http.get(urlparse(link).path, params=parse_qs(urlparse(link).query))
-    assert verify.status_code == 302, "a valid link starts an enrollment session"
+    token = parse_qs(urlparse(link).query)["token"][0]
+    preview = await http.get(urlparse(link).path, params={"token": token})
+    assert preview.status_code == 200, "the link renders a confirm page without consuming"
+    verify = await http.post("/verify", data={"token": token})
+    assert verify.status_code == 302, "confirming starts an enrollment session"
 
     options = (await http.post("/enroll/options", json={})).json()
     device = SoftWebauthnDevice()
@@ -374,13 +377,40 @@ async def test_refresh_tokens_cannot_be_used_as_bearer_tokens(stack):
 async def test_a_replayed_verification_link_is_refused(stack):
     """Single-use: a link forwarded or found in a mailbox later must not enroll again."""
     async with serving(stack) as (http, email):
-        await http.post("/signup", data={"email": "replay@example.com"})
-        link = urlparse(email.last_link)
-        first = await http.get(link.path, params=parse_qs(link.query))
+        await http.post("/signup", data={"email": "replay@example.com", "agree": "yes"})
+        token = parse_qs(urlparse(email.last_link).query)["token"][0]
+        first = await http.post("/verify", data={"token": token})
         assert first.status_code == 302
-        second = await http.get(link.path, params=parse_qs(link.query))
+        second = await http.post("/verify", data={"token": token})
         assert second.status_code == 400
         assert "already used" in second.text
+        stale_page = await http.get("/verify", params={"token": token})
+        assert stale_page.status_code == 400
+
+
+async def test_a_scanners_prefetch_does_not_spend_the_verification_link(stack):
+    """Mail clients and security gateways GET every link before the user clicks; those
+    prefetches must leave the token intact or the human's real click finds it spent."""
+    async with serving(stack) as (http, email):
+        await http.post("/signup", data={"email": "prefetch@example.com", "agree": "yes"})
+        link = urlparse(email.last_link)
+        token = parse_qs(link.query)["token"][0]
+        for _ in range(3):  # SafeLinks, Apple preview, corporate scanner
+            preview = await http.get(link.path, params={"token": token})
+            assert preview.status_code == 200
+            assert "set-cookie" not in preview.headers, "a robot must not get a session"
+        clicked = await http.post("/verify", data={"token": token})
+        assert clicked.status_code == 302, "the human's click still works after prefetches"
+
+
+async def test_signup_without_the_agreement_box_is_refused(stack):
+    """The checkbox is browser-required, but a bare POST must not sign up either:
+    consent is explicit or it is not consent."""
+    async with serving(stack) as (http, email):
+        response = await http.post("/signup", data={"email": "hasty@example.com"})
+        assert response.status_code == 400
+        assert "agree" in response.text
+        assert email.sent == [], "no verification email without agreement"
 
 
 async def test_signup_does_not_reveal_whether_an_address_is_registered(stack):
@@ -388,8 +418,8 @@ async def test_signup_does_not_reveal_whether_an_address_is_registered(stack):
     becomes an account-enumeration oracle."""
     async with serving(stack) as (http, email):
         await enroll_passkey(http, email, "known@example.com")
-        existing = await http.post("/signup", data={"email": "known@example.com"})
-        fresh = await http.post("/signup", data={"email": "stranger@example.com"})
+        existing = await http.post("/signup", data={"email": "known@example.com", "agree": "yes"})
+        fresh = await http.post("/signup", data={"email": "stranger@example.com", "agree": "yes"})
 
     assert existing.status_code == fresh.status_code == 200
     assert existing.text == fresh.text
@@ -502,8 +532,10 @@ async def test_privacy_page_is_public_and_states_the_commitments(stack):
 async def test_disposable_email_domains_are_refused_at_signup(stack):
     """A cheap abuse brake (plan §6). Also honest: the address is the recovery path."""
     async with serving(stack) as (http, email):
-        blocked = await http.post("/signup", data={"email": "burner@mailinator.com"})
-        allowed = await http.post("/signup", data={"email": "real@example.com"})
+        blocked = await http.post(
+            "/signup", data={"email": "burner@mailinator.com", "agree": "yes"}
+        )
+        allowed = await http.post("/signup", data={"email": "real@example.com", "agree": "yes"})
 
     assert blocked.status_code == 400
     assert "not accepted" in blocked.text
@@ -545,7 +577,7 @@ async def test_self_deletion_erases_the_account_through_the_endpoint(stack):
         assert after.status_code == 302
 
         # Signing up again with the same address must be possible — erasure was complete.
-        again = await http.post("/signup", data={"email": "goodbye@example.com"})
+        again = await http.post("/signup", data={"email": "goodbye@example.com", "agree": "yes"})
         assert again.status_code == 200
 
 
@@ -692,7 +724,9 @@ async def test_a_failing_mail_provider_is_503_not_a_stack_trace(stack):
 
     surface._email = BrokenEmail()  # type: ignore[assignment]
     async with serving(stack) as (http, _):
-        response = await http.post("/signup", data={"email": "mailer-down@example.com"})
+        response = await http.post(
+            "/signup", data={"email": "mailer-down@example.com", "agree": "yes"}
+        )
 
     assert response.status_code == 503, "retryable outage, not a bug and not a client error"
     assert "try again" in response.text.lower()
