@@ -87,19 +87,41 @@ services:
           memory: ${DB_MEMORY_LIMIT:-2g}
     logging: *logging
 
-  # Schema is applied by an explicit one-shot job, never by the server on boot: replicas
-  # must not race to mutate their own schema (plan §5). Same image *and same tag* as app —
-  # applying a schema with a different build than the one that reads it is the version skew
-  # that actually corrupts.
+  # Schema is applied by an explicit job, never by the server on boot: replicas must not
+  # race to mutate their own schema (plan §5). Same image *and same tag* as app — applying
+  # a schema with a different build than the one that reads it is the version skew that
+  # actually corrupts.
+  #
+  # The job runs once per start, then IDLES instead of exiting: Docker dashboards (NAS
+  # UIs, Portainer) colour a whole project red over any stopped container, so success is
+  # signalled by a marker-file healthcheck and dependents wait on service_healthy. An
+  # EXITED migrate container now always means the migration actually failed — read its log.
   migrate:
     image: ghcr.io/phdwight/pse-edge-mcp:${PSE_IMAGE_TAG:-latest}
-    entrypoint: ["alembic", "upgrade", "head"]
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        if alembic upgrade head; then
+          echo "migrate: schema is current; idling so the project badge stays green"
+          touch /tmp/ready
+          exec sleep infinity
+        else
+          echo "migrate: FATAL — alembic failed, the app will not start; see above" >&2
+          sleep 60
+          exit 1
+        fi
     environment:
       DATABASE_URL: postgresql+asyncpg://pse:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/pse_edge
     depends_on:
       db:
         condition: service_healthy
-    restart: "no"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "test", "-f", "/tmp/ready"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 300s
     logging: *logging
 
   app:
@@ -134,7 +156,7 @@ services:
       db:
         condition: service_healthy
       migrate:
-        condition: service_completed_successfully
+        condition: service_healthy
     read_only: true
     tmpfs:
       - /tmp
@@ -203,7 +225,7 @@ services:
       DATABASE_URL: postgresql+asyncpg://pse:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/pse_edge
     depends_on:
       migrate:
-        condition: service_completed_successfully
+        condition: service_healthy
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
@@ -229,7 +251,7 @@ services:
       PSE_LOG_JSON: "1"
     depends_on:
       migrate:
-        condition: service_completed_successfully
+        condition: service_healthy
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
