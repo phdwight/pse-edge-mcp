@@ -128,6 +128,9 @@ _PAGE_STYLE = """
    border-radius:.75rem;background:#fff;width:100%;max-width:24rem;margin:.4rem 0 1rem}
  input:focus{outline:2px solid #8b83f6;outline-offset:1px;border-color:#8b83f6}
  label{font-weight:600}
+ .agree{display:flex;gap:.55rem;align-items:flex-start;font-weight:400;font-size:.92rem;
+   color:#3a3950;margin:0 0 1rem}
+ .agree input{width:auto;max-width:none;margin:.25rem 0 0;accent-color:#5b54e8}
  .chip{display:inline-block;padding:.15rem .6rem;border-radius:1rem;font-size:.8rem;
    font-weight:600;background:#d9f2df;color:#1a7a3a;vertical-align:middle}
  .chip.warn{background:#faeed2;color:#946200}
@@ -587,11 +590,14 @@ class AuthApp:
             "No passwords.</p>"
             "<form method=post action='/signup' style='margin:0'>"
             "<label>Email<input name=email type=email required autofocus></label>"
+            # The agreement sits inside the form, directly above the button: consent is
+            # part of the signup action, not fine print discovered after the fact.
+            "<label class=agree><input type=checkbox name=agree value=yes required>"
+            "<span>I agree that this server stores my email address and aggregated usage "
+            "counts — see the <a href='/privacy'>privacy page</a>. I can delete my "
+            "account myself at any time.</span></label>"
             "<button type=submit>Send verification link</button></form>"
             "</div>"
-            "<p class=muted style='font-size:.9em'>We store your email address and "
-            "aggregated usage counts only — see the <a href='/privacy'>privacy page</a>. "
-            "You can delete your account yourself at any time.</p>"
             "</main>"
         )
 
@@ -600,6 +606,15 @@ class AuthApp:
     ) -> tuple[int, dict[str, str], bytes]:
         form = {k: v[0] for k, v in parse_qs(body.decode("utf-8")).items()}
         email = form.get("email", "")
+        if form.get("agree") != "yes":
+            # The checkbox is `required` in the browser; this is the backstop for a POST
+            # that skipped the form. Consent has to be explicit, not assumed from arrival.
+            return _html(
+                "<h1>Create an account</h1><div class='msg err'>please tick the agreement "
+                "box — signing up stores your email address, and that needs your explicit "
+                "OK</div>",
+                400,
+            )
         try:
             token = await self._passkeys.start_signup(email)
         except PasskeyError as exc:
