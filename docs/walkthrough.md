@@ -13,7 +13,7 @@ understand it, debug it, or extend it.
 | `docs/deploy.md` | Running it in production |
 | `CLAUDE.md` | The short form of the invariants, kept next to the code |
 
-Version described: **0.18.0**. 36 modules, ~8,900 lines of source, ~6,800 lines of tests.
+Version described: **0.19.0**. 36 modules, ~9,000 lines of source, ~6,900 lines of tests.
 
 ---
 
@@ -59,7 +59,7 @@ Three modes, same tool implementations underneath.
   (dev)                                                          Postgres
 
   HTTP          docker compose -f compose.nas.yaml up -d   on    Postgres
-  (production)  + compose.tunnel.yaml
+  (production)  (--profile tunnel for the public hostname)
 ```
 
 **stdio never authenticates.** It runs on the user's own machine as a subprocess of their
@@ -70,7 +70,7 @@ Local development:
 
 ```bash
 uv sync --all-extras          # Python 3.14, uv for everything
-uv run pytest                 # 323 tests, no network access
+uv run pytest                 # 334 tests, no network access
 uv run ruff check .           # line length 100
 uv run mypy src               # strict
 ```
@@ -248,20 +248,20 @@ mocking at all**.
 
 | Module | Lines | Responsibility |
 |---|---:|---|
-| `auth_app.py` | 1220 | Browser- and client-facing routes: OAuth, signup, login, the tabbed account settings UI, privacy |
+| `auth_app.py` | 1280 | Browser- and client-facing routes: OAuth, signup, login, the tabbed account settings UI, privacy |
+| `oauth.py` | 770 | OAuth 2.1 server: DCR, PKCE, code exchange, refresh rotation, client_credentials |
 | `parsers.py` | 752 | HTML/JSON → dicts. The most PSE-specific code in the repo |
-| `oauth.py` | 748 | OAuth 2.1 server: DCR, PKCE, code exchange, refresh rotation, client_credentials |
-| `repositories.py` | 526 | The domain layer — five repositories |
+| `server.py` | 646 | The 14 tool definitions (13 read-only + `send_email`) |
+| `repositories.py` | 623 | The domain layer — five repositories |
 | `admin.py` | 485 | `pse-edge-admin` CLI, including machine-client provisioning |
-| `passkeys.py` | 424 | WebAuthn ceremonies and browser sessions |
-| `server.py` | 491 | The 13 tool definitions |
-| `models.py` | 332 | 24 Pydantic models |
-| `client.py` | 268 | HTTP to PSE Edge; both request dialects |
+| `passkeys.py` | 441 | WebAuthn ceremonies and browser sessions |
+| `models.py` | 360 | 24 Pydantic models |
+| `canary.py` | 316 | Nightly schema check: one endpoint per family, validated against its model |
+| `client.py` | 284 | HTTP to PSE Edge; both request dialects |
 | `db.py` | 255 | SQLAlchemy tables, engine, schema check |
-| `asgi.py` | 240 | The single composition point, and the DNS-rebinding allowlist |
+| `asgi.py` | 254 | The single composition point, and the DNS-rebinding allowlist |
 | `auth.py` | 190 | `TokenService`, `QuotaTracker`. Must stay SQLAlchemy-free |
-| `notifications.py` | 143 | `send_email` policy: self-only recipient, caps, escaping |
-| `canary.py` | 320 | Nightly schema check: one endpoint per family, validated against its model |
+| `notifications.py` | 141 | `send_email` policy: self-only recipient, caps, escaping |
 
 ---
 
@@ -602,7 +602,11 @@ half forever, and hands back only the public half.
         │                                │──── store SHA-256 ──────────▶│  30 min
         │◀── emailed link ───────────────│                              │
         │                                │                              │
-        │   GET /enroll?token=…          │                              │
+        │   GET /verify?token=…          │  validate only, render a     │
+        │───────────────────────────────▶│  confirm page — mail         │
+        │◀── confirm page ───────────────│  scanners GET every link,    │
+        │                                │  and a robot must not burn   │
+        │   POST /verify (the button)    │  the single-use token        │
         │───────────────────────────────▶│  consume; open a session     │
         │                                │──── session id, 20 min ─────▶│
         │                                │  challenge = random bytes    │
@@ -1000,27 +1004,29 @@ ceiling is up to N× nominal. Scale workers for CPU, and scale limits with them.
 ## 15. Deployment topologies
 
 ```
-   A. VPS that owns ports 80/443          B. NAS behind Cloudflare Tunnel
-      compose.prod.yaml                      compose.nas.yaml [+ compose.tunnel.yaml]
+   One file: compose.nas.yaml, on any single Docker host (NAS, home server, VPS)
 
-      internet                               internet
-         │  :80 / :443                          │
+      Stage 1 (LAN only)                     Stage 2 (--profile tunnel)
+
+      LAN                                    internet
+         │  http://<nas-ip>:8200                │
          ▼                                      ▼  (Cloudflare edge, TLS ends here)
-      ┌────────┐                             ┌──────────────┐
-      │ Caddy  │ ACME certs                  │  Cloudflare  │
-      └───┬────┘                             └──────┬───────┘
-          │                                         │  outbound tunnel only
-          ▼                                         ▼  ── NO inbound ports ──
-      ┌────────┐   ┌────────┐               ┌────────────┐   ┌────────┐
-      │  app   │──▶│   db   │               │ cloudflared│──▶│  app   │──▶ db
-      └────────┘   └────────┘               └────────────┘   └────────┘
+      ┌────────┐   ┌────────┐               ┌──────────────┐
+      │  app   │──▶│   db   │               │  Cloudflare  │
+      └────────┘   └────────┘               └──────┬───────┘
+                                                   │  outbound tunnel only
+                                                   ▼  ── NO inbound ports ──
+      Nothing exposed to the internet.      ┌────────────┐   ┌────────┐
+      Auth still on: mint a token with      │ cloudflared│──▶│  app   │──▶ db
+      the pse-edge-admin CLI.               └────────────┘   └────────┘
 
-      Requires the router to forward         Needs no inbound ports at all.
-      80→8280 and 443→8243: ACME             Tunnel route is HTTP → app:8000
-      validates on 80/443 only.              (container port, not the host port)
+                                            Tunnel route is HTTP → app:8000
+                                            (container port, not the host port).
+                                            PSE_LAN_BIND=127.0.0.1 closes stage 1's
+                                            LAN port. No ACME, no port forwarding.
 ```
 
-Both pull the published, CI-gated multi-arch image; neither builds from source. Pin
+Production pulls the published, CI-gated multi-arch image; it never builds from source. Pin
 `PSE_IMAGE_TAG` — a moving `:latest` that lags the compose file reads as a broken
 deployment.
 

@@ -5,9 +5,11 @@
 #     Reachable at http://<nas-ip>:8200. Nothing is exposed to the internet.
 #
 #   Stage 2 — add a public hostname through a Cloudflare Tunnel:
-#       docker compose -f compose.nas.yaml -f compose.tunnel.yaml up -d --remove-orphans
-#     Set PSE_LAN_BIND=127.0.0.1 in .env at the same time — that is what stops the port
-#     below being reachable from the LAN once the hostname is public.
+#       docker compose -f compose.nas.yaml --profile tunnel up -d
+#     (or set COMPOSE_PROFILES=tunnel in .env and keep the stage 1 command). Set
+#     CLOUDFLARE_TUNNEL_TOKEN, PSE_PUBLIC_URL=https://<hostname> and
+#     PSE_LAN_BIND=127.0.0.1 in .env at the same time — that last one is what stops the
+#     port below being reachable from the LAN once the hostname is public.
 #
 # Self-contained on purpose: NAS Docker UIs import a single compose file far more happily
 # than a base plus an overlay. It *pulls* the published image rather than building — a NAS
@@ -16,7 +18,7 @@
 # Required in .env next to this file:
 #   POSTGRES_PASSWORD   long and random
 # Strongly recommended:
-#   PSE_IMAGE_TAG       pin a version (e.g. 0.11.0). :latest is a moving target, and a tag
+#   PSE_IMAGE_TAG       pin a version (e.g. 0.19.0). :latest is a moving target, and a tag
 #                       that lags this file reads as a broken deployment rather than a
 #                       version mismatch.
 #   PSE_LAN_PORT        if 8200 is already taken. A clash leaves the app container created
@@ -190,8 +192,8 @@ services:
       # separated). Same authority as the pse-edge-admin CLI — the way to grant headless
       # agent access on a NAS with no shell. Empty = web provisioning off, CLI only.
       PSE_ADMIN_EMAILS: ${PSE_ADMIN_EMAILS:-}
-      # Stage 1 has no public hostname yet. compose.tunnel.yaml overrides this with the
-      # real https URL, which is the value WebAuthn binds every passkey to.
+      # Stage 1 has no public hostname yet. In stage 2, set PSE_PUBLIC_URL in .env to the
+      # real https URL — that is the value WebAuthn binds every passkey to.
       PSE_PUBLIC_URL: ${PSE_PUBLIC_URL:-http://localhost:${PSE_LAN_PORT:-8200}}
       PSE_LOG_JSON: "1"
       ZEPTOMAIL_API_KEY: ${ZEPTOMAIL_API_KEY:-}
@@ -224,6 +226,54 @@ services:
       resources:
         limits:
           memory: ${APP_MEMORY_LIMIT:-768m}
+    logging: *logging
+
+  # ── Stage 2: Cloudflare Tunnel connector (profile: tunnel) ─────────────────────
+  # Off in stage 1; started by `--profile tunnel` or COMPOSE_PROFILES=tunnel in .env.
+  # cloudflared dials OUT to Cloudflare — no port forwarding, nothing for CGNAT to break,
+  # no contest with the NAS's own web UI over 80/443. TLS terminates at Cloudflare's edge,
+  # which is why no certificate or ACME appears anywhere in this deployment.
+  #
+  # In the Zero Trust dashboard the tunnel's public hostname must route to:
+  #   Service: HTTP → app:8000   (http — the hop to the app runs inside the compose network)
+  # Set in .env alongside the token:
+  #   PSE_PUBLIC_URL=https://<hostname>   WebAuthn binds every passkey to this origin
+  #   PSE_LAN_BIND=127.0.0.1              closes the stage 1 LAN port (see `app`)
+  #   ZEPTOMAIL_API_KEY / PSE_EMAIL_FROM  signup goes live; the sender's domain must be one
+  #                                       ZeptoMail verified EXACTLY (subdomains do not
+  #                                       inherit a verified parent)
+  # Do NOT put Cloudflare Access in front of the hostname: MCP clients cannot complete a
+  # browser login; this server authenticates its own callers.
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    profiles: ["tunnel"]
+    restart: unless-stopped
+    # `:-`, not `:?`, deliberately: Compose interpolates BEFORE profile filtering, so a
+    # required-variable marker here would abort stage 1, which never runs this service.
+    # An empty token fails loudly in cloudflared's own log instead.
+    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN:-}
+    depends_on:
+      app:
+        condition: service_healthy
+    logging: *logging
+
+  # Database browser, opt-in: `docker compose -f compose.nas.yaml --profile tools up -d`,
+  # then open http://<nas-ip>:8201 and log in with System=PostgreSQL, Server=db, User=pse,
+  # Password=$POSTGRES_PASSWORD, Database=pse_edge. LAN-only by construction — the tunnel
+  # routes only app:8000, so this can never become public — and the login gate is the
+  # database password. The port deliberately does NOT follow PSE_LAN_BIND: loopback on a
+  # NAS with no browser of its own would make the UI unreachable entirely.
+  adminer:
+    image: adminer:5
+    profiles: ["tools"]
+    restart: unless-stopped
+    ports:
+      - "${PSE_ADMINER_PORT:-8201}:8080"
+    environment:
+      ADMINER_DEFAULT_SERVER: db
+    depends_on:
+      db:
+        condition: service_healthy
     logging: *logging
 
   # Daily pg_dump into ./backups. Keep this directory on a NAS share that is itself part of

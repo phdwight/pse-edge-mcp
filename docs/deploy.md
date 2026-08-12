@@ -1,60 +1,43 @@
 # Deploying pse-edge-mcp
 
-A production deployment is one command once DNS and `.env` are in place. This page covers
-what to set, why the pieces are arranged as they are, and what to check afterwards.
+One deployment file, `compose.nas.yaml`, for a NAS or any single Docker host, in two
+stages: stage 1 is LAN-only, stage 2 adds a public hostname through a Cloudflare Tunnel
+(profile `tunnel`, same file). This page covers what to set, why the pieces are arranged
+as they are, and what to check afterwards.
 
 ```bash
 cp .env.example .env      # then fill in the required values below
-docker compose -f compose.prod.yaml up -d
+docker compose -f compose.nas.yaml up -d
 ```
+
+*(An earlier Caddy-based `compose.prod.yaml` for hosts that own ports 80/443 was retired
+in favour of this single path — the tunnel needs no inbound ports, no ACME, and no
+port-forwarding, so it works on every host the Caddy file did and the ones it did not.)*
 
 ## What this deploys
 
 | Service | Role |
 |---|---|
-| `caddy` | TLS termination; obtains and renews certificates over ACME automatically |
-| `migrate` | one-shot `alembic upgrade head`; `app` waits for it to succeed |
-| `app` | the server, 2 workers, auth on, JSON logs, no published ports |
+| `pgdata-owner` | repairs bind-mount ownership before Postgres starts, then idles |
+| `migrate` | `alembic upgrade head`; `app` waits for it, then it idles |
+| `app` | the server, auth on, JSON logs |
 | `db` | Postgres 18, no published ports |
 | `backup` | daily `pg_dump` at 02:00 Asia/Manila, rotated |
 | `purge` | daily usage-retention purge |
+| `canary` | nightly schema-drift check against PSE Edge |
+| `cloudflared` | *profile `tunnel`* — outbound connector for the public hostname |
+| `adminer` | *profile `tools`* — database browser on the LAN, port 8201 |
 
-Neither `app` nor `db` publishes a port: everything arrives through Caddy. A stray firewall
-rule therefore cannot expose the app unencrypted or the database at all.
+`db` publishes no port: only the stack's own services reach Postgres, over the compose
+network. The only published ports are the app's LAN port (stage 1, closeable) and
+Adminer's, if you opt in.
 
-## Ports, and what ACME requires of them
-
-Caddy publishes on **8280** and **8243** rather than 80 and 443, to stay clear of whatever
-else already runs on the host — on a NAS, 80 and 443 usually belong to the device's own web
-UI. Only the published side moves; Caddy still listens on 80/443 *inside* the container, so
-the Caddyfile is untouched. Override with `PSE_HTTP_PORT` / `PSE_HTTPS_PORT`.
-
-**Your router must forward 80 → 8280 and 443 → 8243.** This is not a preference. A
-certificate authority validates by connecting to your domain on port 80 (HTTP-01) or 443
-(TLS-ALPN-01); those numbers are fixed in the ACME protocol, and no Caddy setting moves them.
-If the internet cannot reach this host on 80 and 443 by some path, Caddy never obtains a
-certificate, and the site never serves at all — the failure is total, not degraded.
-
-So this file suits a host you control the edge of. Where you cannot forward those ports —
-CGNAT, a locked-down router, an ISP that blocks 80, or a NAS whose ports are already
-spoken for — use `compose.nas.yaml` + `compose.tunnel.yaml` instead. That path needs no
-inbound ports whatsoever, and Cloudflare handles the certificate.
-
-## Required configuration
-
-```bash
-PSE_DOMAIN=mcp.example.com            # Caddy gets a certificate for this
-PSE_ACME_EMAIL=ops@example.com        # CA contact address
-POSTGRES_PASSWORD=<long random value>
-ZEPTOMAIL_API_KEY=<key>               # verification emails; runtime only, never committed
-```
-
-**`PSE_PUBLIC_URL` must be the externally reachable https URL.** This file derives it from
-`PSE_DOMAIN`, so setting that correctly is enough. It drives three things at once: the
-WebAuthn `rp_id`, the links in verification emails, and the OAuth issuer in the discovery
-documents. Getting it wrong breaks passkeys in a way that looks like a browser bug, because
-WebAuthn binds every credential to the origin it was created under — credentials enrolled
-against the wrong origin cannot be recovered, only re-enrolled.
+**`PSE_PUBLIC_URL` must be the externally reachable https URL** once stage 2 is up. It
+drives three things at once: the WebAuthn `rp_id`, the links in verification emails, and
+the OAuth issuer in the discovery documents. Getting it wrong breaks passkeys in a way
+that looks like a browser bug, because WebAuthn binds every credential to the origin it
+was created under — credentials enrolled against the wrong origin cannot be recovered,
+only re-enrolled.
 
 ## Health checks
 
@@ -65,8 +48,9 @@ against the wrong origin cannot be recovered, only re-enrolled.
 
 The split matters. A liveness probe that touches the database restarts every replica during
 a database blip, turning a recoverable outage into an outage plus a restart storm. Readiness
-failing should remove a replica from rotation; liveness failing should kill it. Caddy returns
-404 for both paths, so they are available to the orchestrator but not to the internet.
+failing should remove a replica from rotation; liveness failing should kill it. Both paths
+are reachable through the tunnel — see "Things worth knowing" below if you would rather
+not publish them.
 
 ## Workers and what is shared
 
@@ -104,16 +88,16 @@ accumulated EOD archive. Everything else can be re-fetched from PSE Edge.
 ## First-run checklist
 
 ```bash
-docker compose -f compose.prod.yaml ps          # all services up, app healthy
-curl -fsS https://$PSE_DOMAIN/health                            # 200 via TLS
-curl -fsS https://$PSE_DOMAIN/.well-known/oauth-protected-resource
-curl -fsS -o /dev/null -w '%{http_code}\n' -X POST https://$PSE_DOMAIN/mcp   # expect 401
+docker compose -f compose.nas.yaml ps           # all services Running, app healthy
+curl -fsS https://<hostname>/health                             # 200 via TLS
+curl -fsS https://<hostname>/.well-known/oauth-protected-resource
+curl -fsS -o /dev/null -w '%{http_code}\n' -X POST https://<hostname>/mcp   # expect 401
 ```
 
 That last 401 is the point: it confirms auth is on. It should carry a `WWW-Authenticate`
 header naming the metadata URL, which is how MCP clients discover where to authenticate.
 
-Then visit `https://$PSE_DOMAIN/signup` and complete a real signup — email, passkey — to
+Then visit `https://<hostname>/signup` and complete a real signup — email, passkey — to
 confirm `PSE_PUBLIC_URL` and email delivery are both right. Doing this once, deliberately, is
 much cheaper than discovering an origin mismatch from a user's bug report.
 
@@ -215,18 +199,11 @@ lengthens the window in which a revoked token still works.
 # NAS deployment, in two stages
 
 Bring the stack up on the NAS first and confirm it works on your LAN; add the public
-hostname afterwards. Stage 1 is a single file; stage 2 adds one alongside it.
+hostname afterwards. Both stages are the same file — stage 2 is a Compose profile.
 
 `compose.nas.yaml` is standalone rather than an overlay — NAS Docker UIs import a single
-file much more happily — and **pulls** the published image instead of building, since a NAS
-is a poor build host.
-
-**Use `compose.nas.yaml`, not `compose.prod.yaml`.** The Caddy file is for a host that owns
-ports 80 and 443; on a NAS it fails twice over. It bind-mounts `Caddyfile` from beside
-itself, so importing the compose file alone leaves the `caddy` container *created but never
-started* with an opaque OCI "not a directory" error — and even with the file present, ACME
-cannot issue a certificate unless your router forwards 80 and 443. `compose.nas.yaml` mounts
-no repository files at all, so a single-file import is complete.
+file much more happily — it mounts no repository files, and it **pulls** the published
+image instead of building, since a NAS is a poor build host.
 
 ## Reading the NAS project badge
 
@@ -244,6 +221,7 @@ A correct stack is therefore **everything Running**:
 | `db`, `app` | Running (healthy) |
 | `pgdata-owner`, `migrate` | Running (healthy) — log ends with `… idling so the NAS badge stays green` |
 | `backup`, `purge`, `canary` | Running |
+| `cloudflared` (stage 2), `adminer` (opt-in) | Running |
 
 That makes the badge trustworthy: a stopped `pgdata-owner` or `migrate` now always means
 its job actually failed — read its log, which names the cause. `/health` remains the
@@ -252,7 +230,7 @@ authoritative check either way.
 ## Stage 1 — LAN only
 
 ```bash
-PSE_IMAGE_TAG=0.18.0            # pin a version; see the warning below
+PSE_IMAGE_TAG=0.19.0            # pin a version; see the warning below
 POSTGRES_PASSWORD=<long random value>
 ```
 
@@ -260,14 +238,14 @@ POSTGRES_PASSWORD=<long random value>
 docker compose -f compose.nas.yaml up -d
 ```
 
-That is the whole stage. No Cloudflare account, domain or token is involved yet — those
-variables live in the stage 2 file, so nothing asks for them until you opt in. The server
+That is the whole stage. No Cloudflare account, domain or token is involved yet — the
+tunnel service sits behind a Compose profile, so nothing asks for them until you opt in. The server
 is reachable at `http://<nas-ip>:8200`, and nothing is exposed to the internet.
 
 Check it:
 
 ```bash
-curl http://<nas-ip>:8200/health           # {"status": "ok", "version": "0.18.0", ...}
+curl http://<nas-ip>:8200/health           # {"status": "ok", "version": "0.19.0", ...}
 curl -X POST http://<nas-ip>:8200/mcp      # 401 — auth is on
 ```
 
@@ -290,7 +268,8 @@ curl -X POST http://<nas-ip>:8200/mcp \
 ```
 
 Thirteen tools back means the stack is sound: image, migrations, database, auth and the MCP
-transport are all working. What stage 1 *cannot* tell you is whether passkeys, OAuth and
+transport are all working. (Fourteen once `ZEPTOMAIL_API_KEY` is set — `send_email`
+registers only when auth and email are both configured.) What stage 1 *cannot* tell you is whether passkeys, OAuth and
 verification email work — all three need the real https origin, so they are stage 2's
 checklist, not something you have deferred by accident.
 
@@ -303,7 +282,7 @@ and 443.
 1. **Cloudflare Zero Trust → Networks → Tunnels → Create a tunnel** (type: Cloudflared).
    Copy the token it shows you.
 2. Add a **public hostname** on that tunnel:
-   - Subdomain/domain: your `PSE_DOMAIN`
+   - Subdomain/domain: the hostname you will serve on (your `PSE_PUBLIC_URL`)
    - Service type: **HTTP**, URL: **`app:8000`**
 
    HTTP, not HTTPS — that hop runs inside the compose network. TLS is terminated at
@@ -312,26 +291,31 @@ and 443.
 3. Add to the same `.env`:
 
    ```bash
-   PSE_DOMAIN=mcp.example.com
+   PSE_PUBLIC_URL=https://mcp.example.com   # the hostname from step 2
    CLOUDFLARE_TUNNEL_TOKEN=<the token from step 1>
    ZEPTOMAIL_API_KEY=<key>          # verification email, now that strangers can sign up
+   PSE_EMAIL_FROM=<verified sender> # ZeptoMail verifies EXACT domains — see .env.example
    PSE_LAN_BIND=127.0.0.1           # closes the stage 1 LAN port — see below
+   COMPOSE_PROFILES=tunnel          # or pass --profile tunnel on every command instead
    ```
 
-4. Bring it up with both files:
+4. Bring it up — same file, tunnel profile now active:
 
    ```bash
-   docker compose -f compose.nas.yaml -f compose.tunnel.yaml up -d --remove-orphans
+   docker compose -f compose.nas.yaml up -d
    ```
 
-The overlay starts `cloudflared` and swaps `PSE_PUBLIC_URL` to the https hostname.
+The profile starts `cloudflared`, and `PSE_PUBLIC_URL` becomes the origin passkeys bind to.
+(The token variable defaults to empty rather than being marked required — Compose
+interpolates before it filters profiles, so a required marker would abort stage 1 too. An
+empty token fails loudly in `cloudflared`'s own log.)
 
 **`PSE_LAN_BIND=127.0.0.1` is what closes the stage 1 LAN port**, and it is a separate line
-in `.env` rather than something the overlay does for you. Compose merges `ports` additively
-— a second file can add a mapping but never remove one — so an overlay genuinely cannot take
-the port away. Setting the bind address moves it to the NAS's own loopback instead: still
-there for debugging from the NAS shell, no longer reachable from the local network. Confirm
-it rather than assuming, from a *different* machine:
+in `.env` rather than something the profile does for you. Compose merges `ports` additively
+— a mapping, once declared, cannot be conditionally removed — so setting the bind address
+moves it to the NAS's own loopback instead: still there for debugging from the NAS shell, no
+longer reachable from the local network. Confirm it rather than assuming, from a *different*
+machine:
 
 ```bash
 curl -sf https://mcp.example.com/health && echo "public: up"
@@ -343,11 +327,12 @@ Then **do one real passkey signup immediately.** It is the only check that prove
 it arrives as "passkeys just don't work", and enrolled credentials cannot be migrated, only
 re-enrolled.
 
-If you would rather run a single file long-term — some NAS UIs only import one — flatten the
-two once the tunnel works:
+If your NAS UI cannot pass a profile or read `.env`, flatten the resolved config into an
+operator-local file once the tunnel works, and import that. Keep it out of git — it embeds
+the resolved tunnel token:
 
 ```bash
-docker compose -f compose.nas.yaml -f compose.tunnel.yaml config > compose.merged.yaml
+docker compose -f compose.nas.yaml --profile tunnel config > my-nas.yaml   # gitignore it
 ```
 
 ## Pin the image tag
@@ -452,7 +437,7 @@ docker compose -f compose.nas.yaml exec db \
 docker compose -f compose.nas.yaml exec db ls -lh /backups/premove.dump
 
 # 2. Copy that dump somewhere outside the old volume, set the variables, then
-docker compose -f compose.nas.yaml -f compose.storage.yaml up -d --force-recreate
+docker compose -f compose.nas.yaml up -d --force-recreate
 
 # 3. Restore into the new, genuinely empty database
 docker compose -f compose.nas.yaml exec db \
@@ -472,8 +457,8 @@ reading them. The data stops being something a stray `-v` can destroy.
 ## Verifying stage 2, from outside
 
 ```bash
-curl -fsS https://$PSE_DOMAIN/.well-known/oauth-protected-resource
-curl -sS -o /dev/null -w '%{http_code}\n' -X POST https://$PSE_DOMAIN/mcp   # expect 401
+curl -fsS https://<hostname>/.well-known/oauth-protected-resource
+curl -sS -o /dev/null -w '%{http_code}\n' -X POST https://<hostname>/mcp   # expect 401
 ```
 
 The 401 is the point — it confirms auth is on, and it carries a `WWW-Authenticate` header
@@ -481,7 +466,7 @@ naming the metadata URL, which is how an MCP client discovers where to authentic
 that the `resource` field in the metadata is your real hostname and not `localhost`: that is
 `PSE_PUBLIC_URL` reflected back, and it is what clients will try to authenticate against.
 
-Then visit `https://$PSE_DOMAIN/signup` and complete a real signup, as above — the one check
+Then visit `https://<hostname>/signup` and complete a real signup, as above — the one check
 stage 1 could not perform.
 
 ---

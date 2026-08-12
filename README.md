@@ -375,27 +375,18 @@ Both architectures are gated before publishing, on native runners. The rule is *
 
 ## Production
 
-Two topologies, chosen by how the host is reached. Both pull the published image rather than building, so production runs the artifact CI gated.
-
-**A host reachable on ports 80 and 443** — Caddy terminates TLS and renews certificates automatically. It publishes on 8280/8243 to stay clear of a NAS's own web UI, so the router must forward 80 → 8280 and 443 → 8243; certificate authorities always validate on 80/443, so that forwarding is required, not optional:
+One file, `compose.nas.yaml`, for a NAS or any single Docker host, in two stages. It pulls the published image rather than building, so production runs the artifact CI gated. Stage 1 is LAN-only and needs nothing from Cloudflare:
 
 ```bash
-cp .env.example .env    # PSE_DOMAIN, PSE_ACME_EMAIL, POSTGRES_PASSWORD, ZEPTOMAIL_API_KEY, PSE_IMAGE_TAG
-docker compose -f compose.prod.yaml up -d
+docker compose -f compose.nas.yaml up -d                     # http://<nas-ip>:8200
+docker compose -f compose.nas.yaml --profile tunnel up -d    # + public hostname
 ```
 
-**A NAS or any host behind a home router**, in two stages. Stage 1 is LAN-only and needs nothing from Cloudflare:
+The `tunnel` profile starts `cloudflared`, which dials *out* — so there is no port forwarding, no ACME, and nothing for CGNAT to break; Cloudflare terminates TLS at its edge. Set `CLOUDFLARE_TUNNEL_TOKEN`, `PSE_PUBLIC_URL` and `PSE_LAN_BIND=127.0.0.1` in `.env` alongside it — the last moves the stage 1 LAN port onto loopback, which is the only way to unpublish it, because Compose merges `ports` additively.
 
-```bash
-docker compose -f compose.nas.yaml up -d                                  # http://<nas-ip>:8200
-docker compose -f compose.nas.yaml -f compose.tunnel.yaml up -d           # + public hostname
-```
+Both stages give auth on by default, daily backups, a daily retention purge, and no published database port. Health probes are `/health` (liveness) and `/health/ready` (readiness). The app is importable for other servers: `uvicorn pse_edge_mcp.asgi:app --workers 4`.
 
-The tunnel overlay starts `cloudflared`, which dials *out* — so there is no port forwarding and nothing for CGNAT to break. Set `PSE_LAN_BIND=127.0.0.1` alongside it to move the stage 1 LAN port onto loopback; Compose merges `ports` additively, so an overlay can add a mapping but never remove one.
-
-Both give auth on by default, daily backups, a daily retention purge, and no published database port. Health probes are `/health` (liveness) and `/health/ready` (readiness). The app is importable for other servers: `uvicorn pse_edge_mcp.asgi:app --workers 4`.
-
-See **[docs/deploy.md](docs/deploy.md)** for both guides, including the two settings most worth getting right: pin `PSE_IMAGE_TAG` rather than tracking `:latest`, and make `PSE_PUBLIC_URL` the real external https URL, because WebAuthn binds every passkey to the origin it was enrolled under.
+See **[docs/deploy.md](docs/deploy.md)** for the full guide, including the two settings most worth getting right: pin `PSE_IMAGE_TAG` rather than tracking `:latest`, and make `PSE_PUBLIC_URL` the real external https URL, because WebAuthn binds every passkey to the origin it was enrolled under.
 
 ## Development
 
