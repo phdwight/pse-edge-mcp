@@ -228,23 +228,26 @@ started* with an opaque OCI "not a directory" error — and even with the file p
 cannot issue a certificate unless your router forwards 80 and 443. `compose.nas.yaml` mounts
 no repository files at all, so a single-file import is complete.
 
-## "Error" in the NAS UI, with `migrate` stopped
+## Reading the NAS project badge
 
-`migrate` **runs once and exits 0**. That is success. It applies `alembic upgrade head` and
-finishes — the schema must not be applied by the server on boot, because replicas would race
-to mutate it (plan §5). NAS Docker UIs list any stopped container as "Not in use" and colour
-the whole project red on that basis, so a healthy deployment looks broken.
+NAS Docker UIs list any stopped container as "Not in use" and colour the whole project red
+on that basis. `compose.nas.yaml` is shaped so that never happens on a healthy stack: the
+two setup jobs (`pgdata-owner`, `migrate`) do their work once per start, then **idle
+instead of exiting**, signalling success through a marker-file healthcheck that `db` and
+`app` wait on. (The schema is still applied only by the explicit `migrate` job, never by
+the server on boot — replicas must not race to mutate it, plan §5.)
 
-Read the containers rather than the badge. This is a correct stack:
+A correct stack is therefore **everything Running**:
 
 | Container | Expected |
 |---|---|
-| `db`, `app`, `backup`, `purge` | Running (`app` healthy) |
-| `migrate` | **Exited (0)** — its log ends with `Running upgrade …` |
+| `db`, `app` | Running (healthy) |
+| `pgdata-owner`, `migrate` | Running (healthy) — log ends with `… idling so the NAS badge stays green` |
+| `backup`, `purge`, `canary` | Running |
 
-If `app` is running and answering `/health`, the deployment is fine whatever the project
-badge says. A genuine failure looks different: `migrate` exited **non-zero**, or `app`
-restarting in a loop.
+That makes the badge trustworthy: a stopped `pgdata-owner` or `migrate` now always means
+its job actually failed — read its log, which names the cause. `/health` remains the
+authoritative check either way.
 
 ## Stage 1 — LAN only
 

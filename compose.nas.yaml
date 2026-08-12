@@ -63,7 +63,7 @@ services:
     # exposing 5432 to a LAN is the most common way these get compromised.
     depends_on:
       pgdata-owner:
-        condition: service_completed_successfully
+        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U pse -d pse_edge"]
       interval: 10s
@@ -107,33 +107,65 @@ services:
         chown -R 999:999 /pgdata 2>&1 | head -3
         chmod -R u+rwX /pgdata 2>&1 | head -3
         if gosu postgres sh -c "touch /pgdata/.pse-write-probe && rm -f /pgdata/.pse-write-probe"; then
-          echo "pgdata-owner: verified uid 999 can write — OK"
+          echo "pgdata-owner: verified uid 999 can write — OK; idling so the NAS badge stays green"
+          touch /tmp/ready
+          exec sleep infinity
         else
           echo "pgdata-owner: FATAL — uid 999 (postgres) cannot write here even after" >&2
           echo "  chown/chmod. On a NAS this usually means folder ACLs override classic" >&2
           echo "  permissions. Fix in the NAS file manager: grant read/write on the" >&2
           echo "  PSE_PGDATA_PATH folder to all users, or recreate it in a plain (non-" >&2
           echo "  shared, no-ACL) location. The db will not start until this passes." >&2
+          sleep 60
           exit 1
         fi
-    restart: "no"
+    restart: unless-stopped
+    # Success is signalled by the marker file, not by exiting: NAS Docker UIs colour the
+    # whole project red over any stopped container, so after the work is done this idles
+    # instead of exiting 0. `db` waits on this healthcheck; an EXITED pgdata-owner now
+    # always means failure. The long start_period covers a first-boot chown -R over a
+    # large existing data directory.
+    healthcheck:
+      test: ["CMD", "test", "-f", "/tmp/ready"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 600s
     logging: *logging
 
-  # Schema is applied by an explicit one-shot job, never by the server on boot: replicas must
-  # not race to mutate their own schema (plan §5).
+  # Schema is applied by an explicit job, never by the server on boot: replicas must not
+  # race to mutate their own schema (plan §5).
   #
-  # This container RUNS ONCE AND EXITS 0. That is success, not failure. NAS Docker UIs show
-  # it as "Not in use" / "Exited" and often colour the whole project red because of it —
-  # check its log says "Running upgrade" and nothing after, and ignore the badge.
+  # The job runs once per start, then IDLES instead of exiting: NAS Docker UIs colour the
+  # whole project red over any stopped container, so success is signalled by a marker-file
+  # healthcheck and `app` waits on service_healthy. An EXITED migrate container now always
+  # means the migration actually failed — read its log.
   migrate:
     image: ghcr.io/phdwight/pse-edge-mcp:${PSE_IMAGE_TAG:-latest}
-    entrypoint: ["alembic", "upgrade", "head"]
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        if alembic upgrade head; then
+          echo "migrate: schema is current; idling so the NAS badge stays green"
+          touch /tmp/ready
+          exec sleep infinity
+        else
+          echo "migrate: FATAL — alembic failed, the app will not start; see above" >&2
+          sleep 60
+          exit 1
+        fi
     environment:
       DATABASE_URL: postgresql+asyncpg://pse:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/pse_edge
     depends_on:
       db:
         condition: service_healthy
-    restart: "no"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "test", "-f", "/tmp/ready"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 300s
     logging: *logging
 
   app:
@@ -176,7 +208,7 @@ services:
       db:
         condition: service_healthy
       migrate:
-        condition: service_completed_successfully
+        condition: service_healthy
     read_only: true
     tmpfs:
       - /tmp
@@ -244,7 +276,7 @@ services:
       DATABASE_URL: postgresql+asyncpg://pse:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/pse_edge
     depends_on:
       migrate:
-        condition: service_completed_successfully
+        condition: service_healthy
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
@@ -270,7 +302,7 @@ services:
       PSE_LOG_JSON: "1"
     depends_on:
       migrate:
-        condition: service_completed_successfully
+        condition: service_healthy
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
