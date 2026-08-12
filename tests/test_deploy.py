@@ -152,7 +152,9 @@ async def test_readiness_is_ok_against_a_live_database(pg_engine):
 _CUSTOM_YAML_TAG = re.compile(r"(?:^|[\s:\-])(![a-zA-Z_][\w]*)")
 
 
-@pytest.mark.parametrize("path", sorted(REPO_ROOT.glob("compose*.yaml")), ids=lambda p: p.name)
+# Root-level glob, not compose*.yaml: the operator-local ugreen.yaml (gitignored, absent
+# in CI) is a compose file too, and it deploys to exactly the NAS UI these tags break in.
+@pytest.mark.parametrize("path", sorted(REPO_ROOT.glob("*.yaml")), ids=lambda p: p.name)
 def test_compose_files_use_no_compose_only_yaml_tags(path):
     found = {m.group(1) for m in _CUSTOM_YAML_TAG.finditer(path.read_text())}
     assert not found, (

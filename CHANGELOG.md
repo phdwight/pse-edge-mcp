@@ -5,6 +5,23 @@ Format: [Keep a Changelog](https://keepachangelog.com/) · Versioning: [SemVer](
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-08-12
+
+### Changed
+- **One deployment file.** `compose.prod.yaml` (Caddy/ACME) and the `compose.tunnel.yaml`
+  overlay are gone, along with `Caddyfile`; `compose.nas.yaml` is now the only production
+  compose file. The Cloudflare Tunnel connector lives in it behind a `tunnel` profile —
+  `--profile tunnel` or `COMPOSE_PROFILES=tunnel` in `.env` — so stage 2 is the same file,
+  not a second one. The token variable defaults to empty instead of being marked required,
+  because Compose interpolates before it filters profiles: a `:?` marker there would abort
+  stage 1 too. `PSE_PUBLIC_URL` is set directly in `.env` (`PSE_DOMAIN`/`PSE_ACME_EMAIL`
+  are gone with Caddy).
+
+### Added
+- **Adminer on the NAS file** (`adminer:5`, matching the dev stack): opt-in via the
+  `tools` profile, published on `${PSE_ADMINER_PORT:-8201}`, LAN-only by construction —
+  the tunnel routes only `app:8000`, so the database browser can never become public.
+
 ## [0.18.1] - 2026-08-12
 
 ### Changed
