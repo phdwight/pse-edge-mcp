@@ -935,6 +935,11 @@ PIN.</p>
 </main>
 <script>
 document.getElementById('go').onclick = async () => {
+  // Disabled for the duration so a double-click cannot start two ceremonies; removed on
+  // success — a still-clickable button under "enrolled" reads as "did it work?", and a
+  // second press could enroll a stray second passkey on another authenticator.
+  const go = document.getElementById('go');
+  go.disabled = true;
   try {
     const opts = await postJSON('/enroll/options', {});
     opts.challenge = b64ToBuf(opts.challenge);
@@ -948,10 +953,11 @@ document.getElementById('go').onclick = async () => {
         attestationObject: bufToB64(cred.response.attestationObject)
       }
     });
+    go.remove();
     document.getElementById('msg').innerHTML =
       '<div class=msg>Passkey enrolled. You can close this tab or ' +
       '<a href="' + out.next + '">sign in</a>.</div>';
-  } catch (e) { showError(e); }
+  } catch (e) { go.disabled = false; showError(e); }
 };
 </script>
 """

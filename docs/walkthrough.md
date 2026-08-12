@@ -13,7 +13,7 @@ understand it, debug it, or extend it.
 | `docs/deploy.md` | Running it in production |
 | `CLAUDE.md` | The short form of the invariants, kept next to the code |
 
-Version described: **0.19.0**. 36 modules, ~9,000 lines of source, ~6,900 lines of tests.
+Version described: **0.19.1**. 36 modules, ~9,000 lines of source, ~6,900 lines of tests.
 
 ---
 

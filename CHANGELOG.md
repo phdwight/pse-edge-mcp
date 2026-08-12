@@ -5,6 +5,16 @@ Format: [Keep a Changelog](https://keepachangelog.com/) · Versioning: [SemVer](
 
 ## [Unreleased]
 
+## [0.19.1] - 2026-08-12
+
+### Fixed
+- **The enroll page's "Create passkey" button no longer outlives its job.** After a
+  successful enrollment the success message appeared but the button stayed visible and
+  clickable — confusing at best, and a second press could start a fresh ceremony and
+  enroll a stray second passkey on another authenticator. The button is now disabled for
+  the duration of the ceremony (a double-click cannot start two), re-enabled on error,
+  and removed on success.
+
 ## [0.19.0] - 2026-08-12
 
 ### Changed
