@@ -13,6 +13,7 @@ Tools — companies & prices: search_companies, validate_symbol, get_stock_quote
 Tools — disclosures: search_disclosures, search_disclosure_fulltext, get_disclosure.
 Tools — company info & market: get_company_profile, get_financial_highlights,
         get_dividends_and_rights, get_indices, get_market_summary.
+Tools — BSP (central bank): get_bsp_key_rates, get_bsp_policy_rate.
 Utility: get_server_version (the deployed release, no meta).
 """
 
@@ -42,6 +43,7 @@ from mcp.types import (
 from pydantic import BaseModel
 
 from .archive import Archive, NullArchive
+from .bsp_client import BspClient
 from .cache import Storage
 from .client import PseEdgeClient
 from .config import Settings
@@ -54,6 +56,7 @@ from .repositories import (
     CompanyInfoRepository,
     CompanyRepository,
     DisclosureRepository,
+    KeyRatesRepository,
     MarketRepository,
     QuoteRepository,
 )
@@ -80,7 +83,10 @@ else (disclosures, profiles, financials, dividends, indices) is fetched from PSE
 Edge at most once per query and then served from storage until the next market
 close — check meta.as_of for when it was actually fetched. Every result carries
 meta.as_of / meta.valid_until; meta.stale=true means the value is not a settled
-end-of-day figure (session-time price, or PSE Edge was unreachable)."""
+end-of-day figure (session-time price, or PSE Edge was unreachable).
+A second source, the Bangko Sentral ng Pilipinas (BSP), backs get_bsp_key_rates and
+get_bsp_policy_rate: central-bank policy, facility, and auction rates plus headline
+inflation and the USD peso reference, cached about once a day (meta.as_of)."""
 
 # Behavior hints hosts read for permissioning and display (spec ToolAnnotations): a
 # client may auto-approve a readOnlyHint tool instead of prompting per call. Every data
@@ -247,6 +253,10 @@ def build_server(
     disclosures = DisclosureRepository(client, cache, settings.base_url, archive, memo)
     company_info = CompanyInfoRepository(client, companies, cache, memo)
     market = MarketRepository(client, cache, memo)
+    # BSP is a separate upstream (its own client and base URL); the repository routes to
+    # the Key Rates SharePoint list and caches it daily-refresh.
+    bsp = BspClient(settings)
+    key_rates = KeyRatesRepository(bsp, cache, settings.bsp_base_url, memo)
 
     # `version` is not optional in spirit: it goes into serverInfo on every initialize, and
     # leaving it unset advertised an empty string to every client. Read from the installed
@@ -520,6 +530,37 @@ def build_server(
         cannot include them — say so rather than implying the data is missing or stale.
         """
         return await reply(market.summary)
+
+    @mcp.tool(annotations=READ_ONLY, title="BSP key rates")
+    async def get_bsp_key_rates() -> dict[str, Any]:
+        """Get the Bangko Sentral ng Pilipinas (BSP) Key Rates dashboard.
+
+        Returns every rate BSP publishes on its Key Rates page: the Target RRP (policy)
+        rate, the overnight lending and deposit facility rates, BSP-securities and
+        term-deposit (TDF) weighted-average interest rates, headline inflation, and the
+        USD peso reference level. Each rate carries its own BSP `published_date` (which
+        varies by row and is NOT when we fetched — see meta.as_of) and a `source_url` to
+        BSP's detail page. `rate_percent` is the numeric value for percentage rates; it is
+        null for the peso FX level and for the discontinued ON Reference Rate ('****').
+
+        BSP rates change infrequently, so this is fetched at most once per day and served
+        from cache otherwise (meta.as_of says when). For just the monetary-policy stance,
+        use get_bsp_policy_rate instead.
+        """
+        return await reply(key_rates.key_rates)
+
+    @mcp.tool(annotations=READ_ONLY, title="BSP policy rate")
+    async def get_bsp_policy_rate() -> dict[str, Any]:
+        """Get the BSP policy rate and the interest-rate corridor around it.
+
+        A focused view for "what is the BSP policy rate?": `policy_rate_percent` is the
+        Target RRP rate, bounded by `lending_rate_percent` (the corridor ceiling, the
+        overnight lending rate) and `deposit_rate_percent` (the floor, the overnight
+        deposit rate). `published_date` is BSP's date for the policy figure, and
+        `corridor` holds the three underlying rates with their source links. Cached daily
+        like get_bsp_key_rates — check meta.as_of for when it was fetched.
+        """
+        return await reply(key_rates.policy_rate)
 
     @mcp.resource(
         "pse-edge://attachment/{file_id}",

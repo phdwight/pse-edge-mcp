@@ -5,6 +5,22 @@ Format: [Keep a Changelog](https://keepachangelog.com/) · Versioning: [SemVer](
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-10-04
+
+### Added
+- **BSP (Bangko Sentral ng Pilipinas) key rates — a second upstream.** Two new tools:
+  `get_bsp_key_rates` returns the full BSP Key Rates dashboard (the Target RRP policy rate,
+  the overnight lending/deposit facility rates, BSP-securities and term-deposit WAIRs,
+  headline inflation, and the USD peso reference), and `get_bsp_policy_rate` returns just
+  the policy rate and the interest-rate corridor around it. The data is the public Key
+  Rates page's own anonymous SharePoint REST list; it is cached `daily-refresh` (at most one
+  BSP request per market-close boundary window, served from storage otherwise), so repeated
+  calls do not keep hitting BSP. BSP is a distinct upstream with its own client
+  (`BspClient`), base URL (`BSP_BASE_URL`), source protocol, repository, and fixture. Note:
+  BSP's WAF blocks browser-spoofing clients, so the honest `pse-edge-mcp` bot User-Agent is
+  reused deliberately. Shape drift raises `ENDPOINT_CHANGED`, and the nightly schema canary
+  now covers BSP too. See `docs/endpoints.md` §7 and `docs/plan.md` §5b.
+
 ## [0.19.1] - 2026-08-12
 
 ### Fixed

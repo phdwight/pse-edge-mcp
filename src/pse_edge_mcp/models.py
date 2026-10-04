@@ -358,3 +358,62 @@ class MarketSummary(BaseModel):
     feeds: dict[str, list[FeedItem]] = Field(
         default_factory=dict, description="Edge's feed group label -> its entries"
     )
+
+
+class BspRate(BaseModel):
+    """One row of the BSP Key Rates dashboard.
+
+    `value` is kept as BSP prints it (e.g. "5.00%", "62.7480", "6.1%", or "****" for the
+    discontinued ON Reference Rate) because the list mixes percentages, a peso FX level,
+    and placeholders. `rate_percent` is the numeric reading when `value` is a percentage,
+    so an agent can compare rates without re-parsing the display string.
+    """
+
+    name: str = Field(description="BSP's own label for the rate, e.g. 'Target RRP Rate'")
+    value: str = Field(description="The value exactly as BSP publishes it")
+    rate_percent: float | None = Field(
+        default=None,
+        description="`value` as a number when it is a percentage (e.g. 5.0 for '5.00%'); "
+        "null for the FX reference, '****', or any non-percentage value.",
+    )
+    published_date: str | None = Field(
+        default=None,
+        description="BSP's publication date for this figure, verbatim — formats vary by "
+        "row ('10/02/2026', 'August 2026'). Distinct from meta.as_of (when WE fetched).",
+    )
+    accepted_yields: str | None = Field(
+        default=None, description="Auction accepted-yields range, where BSP reports one."
+    )
+    source_url: str | None = Field(
+        default=None, description="Absolute URL to BSP's detail page for this rate."
+    )
+
+
+class BspKeyRates(BaseModel):
+    """The full BSP Key Rates dashboard (https://www.bsp.gov.ph/.../KeyRates.aspx)."""
+
+    rates: list[BspRate] = Field(default_factory=list)
+
+
+class BspPolicyRate(BaseModel):
+    """The BSP interest-rate corridor — the headline monetary-policy stance.
+
+    A focused projection of the Key Rates dashboard: the Target RRP (the policy rate)
+    sits between the overnight lending rate (the ceiling) and the overnight deposit rate
+    (the floor). `corridor` carries the three underlying rows for callers that want the
+    publication dates and source links.
+    """
+
+    policy_rate_percent: float | None = Field(
+        description="Target RRP Rate — BSP's main policy rate."
+    )
+    lending_rate_percent: float | None = Field(
+        default=None, description="Overnight lending rate — the corridor ceiling."
+    )
+    deposit_rate_percent: float | None = Field(
+        default=None, description="Overnight deposit rate — the corridor floor."
+    )
+    published_date: str | None = Field(
+        default=None, description="Publication date of the Target RRP figure, verbatim."
+    )
+    corridor: list[BspRate] = Field(default_factory=list)

@@ -1,7 +1,7 @@
 """Entry point: `pse-edge-mcp` (stdio, default) or `pse-edge-mcp --http --port 8000`.
 
 HTTP mode is **stateless with plain JSON responses by default**, which is the right shape
-for this server: it is 11 read-only tools over data the freeze policy holds still, and it
+for this server: it is a set of read-only tools over data the freeze policy holds still, and it
 uses none of the features MCP sessions exist to enable — no notifications, no resource
 subscriptions, no sampling, no elicitation, no progress. Every request is self-contained.
 

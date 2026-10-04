@@ -27,6 +27,7 @@ Consequences for our design:
 | Financial reports | Financial highlights from company pages; structured report data where Edge exposes it | Depth limited to what Edge serves as data (not PDF parsing) |
 | Indices & market | PSEi + sector indices, daily market summary, gainers/losers/most active | |
 | Company info | Profile, sector/subsector, listing date, contact info, dividends/rights notices | "Everything Edge discloses" catch-all |
+| BSP rates (added 2026-10-04) | BSP Key Rates dashboard + the policy-rate corridor | **Second upstream** (`www.bsp.gov.ph`), not PSE Edge; see §5b |
 
 **Explicitly out of scope for v1:** PDF text extraction, structured statement parsing from PDFs, backfilling deep price history beyond what Edge serves, order/trade data (Edge doesn't have it), real-time streaming.
 
@@ -135,6 +136,34 @@ Scalability decisions made **now**, paid for **later**:
 - **Calendar source:** open/close times in config + a maintained PSE holiday table (Postgres table with yearly seed file). Weekends/holidays have no boundaries — cache simply persists, zero upstream traffic.
 - **Honesty in responses:** every tool result carries `as_of` (fetch timestamp), `valid_until` (next boundary), a `data_policy` marker (`"EOD-frozen"` for prices, `"daily-refresh"` for everything else, `"immutable"` for objects that never change), and — when there is a caveat — a `note` (e.g. the mid-session `previous_close`-only quote), so LLM clients can tell users exactly how fresh the data is.
 - The global outbound politeness throttle stays as a second, independent layer beneath this.
+
+## 5b. BSP — a second upstream (decided 2026-10-04)
+
+Added the Bangko Sentral ng Pilipinas (central bank) as a **second, independent upstream**
+behind `get_bsp_key_rates` and `get_bsp_policy_rate`. Decisions:
+
+- **Source.** The public Key Rates dashboard is an Angular/PnP SharePoint page with no
+  figures in its HTML; it binds to a SharePoint list anonymously. We query that list's REST
+  endpoint directly (`/_api/web/lists/getByTitle('Key Rates')/items`, `odata=nometadata`),
+  exactly as the page does. Full recon in `docs/endpoints.md` §7.
+- **Separate client, same shape.** `BspClient` is its own pure-HTTP client with its own
+  base URL (`BSP_BASE_URL`), mirroring `PseEdgeClient` — a distinct upstream gets a distinct
+  client, and the repository depends on a narrow `KeyRatesSource` protocol, never the
+  concrete client (the §5 interface-segregation rule, unchanged).
+- **WAF note (important).** BSP fingerprints clients: a *browser* User-Agent is 403'd while
+  our *honest* bot UA is served 200. We deliberately reuse the same `user_agent`; spoofing a
+  browser would break BSP access, the opposite of the usual scraping instinct.
+- **Caching = `daily-refresh`, not the `EOD-frozen` default.** BSP has no PSE trading
+  session, so the price-freeze semantics (and its intraday "not realtime" note) would be
+  wrong. `daily-refresh` fetches at most once per market-close boundary window and serves
+  from cache otherwise — so BSP sees ~one request per trading day no matter the call volume,
+  which satisfies "don't keep hitting the page" while keeping the figures reasonably current
+  (the policy rate rarely moves; the daily WAIR/FX figures refresh once a day). One cache key
+  backs both tools; the policy-rate view is a memoised projection of the same cached rows.
+- **Loud on drift (invariant #3) extends to BSP.** The client/parser raise
+  `EndpointChangedError` on a changed envelope, a missing `Title`/`Value`, or an empty list,
+  and the policy tool raises if the `Target RRP Rate` row is gone. The nightly schema canary
+  gained a BSP check too, so drift surfaces to the operator before a user sees it.
 
 ## 6. Users, auth & abuse prevention (HTTP mode)
 
