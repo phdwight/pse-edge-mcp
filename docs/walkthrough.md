@@ -300,6 +300,8 @@ Two **prompts** (0.16.0) appear in host prompt-pickers — `market_recap` and
 | `get_dividends_and_rights` | `symbol` | `CompanyInfoRepository.dividends_and_rights` |
 | `get_indices` | — | `MarketRepository.indices` |
 | `get_market_summary` | — | `MarketRepository.summary` |
+| `get_bsp_key_rates` | — | `KeyRatesRepository.key_rates` |
+| `get_bsp_policy_rate` | — | `KeyRatesRepository.policy_rate` |
 | `get_server_version` | — | none — reads the installed distribution's version in `server.py` |
 | `send_email` *(auth only)* | `subject`, `body` | `NotificationService.send_to_self` |
 

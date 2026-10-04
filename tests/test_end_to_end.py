@@ -294,3 +294,34 @@ def _fake_report(*, ok: bool) -> Any:
         return report
 
     return run
+
+
+BSP = "https://www.bsp.gov.ph"
+
+
+def _bsp_rates() -> dict:
+    return json.loads((FIXTURES / "bsp_key_rates.json").read_text())
+
+
+@respx.mock
+async def test_bsp_rates_answer_through_the_whole_stack_and_fetch_once():
+    """The second upstream, end to end: both BSP tools share one cached fetch, and the
+    policy tool projects the corridor a client actually reads. Market hours are irrelevant
+    to BSP (daily-refresh), so this runs with the session OPEN to prove it."""
+    route = respx.get(f"{BSP}/_api/web/lists/getByTitle('Key Rates')/items").mock(
+        return_value=httpx.Response(200, json=_bsp_rates())
+    )
+    async with serving(at=OPEN) as http:
+        policy = await call_tool(http, "get_bsp_policy_rate")
+        dashboard = await call_tool(http, "get_bsp_key_rates")
+
+    assert "error" not in policy
+    assert policy["data"]["policy_rate_percent"] == 5.0
+    assert policy["data"]["lending_rate_percent"] == 5.5
+    assert policy["data"]["deposit_rate_percent"] == 4.5
+    assert policy["meta"]["data_policy"] == "daily-refresh"
+    # No PSE session semantics leak onto BSP data.
+    assert policy["meta"]["stale"] is False and policy["meta"]["note"] is None
+
+    assert len(dashboard["data"]["rates"]) == 12
+    assert route.call_count == 1, "both tools must share a single upstream fetch"

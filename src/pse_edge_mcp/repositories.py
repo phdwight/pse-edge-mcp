@@ -28,6 +28,9 @@ from .archive import Archive, NullArchive
 from .errors import EndpointChangedError, InvalidArgumentError, SymbolNotFoundError
 from .memo import ParsedMemo
 from .models import (
+    BspKeyRates,
+    BspPolicyRate,
+    BspRate,
     CompanyHit,
     CompanyProfile,
     DisclosureDetail,
@@ -56,6 +59,7 @@ from .parsers import (
     parse_dividends,
     parse_financial_reports,
     parse_indices,
+    parse_key_rates,
     parse_keyword_results,
     parse_market_summary,
     parse_rights,
@@ -66,6 +70,7 @@ from .sources import (
     CompanyInfoSource,
     CompanySource,
     DisclosureSource,
+    KeyRatesSource,
     MarketSource,
     QuoteSource,
 )
@@ -621,3 +626,83 @@ class MarketRepository:
             )
 
         return self._memo.resolve(f"{self.HOMEPAGE_KEY}#summary", served, build)
+
+
+class KeyRatesRepository:
+    """BSP key rates — a second upstream, cached once a day like any non-price lookup.
+
+    BSP rates change infrequently (the policy rate moves only at Monetary Board meetings;
+    the daily figures refresh on BSP business days), so one cache key under daily-refresh
+    hits BSP at most once per boundary window no matter how many times either tool is
+    called. The two projections — the full dashboard and the policy corridor — parse the
+    same cached rows, so asking for both costs a single upstream fetch.
+    """
+
+    CACHE_KEY = "bsp:key_rates"
+    # The three corridor rows, by BSP's exact list titles. The policy rate (Target RRP)
+    # is the required anchor; absence means the list changed shape (loud on drift).
+    _TARGET_RRP = "Target RRP Rate"
+    _ON_LENDING = "ON Lending Rate"
+    _ON_DEPOSIT = "ON Deposit Rate"
+
+    def __init__(
+        self,
+        source: KeyRatesSource,
+        cache: FrozenCache,
+        base_url: str,
+        memo: ParsedMemo | None = None,
+    ) -> None:
+        self._source = source
+        self._cache = cache
+        self._base_url = base_url.rstrip("/")
+        self._memo = memo or ParsedMemo()
+
+    async def _rows(self) -> Served[list[dict[str, Any]]]:
+        # daily-refresh, not the EOD-frozen default: BSP has no PSE trading session, so the
+        # price-freeze semantics (and its intraday "not realtime" note) would be wrong here.
+        return await self._cache.get(
+            self.CACHE_KEY, lambda: self._source.fetch_key_rates(), policy="daily-refresh"
+        )
+
+    def _rate(self, parsed: dict[str, Any]) -> BspRate:
+        url = parsed["source_url"]
+        return BspRate(
+            name=parsed["name"],
+            value=parsed["value"],
+            rate_percent=parsed["rate_percent"],
+            published_date=parsed["published_date"],
+            accepted_yields=parsed["accepted_yields"],
+            source_url=f"{self._base_url}{url}" if url else None,
+        )
+
+    async def key_rates(self) -> Served[BspKeyRates]:
+        served = await self._rows()
+        return self._memo.resolve(
+            f"{self.CACHE_KEY}#rates",
+            served,
+            lambda rows: BspKeyRates(rates=[self._rate(r) for r in parse_key_rates(rows)]),
+        )
+
+    async def policy_rate(self) -> Served[BspPolicyRate]:
+        served = await self._rows()
+
+        def build(rows: list[dict[str, Any]]) -> BspPolicyRate:
+            by_name = {r["name"]: self._rate(r) for r in parse_key_rates(rows)}
+            target = by_name.get(self._TARGET_RRP)
+            if target is None:
+                raise EndpointChangedError(
+                    f"BSP Key Rates: no '{self._TARGET_RRP}' row — the policy rate moved or "
+                    "was relabelled"
+                )
+            lending = by_name.get(self._ON_LENDING)
+            deposit = by_name.get(self._ON_DEPOSIT)
+            corridor = [r for r in (lending, target, deposit) if r is not None]
+            return BspPolicyRate(
+                policy_rate_percent=target.rate_percent,
+                lending_rate_percent=lending.rate_percent if lending else None,
+                deposit_rate_percent=deposit.rate_percent if deposit else None,
+                published_date=target.published_date,
+                corridor=corridor,
+            )
+
+        return self._memo.resolve(f"{self.CACHE_KEY}#policy", served, build)

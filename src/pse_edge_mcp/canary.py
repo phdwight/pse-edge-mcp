@@ -30,6 +30,7 @@ from dataclasses import dataclass, field
 from datetime import date, timedelta
 from typing import Any
 
+from .bsp_client import BspClient
 from .client import PseEdgeClient
 from .config import Settings
 from .market_calendar import MarketCalendar
@@ -84,6 +85,7 @@ async def run_canary(
     *,
     calendar: MarketCalendar | None = None,
     client: Any | None = None,
+    bsp_client: Any | None = None,
 ) -> CanaryReport:
     """Exercise one endpoint per family and validate each against its model."""
     settings = settings or Settings.from_env()
@@ -101,11 +103,16 @@ async def run_canary(
 
     owned = client is None
     client = client or PseEdgeClient(settings)
+    # BSP is the second upstream, independent of PSE Edge's market-hours gate. It is
+    # injected separately so a test double can serve it without a real request.
+    bsp_owned = bsp_client is None
+    bsp_client = bsp_client or BspClient(settings)
     try:
         # Imported here so the module stays importable without the parse layer's cost, and
         # so a parser rename surfaces as a canary failure rather than an import error.
         from . import parsers
         from .models import (
+            BspRate,
             CompanyProfile,
             DividendRecord,
             FinancialPeriod,
@@ -239,9 +246,21 @@ async def run_canary(
             return True
 
         await check("get_indices (homepage → MarketIndices)", indices)
+
+        async def bsp_rates() -> Any:
+            rows = await bsp_client.fetch_key_rates()
+            parsed = parsers.parse_key_rates(rows)
+            [BspRate(**row) for row in parsed]
+            if not any(p["name"] == "Target RRP Rate" for p in parsed):
+                raise ValueError("Key Rates list missing 'Target RRP Rate' (policy rate)")
+            return True
+
+        await check("get_bsp_key_rates (BSP Key Rates list → BspKeyRates)", bsp_rates)
     finally:
         if owned:
             await client.aclose()
+        if bsp_owned:
+            await bsp_client.aclose()
 
     if report.ok:
         logger.info("canary: %s", report.summary())

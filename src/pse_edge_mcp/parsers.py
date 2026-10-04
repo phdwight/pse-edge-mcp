@@ -750,3 +750,56 @@ def parse_market_summary(html: str) -> dict[str, Any]:
             "homepage: indices parsed but no disclosure feeds found — page structure changed"
         )
     return {"indices": indices, "feeds": feeds}
+
+
+# --- BSP (Bangko Sentral ng Pilipinas) ---------------------------------------
+
+_BSP_PERCENT_RE = re.compile(r"^-?\d+(?:\.\d+)?\s*%$")
+
+
+def _bsp_percent(value: str) -> float | None:
+    """A BSP display value as a number, only when it is a percentage.
+
+    The Key Rates list mixes percentages ('5.00%'), a peso FX level ('62.7480'), and the
+    '****' placeholder for the discontinued ON Reference Rate, so a blanket `_to_float`
+    would turn the FX level into a nonsensical 'rate'. Gate on the trailing '%'.
+    """
+    if _BSP_PERCENT_RE.match(value.strip()):
+        return float(value.strip().rstrip("%").strip())
+    return None
+
+
+def parse_key_rates(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """BSP 'Key Rates' SharePoint list rows -> clean dicts (one per rate).
+
+    `source_url` stays relative here (the repository absolutises it against the BSP base,
+    as the disclosure repository does for Edge). Loud on drift: a missing Title/Value or
+    an empty list raises rather than returning a partial dashboard.
+    """
+    parsed: list[dict[str, Any]] = []
+    for row in rows:
+        title = row.get("Title")
+        value = row.get("Value")
+        if not isinstance(title, str) or not isinstance(value, str):
+            raise EndpointChangedError(
+                "BSP Key Rates: a row is missing a string Title/Value — list schema changed"
+            )
+        yields = row.get("Yields")
+        url = row.get("URL")
+        parsed.append(
+            {
+                "name": _squash(title),
+                "value": value.strip(),
+                "rate_percent": _bsp_percent(value),
+                "published_date": (
+                    row["Published_x0020_Date"].strip()
+                    if isinstance(row.get("Published_x0020_Date"), str)
+                    else None
+                ),
+                "accepted_yields": yields.strip() if isinstance(yields, str) else None,
+                "source_url": url.strip() if isinstance(url, str) and url.strip() else None,
+            }
+        )
+    if not parsed:
+        raise EndpointChangedError("BSP Key Rates: the list returned no rows")
+    return parsed

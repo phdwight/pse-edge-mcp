@@ -298,6 +298,8 @@ async def test_tool_surface_is_stable():
         "get_dividends_and_rights": ["symbol"],
         "get_indices": [],
         "get_market_summary": [],
+        "get_bsp_key_rates": [],
+        "get_bsp_policy_rate": [],
         "get_server_version": [],
     }
     # Descriptions come from the docstrings and are how the model picks a tool.

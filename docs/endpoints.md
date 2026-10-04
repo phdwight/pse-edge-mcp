@@ -249,3 +249,43 @@ offers three walks that are *not* equivalent:
 7. Remaining open items: `tmplNm` template-name taxonomy (free-text input; values are
    harvestable from search results themselves), `cm/companySearch.ax` params, sector /
    subsector code values for `keyword/search.ax`, and the Phase 3 parse targets in §4–5.
+
+## 7. BSP (Bangko Sentral ng Pilipinas) — second upstream ✅
+
+**Date:** 2026-10-04 · **Base URL:** `https://www.bsp.gov.ph` · **Method:** live httpx probe
++ browser network inspection of the public Key Rates dashboard.
+
+The BSP Key Rates page (`/SitePages/Statistics/KeyRates.aspx`) is a SharePoint page whose
+figures are **not in the server-rendered HTML** — it is Angular + PnP.js, and the
+controller (`CtrlSPEI`) binds to a SharePoint list, anonymously, client-side:
+
+```js
+$pnp.sp.web.lists.getByTitle("Key Rates").items.select("*").orderBy('Order0', true).get()
+```
+
+So we hit that list's REST endpoint directly, exactly as the page does:
+
+| What | Endpoint | Notes |
+|------|----------|-------|
+| **Key Rates dashboard** ✅ | `GET /_api/web/lists/getByTitle('Key Rates')/items?$select=*&$orderby=Order0` | `Accept: application/json;odata=nometadata` → flat `{"value": [...]}`. Anonymous; no cookie / `X-RequestDigest`. 12 rows. |
+
+**Row shape** (SharePoint list fields): `Title` (rate name), `Value` (as displayed —
+`"5.00%"`, `"62.7480"`, `"6.1%"`, or `"****"` for the discontinued ON Reference Rate),
+`Order0` (display order), `Published_x0020_Date` (publication date, **format varies by
+row**: `"10/02/2026"`, `"August 2026"`, `"9/8/2023"`), `Yields` (auction accepted-yields,
+usually null), `URL` (site-relative link to the detail page).
+
+**The 12 rows** (Order0 1→12): USD peso reference (`US$ 1.00`), `Inflation Rate
+(2018=100)`, `ON Lending Rate`, `Target RRP Rate` (the policy rate), `ON Deposit Rate`,
+`ON RRP Rate` (carries `Yields`), `28-day BSP Securities (WAIR)`, `56-day BSP Securities
+(WAIR)`, `ON Reference Rate` (discontinued → `"****"`), `7/14/28-day TDF (WAIR)`.
+
+**⚠️ WAF fingerprinting — do NOT spoof a browser.** BSP sits behind a WAF that fingerprints
+clients: a **browser** User-Agent on a non-browser TLS stack is **HTTP 403** (both `curl`
+and httpx with a Chrome UA), while our **honest** `pse-edge-mcp` bot UA is served **200**.
+The same `user_agent` is reused deliberately; a browser UA would break it.
+
+Mapped to one client (`BspClient`, separate base URL), one source protocol
+(`KeyRatesSource`), one repository (`KeyRatesRepository`, policy `daily-refresh`), and two
+tools: `get_bsp_key_rates` (the full dashboard) and `get_bsp_policy_rate` (the Target RRP
+plus the ON lending/deposit corridor). Fixture: `tests/fixtures/bsp_key_rates.json`.

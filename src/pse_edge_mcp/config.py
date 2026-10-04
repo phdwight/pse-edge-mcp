@@ -14,6 +14,10 @@ class Settings:
     """All tunables in one place. Env vars override defaults."""
 
     base_url: str = "https://edge.pse.com.ph"
+    # Bangko Sentral ng Pilipinas (BSP). A second, independent upstream: the Key Rates
+    # dashboard is an anonymous SharePoint REST list. BSP's WAF blocks browser-UA-spoofing
+    # clients but serves our honest bot UA, so the SAME user_agent is deliberately reused.
+    bsp_base_url: str = "https://www.bsp.gov.ph"
     user_agent: str = USER_AGENT
 
     # Market session (Asia/Manila). Boundaries drive the cache freeze policy.
@@ -99,6 +103,7 @@ class Settings:
 
         return cls(
             base_url=os.environ.get("PSE_EDGE_BASE_URL", cls.base_url),
+            bsp_base_url=os.environ.get("BSP_BASE_URL", cls.bsp_base_url),
             market_open=_time("PSE_MARKET_OPEN", cls.market_open),
             market_close=_time("PSE_MARKET_CLOSE", cls.market_close),
             throttle_rate_per_sec=float(

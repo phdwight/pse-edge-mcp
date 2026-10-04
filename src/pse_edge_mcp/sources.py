@@ -77,3 +77,7 @@ class CompanyInfoSource(Protocol):
 
 class MarketSource(Protocol):
     async def fetch_homepage(self) -> str: ...
+
+
+class KeyRatesSource(Protocol):
+    async def fetch_key_rates(self) -> list[dict[str, Any]]: ...

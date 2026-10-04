@@ -87,6 +87,11 @@ class FakeEdge:
     async def fetch_homepage(self) -> str:
         return self._answer("homepage", fixture("homepage.html"))
 
+    async def fetch_key_rates(self) -> list:
+        # The second upstream (BSP) rides the same injected double, so one fake drives the
+        # whole canary and no test touches a real server.
+        return self._answer("bsp_key_rates", json.loads(fixture("bsp_key_rates.json"))["value"])
+
     async def aclose(self) -> None:
         pass
 
@@ -95,7 +100,8 @@ SETTINGS = Settings(throttle_rate_per_sec=1000)
 
 
 async def test_a_healthy_edge_passes_every_family():
-    report = await run_canary(SETTINGS, calendar=ClosedMarket(), client=FakeEdge())
+    edge = FakeEdge()
+    report = await run_canary(SETTINGS, calendar=ClosedMarket(), client=edge, bsp_client=edge)
 
     assert report.ok, report.as_text()
     assert len(report.checks) >= 7, "one check per endpoint family"
@@ -116,7 +122,7 @@ async def test_restyled_html_is_caught_even_though_http_says_200():
     which is invisible at the HTTP layer and only shows up when something parses it."""
     edge = FakeEdge(company_profile="<html><body><p>redesigned</p></body></html>")
 
-    report = await run_canary(SETTINGS, calendar=ClosedMarket(), client=edge)
+    report = await run_canary(SETTINGS, calendar=ClosedMarket(), client=edge, bsp_client=edge)
 
     assert not report.ok
     names = [c.name for c in report.failures]
@@ -129,10 +135,23 @@ async def test_restyled_html_is_caught_even_though_http_says_200():
 async def test_an_unreachable_edge_is_reported_rather_than_raised():
     edge = FakeEdge(search_companies=EdgeUnavailableError("PSE Edge unreachable"))
 
-    report = await run_canary(SETTINGS, calendar=ClosedMarket(), client=edge)
+    report = await run_canary(SETTINGS, calendar=ClosedMarket(), client=edge, bsp_client=edge)
 
     assert not report.ok
     assert "EdgeUnavailableError" in report.as_text()
+
+
+async def test_bsp_list_drift_is_caught():
+    """The BSP equivalent of restyled HTML: a 200 whose 'Key Rates' list lost the policy
+    row. Invisible at the HTTP layer; caught only because the canary parses and validates."""
+    edge = FakeEdge(bsp_key_rates=[{"Order0": 1.0, "Title": "US$ 1.00", "Value": "62.75"}])
+
+    report = await run_canary(SETTINGS, calendar=ClosedMarket(), client=edge, bsp_client=edge)
+
+    assert not report.ok
+    names = [c.name for c in report.failures]
+    assert any("bsp" in n.lower() for n in names), names
+    assert len(report.failures) == 1, "only BSP broke; the Edge families still pass"
 
 
 async def test_failures_email_the_operator_and_successes_stay_silent():
@@ -152,12 +171,12 @@ async def test_failures_email_the_operator_and_successes_stay_silent():
     import pse_edge_mcp.canary as canary_module
 
     async def fake_run(_settings):
-        return await run_canary(settings, calendar=ClosedMarket(), client=FakeEdge())
+        edge = FakeEdge()
+        return await run_canary(settings, calendar=ClosedMarket(), client=edge, bsp_client=edge)
 
     async def fake_run_broken(_settings):
-        return await run_canary(
-            settings, calendar=ClosedMarket(), client=FakeEdge(homepage="<html></html>")
-        )
+        edge = FakeEdge(homepage="<html></html>")
+        return await run_canary(settings, calendar=ClosedMarket(), client=edge, bsp_client=edge)
 
     original = canary_module.run_canary
     try:

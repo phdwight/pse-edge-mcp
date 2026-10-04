@@ -6,9 +6,9 @@
 [![Python 3.14](https://img.shields.io/badge/python-3.14-blue)](pyproject.toml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](#license)
 
-An MCP server exposing **Philippine Stock Exchange** data from the [PSE Edge portal](https://edge.pse.com.ph/) — quotes, price history, disclosures, financial reports, and market data — to Claude and any other MCP client.
+An MCP server exposing **Philippine Stock Exchange** data from the [PSE Edge portal](https://edge.pse.com.ph/) — quotes, price history, disclosures, financial reports, and market data — plus **Bangko Sentral ng Pilipinas** (central bank) key rates, to Claude and any other MCP client.
 
-> **Unofficial.** PSE Edge has no public API; this project speaks to the same endpoints the portal's own pages use. It is not affiliated with or endorsed by the PSE. Data is provided as-is for personal/research use, with no warranty.
+> **Unofficial.** PSE Edge and BSP have no public API; this project speaks to the same endpoints their own pages use. It is not affiliated with or endorsed by the PSE or the BSP. Data is provided as-is for personal/research use, with no warranty.
 
 ## Contents
 
@@ -29,7 +29,7 @@ An MCP server exposing **Philippine Stock Exchange** data from the [PSE Edge por
 
 ## Features
 
-- **13 read tools + 1 action tool** covering quotes, price history, disclosures (metadata, full-text, and detail), company profiles, financials, dividends, indices, and market summary — plus an attachment **resource**, two **prompts** with symbol completion, and tool annotations.
+- **15 read tools + 1 action tool** covering quotes, price history, disclosures (metadata, full-text, and detail), company profiles, financials, dividends, indices, market summary, and **BSP (central bank) key rates** — plus an attachment **resource**, two **prompts** with symbol completion, and tool annotations.
 - **Deliberately gentle on PSE Edge:** every unique query hits it at most once per day, and prices follow a strict market-boundary freeze.
 - **OAuth 2.1 + passkeys** for humans (no passwords anywhere), **`client_credentials`** for headless agents — both opt-in; stdio needs nothing.
 - **Postgres optional:** zero-config in-memory for local stdio, or a shared cache + an ever-deepening EOD archive when `DATABASE_URL` is set.
@@ -87,7 +87,7 @@ flowchart TD
 | Policy | Applies to | Behaviour |
 |---|---|---|
 | `EOD-frozen` ★ | `get_stock_quote`, `get_price_history` | A cached price is never refetched during a session; a never-cached key is fetched once and surfaces only `previous_close`, labelled not-realtime for the whole session. Also the **default** policy, so an unlabelled read can only over-protect PSE Edge. |
-| `daily-refresh` | Companies, disclosures, profiles, financials, dividends, indices, summary | First ask fetches at any hour — once, deduplicated across concurrent callers; every repeat of the same query answers from storage until the next 15:00 close. |
+| `daily-refresh` | Companies, disclosures, profiles, financials, dividends, indices, summary, **BSP rates** | First ask fetches at any hour — once, deduplicated across concurrent callers; every repeat of the same query answers from storage until the next 15:00 close. |
 | `immutable` | Disclosure detail by `edge_no`, attachment bytes | The object never changes upstream. Fetched once ever; `valid_until: null`. |
 
 If PSE Edge is unreachable and an expired entry exists, tools serve it flagged `meta.stale: true` rather than discarding real data for an error. `EDGE_UNAVAILABLE` means unreachable *and* nothing cached.
@@ -124,6 +124,8 @@ Every data tool returns the same envelope — `meta` is the freshness contract:
 | `get_dividends_and_rights(symbol)` | Declared dividends and stock rights, linked to their disclosures |
 | `get_indices()` | PSEi and the 7 sector indices, with signed daily change |
 | `get_market_summary()` | Index levels plus PSE Edge's homepage disclosure feeds |
+| `get_bsp_key_rates()` | The Bangko Sentral ng Pilipinas (central bank) Key Rates dashboard: policy, facility and auction rates, headline inflation, and the USD peso reference |
+| `get_bsp_policy_rate()` | The BSP policy rate (Target RRP) and the overnight lending/deposit corridor around it |
 | `get_server_version()` | The deployed version of this MCP server itself (matches `/health`) |
 | `send_email(subject, body)` | Email **yourself** a note (auth-enabled deployments only) |
 

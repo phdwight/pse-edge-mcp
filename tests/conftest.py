@@ -104,6 +104,17 @@ def homepage_html() -> str:
     return _fixture("homepage.html")
 
 
+@pytest.fixture
+def bsp_key_rates_json() -> dict:
+    """BSP 'Key Rates' SharePoint list — recorded live 2026-10-04 (see docs/endpoints.md).
+
+    12 rows: USD peso reference, headline inflation, the policy/facility corridor, the
+    ON RRP (with accepted yields), BSP-securities WAIRs, the discontinued ON Reference
+    Rate ('****'), and the TDF WAIRs.
+    """
+    return json.loads((FIXTURES / "bsp_key_rates.json").read_text())
+
+
 # --- shared Postgres harness (testcontainers) --------------------------------
 #
 # Session-scoped so every Postgres-marked test file shares one container. The fixture
